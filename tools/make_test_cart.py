@@ -5,11 +5,10 @@ MAME only loads Neo Geo cartridges through a software list, so this writes:
   <out>/hash/neogeo.xml           one software entry, "brtest"
   <out>/roms/neogeo/brtest/*      the ROM files (MAME naming and byte order)
 Content (all generated, nothing copyrighted):
-  P ROM 3 MB: P1 1 MB + P2 2 MB (2 banks), pseudo-random words with a fixed
-               seed, so TestCart checksums are known (tools/cart_checksum.py).
+  P ROM 3 MB: P1 1 MB + P2 2 MB (2 banks), pseudo-random words, fixed seed.
   S1 128 KB : fix tiles, tile $20 blank, other tiles striped.
   M1 64 KB  : tiny Z80 service: $03 = reset (reply $00), $01 = reply $01.
-               No YM2610 code: enough for TestZ80 / the TestAudio handshake.
+               No YM2610 code: lets TestZ80 / the TestAudio handshake run on AES.
   V1, C1/C2 : blank.
 Usage: python3 tools/make_test_cart.py OUTDIR      then mame_bench.py with
        BRICO_CART=OUTDIR (adds -hashpath / -cart brtest).

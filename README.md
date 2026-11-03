@@ -11,7 +11,7 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.2 (Python 3.8+, standard library only, Tk window) |
 | `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB padded with `$FF` (SHA-256 in `rom/Brico68k.bin.sha256`) |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
-| `tools/` | Cartridge checksum tool and the MAME test bench |
+| `tools/` | MAME test bench and its synthetic test cartridge |
 
 ## Quick start
 
@@ -45,7 +45,7 @@ python Brico68k_Compiler.py --cli --source github:main   # upstream development 
 The GitHub sources are Aurelien's original code, **without** the fixes and tests of this
 repository.
 
-## ROM contents: 24 extensions
+## ROM contents: 23 extensions
 
 Commands are typed on the Brico16Bits console. "No WRAM" means the test never relies on
 work RAM (no stack), so it still runs on a board with dead WRAM.
@@ -64,13 +64,9 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | **TestZ80** | yes | Z80 handshake 03/01/03: needs 16 stable fresh replies, flags a latch echo |
 | **TestDAC** | yes | RGB DAC pattern: 16 bands, one colour bit each. `P1=1` adds the dark bit; `P1=$10+n` fills the screen with band n for a scope or multimeter. |
 | **TestTiming** | yes | LSPC line counter (+1 steps, range, lines per frame, stuck bits named), CPU cycles per frame, auto-animation counter |
-| **TestCart** | yes | P1 ROM checksum, stuck data bits, mirror size. `P1=1` checks the P2 window, banks 0-7. |
 | **TestWatchdog** | no | First run starves the watchdog; the second run reports the reset and its delay |
 
 Bold entries are new in this repository.
-
-To check a cartridge, compare TestCart with its dump:
-`python tools/cart_checksum.py 201-p1.p1` prints the same `s1` / `s2` values.
 
 ### Changes compared with upstream Brico68k 1.35
 
@@ -92,7 +88,7 @@ To check a cartridge, compare TestCart with its dump:
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `5859d6b` (2026-10-22, "Fixed remote keyboard detection"). Compatible **without modification**. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | announces BricoNeo **1.35**, 24 extensions, SHA-256 `3439ee2968d3401683b522e352cae56ab05bee6f10eace674a2818ea6e9518a7` |
+| This ROM | announces BricoNeo **1.35**, 23 extensions, SHA-256 `f5db7a238d8b266ac1f48b68e24333de0fb6052bb2b191a862c75274f0624128` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
@@ -106,13 +102,13 @@ Brico16Bits recognises the byte order.
 in Lua. It needs your own BIOS dumps: `000-lo.lo`, plus `sm1.sm1` and `sfix.sfix` for MVS.
 
 ```
-python3 tools/make_test_cart.py /tmp/testcart          # synthetic cartridge, nothing copyrighted
+python3 tools/make_test_cart.py /tmp/testcart          # synthetic cartridge (tiny Z80 M1), nothing copyrighted
 BRICO_SOUND_ROM=000-lo.lo python3 tools/mame_bench.py rom/Brico68k.bin
-BRICO_SOUND_ROM=000-lo.lo BRICO_CART=/tmp/testcart python3 tools/mame_bench.py rom/Brico68k.bin TestCart TestZ80
+BRICO_SOUND_ROM=000-lo.lo BRICO_CART=/tmp/testcart python3 tools/mame_bench.py rom/Brico68k.bin TestZ80 TestAudio
 BRICO_SOUND_ROM=000-lo.lo BRICO_DRIVER=neogeo BRICO_MVS_DIR=dumps/ python3 tools/mame_bench.py rom/Brico68k.bin TestWatchdog Echo:1 TestWatchdog
 ```
 
-Verified in MAME, on `aes`, `aes` with the test cartridge, and `neogeo`: all 24 extensions,
+Verified in MAME, on `aes`, `aes` with the test cartridge, and `neogeo`: all 23 extensions,
 each well under the 3 s host limit.
 
 - TestDAC: 16 exact colours on screenshots.
@@ -120,15 +116,10 @@ each well under the 3 s host limit.
   at 0 and at 1, are named exactly.
 - TestWatchdog: reset after ~133 ms on MVS (MAME: 135 ms).
 - TestZ80: passes with a real SM1 and with the test M1.
-- TestCart: the P2 window matches `cart_checksum.py` exactly.
 
 ### Known limits (read before trusting a result)
 
 - **Nothing here has been validated on real hardware yet.** MAME is the reference used.
-- **TestCart P1 in MAME**: with a cartridge loaded through a software list, CPU reads of
-  `$000100`-`$000103` often return `$FFFF`. The cause was not found, and it does not happen on
-  every run. The P1 checksum is exact when those two words read correctly, and every other
-  P1 byte matches the dump. Check TestCart P1 against a known good cartridge.
 - **TestWatchdog**: MAME emulates the watchdog on MVS only. On AES in MAME the test reports
   "no reset", which is expected there. Commands sent during the 1.5 s starve window are lost.
 - **TestTiming** on PAL boards: the expected 312 lines is not verified (MAME is NTSC only).

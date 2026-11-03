@@ -18,7 +18,7 @@ Environment variables:
   BRICO_DRIVER      "aes" (default) or "neogeo" (MVS: the ROM replaces sp-s2.sp1,
                     BRICO_MVS_DIR must hold YOUR sm1.sm1 and sfix.sfix dumps)
   BRICO_CART        folder made by tools/make_test_cart.py: inserts the synthetic
-                    test cartridge "brtest" (known 3 MB P ROM, tiny Z80 M1)
+                    test cartridge "brtest" (tiny Z80 M1 for TestZ80 / TestAudio on AES)
   BRICO_STATUSB     "clear,set": forces STATUS_B bits (e.g. 0x00,0x80 = MVS)
   BRICO_STUCK       "start,end,or,and": simulated data fault on reads
   BRICO_ALIAS       "start,end,mask": stuck address / bank line

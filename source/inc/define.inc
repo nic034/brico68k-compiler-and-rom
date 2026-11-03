@@ -27,17 +27,6 @@ REG_PALBANK1 equ $3A001F
 ; wired (set_use_cart_audio) on ngarcade only, not on AES. Used by TestAudio.
 REG_BRDFIX equ $3A000B
 
-; Vector table source (same HC259 latch, output Q1, MAME set_use_cart_vectors):
-; $3A0003 = BIOS vectors at $000000-$00007F, $3A0013 = cartridge vectors.
-REG_SWPBIOS equ $3A0003
-REG_SWPROM  equ $3A0013
-
-; Cartridge P ROM. P1 at $000000-$0FFFFF (the first $80 bytes show the BIOS
-; vectors unless REG_SWPROM is set). P2 window $200000-$2FFFFF; standard
-; bank register at $2FFFF0 (MAME write_banksel: bank n = P ROM offset (n+1) MB).
-CART_P1_START equ $000000
-CART_P2_START equ $200000
-REG_CART_BANK equ $2FFFF0
 
 ; VRAM layout (word addresses for REG_VRAMADD)
 VRAM_SCB1   equ $0000		; sprite tilemaps
