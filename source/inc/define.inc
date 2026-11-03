@@ -1,0 +1,216 @@
+SYSTEM_ROM	equ $C00000
+SYSTEM_ROM_MIRROR	equ $C20000
+RAM_RESERVED_SYS_ROM	equ $10F300
+
+RAM_START	equ $100000
+RAM_USER_END	equ $10F300;
+RAM_END	equ $110000
+
+BACKUP_RAM_START equ $d00000
+BACKUP_RAM_END equ $d10000
+
+PALETTE_RAM_START equ $400000
+PALETTE_RAM_END equ $402000
+PALETTE_BACKDROP equ $401FFE
+
+; Palette bank select (system latch, odd-byte write, data ignored).
+; Previously swapped here (unused until TestPRAM started testing both
+; banks). Verified against MAME neogeo.cpp: the system latch is an HC259
+; written with write_a3 (A1-A3 = output, A4 = value), output Q7 drives
+; set_palette_bank -> $3A000F = Q7<-0 = bank 0, $3A001F = Q7<-1 = bank 1.
+; Same as the neogeodev wiki "Memory mapped registers" page.
+REG_PALBANK0 equ $3A000F
+REG_PALBANK1 equ $3A001F
+
+; Board / cartridge fix layer + audio ROM select (same HC259 latch, output Q5):
+; $3A000B = board SFIX/SM1, $3A001B = cartridge. MVS only: in MAME, Q5 is
+; wired (set_use_cart_audio) on ngarcade only, not on AES. Used by TestAudio.
+REG_BRDFIX equ $3A000B
+
+; Vector table source (same HC259 latch, output Q1, MAME set_use_cart_vectors):
+; $3A0003 = BIOS vectors at $000000-$00007F, $3A0013 = cartridge vectors.
+REG_SWPBIOS equ $3A0003
+REG_SWPROM  equ $3A0013
+
+; Cartridge P ROM. P1 at $000000-$0FFFFF (the first $80 bytes show the BIOS
+; vectors unless REG_SWPROM is set). P2 window $200000-$2FFFFF; standard
+; bank register at $2FFFF0 (MAME write_banksel: bank n = P ROM offset (n+1) MB).
+CART_P1_START equ $000000
+CART_P2_START equ $200000
+REG_CART_BANK equ $2FFFF0
+
+; VRAM layout (word addresses for REG_VRAMADD)
+VRAM_SCB1   equ $0000		; sprite tilemaps
+VRAM_FIXMAP equ $7000		; fix layer map, 40 x 32 words ($7000-$74FF)
+VRAM_SCB2   equ $8000		; sprite shrink
+VRAM_SCB3   equ $8200		; sprite Y / sticky / height (512 words)
+VRAM_SCB4   equ $8400		; sprite X
+
+; Palette (bank 0 as seen by the CPU)
+PALETTE_0   equ $400000		; palette 0, colours 0-15 (colour 0 = transparent)
+
+; WRAM words kept across a watchdog reset by TestWatchdog (system ROM area,
+; above the stack: SP starts at $10F300 and grows down)
+WDOG_MAGIC  equ $10FFE0		; 4 words
+WDOG_COUNT  equ $10FFE8		; long: loop iterations before the reset
+
+; Backup RAM write protection (MVS only, same HC259 latch, output Q6)
+REG_SRAMLOCK   equ $3A000D
+REG_SRAMUNLOCK equ $3A001D
+
+ROM_NAME_SECTION_ORG	equ $100
+INITIAL_PC_ORG          equ $402
+
+REG_WATCHDOG	equ $300001
+REG_LSPCMODE	equ $3C0006
+REG_IRQACK		equ $3C000C
+
+BRICO_PORT_OUT	equ SYSTEM_ROM + $1FF02
+BRICO_PORT_EOT	equ BRICO_PORT_OUT - 2
+
+BRICO_EXT_OUTPUT_TYPE_VOID equ $0
+BRICO_EXT_OUTPUT_TYPE_WORD equ $1
+BRICO_EXT_OUTPUT_TYPE_STRING equ $2
+BRICO_EXT_OUTPUT_TYPE_DUMP equ $3
+
+; BricoNeo special flags
+BRICO_SPECIAL_FLAG_ENABLE_EXTENSIONS equ $0001		; Command extensions are active
+BRICO_SPECIAL_FLAG_68K_SENDS_COMMANDS equ $0002		; The 68k can send commands using the output port
+
+; VRAM memory mapped registers
+REG_VRAMADD	equ $3C0000
+REG_VRAMRW	equ $3C0002
+REG_VRAMMOD	equ $3C0004
+
+; Inputs memory mapped registers
+REG_P1CNT_REG_DIPSW equ $300000
+REG_SYSTYPE equ $300080
+REG_SOUND equ $320000
+REG_STATUS_A equ $320001
+REG_P2CNT equ $340000
+REG_STATUS_B equ $380000
+
+	macro BRICONEO_VERSION
+		dc.w \1	; Major
+		dc.w \2	; Minor
+	endm
+
+	macro DECLARE_EXTENSION
+		dc.l \1	; Extension address
+		dc.w \2	; Return type
+		dc.b \3	; Command name (0 terminated)
+		dc.b 0
+		align 1	; Parity
+		dc.b \4	; Description (0 terminated)
+		dc.b 0
+		align 1	; Parity
+	endm
+
+	macro WatchDog
+		move.b	d0,(REG_WATCHDOG).l
+	endm
+
+	macro WriteEOT
+		move.w (BRICO_PORT_EOT).l,d0
+	endm
+
+    macro JsrA6
+		lea .\@(pc),a6					; PC-relative: 4 bytes / 8 cycles instead of 6 / 12
+		jmp \1_JsrA6
+.\@:
+	endm
+
+	macro RtsA6
+		jmp (a6)
+	endm
+
+	macro PortWriteD0
+		JsrA6 port_write_d0
+	endm
+
+	; Clobbers d0 and a0 (unchanged contract).
+	macro InlinePortWriteD0
+		and.l #$0000ffff,d0				; cleanup high word
+		add.l d0,d0						; times 2 (16 bits ROM) - add.l Dn,Dn: 8 cycles vs 10 for lsl.l #1
+		add.l #SYSTEM_ROM_MIRROR,d0		; locate in ROM mirror range to trigger the /OE line (under 0x0100, OE will not be triggered on non mirror location)
+		movea.l d0,a0					; value -> address register, as data is read on the address bus! (movea 4 cycles vs exg 6; also avoids EXG, mis-emulated by Unicorn)
+		move.w (BRICO_PORT_OUT).l,d0	; trigger port write
+		move.w (a0),d0					; write value
+	endm
+
+	macro Print							; String constant passed as a parameter
+		PrintHandleCRLF \1,0
+	endm
+
+	macro PrintLn						; String constant passed as a parameter
+		PrintHandleCRLF \1,1
+	endm
+
+	macro PrintHandleCRLF				; P1 is string constant, P2 is either 0 or 1 depending on LF ending
+		lea .\@StringAddress(pc),a1		; PC-relative (was move.l #abs: 6 bytes / 12 cycles)
+		bra .\@PrintStart				; bra.w (was jmp abs.l)
+	.\@StringAddress:
+		dc.b \1
+		ifc "\2","1"
+		dc.b 10
+		endc
+		dc.b 0
+	align 1
+	.\@PrintStart:
+		PrintA1
+	.\@PrintEnd:
+	endm
+
+	macro PrintA1
+		JsrA6 print_a1
+	endm
+
+	; string address in a1. On exit a1 points one byte PAST the terminating
+	; 0 (it used to point AT it - no caller reuses a1 after printing).
+	macro InlinePrintA1
+	.\@lbl0000PrintStart:
+		moveq #0,d0
+		move.b (a1)+,d0				; sets Z on the terminating 0: no separate cmp.b #0,(a1)
+		beq.s .\@lbl0000PrintEnd
+		InlinePortWriteD0
+		bra.s .\@lbl0000PrintStart
+	.\@lbl0000PrintEnd:
+	endm
+
+	macro EnableInterrupts
+		move #$2000,sr				; Supervisor mode + all interrupts enabled
+	endm
+
+	macro DisableInterrupts
+		move #$2700,sr				; Supervisor mode + all interrupts disabled
+	endm
+
+	macro Nop2
+		nop
+		nop
+	endm
+
+	macro Nop4
+		Nop2
+		Nop2
+	endm
+
+	macro Nop6
+		Nop2
+		Nop4
+	endm
+
+	macro Nop8
+		Nop4
+		Nop4
+	endm
+
+	macro Nop12
+		Nop8
+		Nop4
+	endm
+
+	macro Nop16
+		Nop8
+		Nop8
+	endm
