@@ -1,3 +1,5 @@
 brico68k_compiler/
+brico68k_emulator/
 output/
 __pycache__/
+emulator/build/

@@ -9,9 +9,11 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.2 (Python 3.8+, standard library only, Tk window) |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.0: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
 | `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB padded with `$FF` (SHA-256 in `rom/Brico68k.bin.sha256`) |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
+| `emulator/` | Emulator core source (Neo Geo model + host) and its build script |
 
 ## Quick start
 
@@ -44,6 +46,34 @@ python Brico68k_Compiler.py --cli --source github:main   # upstream development 
 
 The GitHub sources are Aurelien's original code, **without** the fixes and tests of this
 repository.
+
+## Brico68k Emulator
+
+Tests the ROM without a BricoNeo, a Brico16Bits or MAME. Double-click `Brico68k_Emulator.py`, or
+run `python Brico68k_Emulator.py [ROM]`. It opens `rom/Brico68k.bin` by default. Then type the
+same commands as on the Brico16Bits console: `Help`, `Echo 1234`, `TestWRAM`, `TestDAC 1`,
+`Dump $100000 16`.
+
+The file embeds a small emulator core for Windows x64 and Linux x64. The core is the Musashi
+68000 (exact cycle counts) plus a Neo Geo AES model written from MAME's driver:
+
+- **Emulated**: BIOS ROM, WRAM, both palette banks, the system latch, LSPC registers and VRAM,
+  the line counter and frame timing, the auto-animation counter, AES inputs with nothing
+  plugged in, and open bus.
+- **Host**: modelled on Brico16Bits. The command and P1-P3 are cleared after 1 ms, the timeout
+  is 3 s, and the buffer holds 2048 words.
+- **Options**: watchdog (135 ms, as MAME MVS) and Z80 behaviour.
+- **Not emulated**: the Z80 and the YM2610, replaced by a responder that answers the standard
+  sound-driver handshake or stays silent. Sound, sprites, the fix layer, interrupts, a
+  cartridge and a memory card are not emulated either. The screen shows the backdrop colour
+  of each line, which is enough for TestDAC and Color.
+
+Checked against MAME (`aes`, no cartridge, Z80 silent): 32 out of 32 test commands give
+word-for-word identical output, including TestTiming's 202,739 cycles per frame.
+
+Text mode: `python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234"` and `--check`.
+Rebuild the core: `python3 emulator/build_core.py` (needs git and `pip install ziglang`).
+The build is reproducible: it gives the same binaries.
 
 ## ROM contents: 23 extensions
 
@@ -132,6 +162,8 @@ each well under the 3 s host limit.
 
 ## Licences
 
+- Brico68k Emulator core: Musashi 68000, MIT, © Karl Stenerud (`emulator/MUSASHI_LICENSE.txt`);
+  `emulator/neocore.c` is written from MAME's Neo Geo driver behaviour (no MAME code is copied).
 - Brico68k firmware source: MIT, © Aurelien34. See `source/LICENSE`; the changes in this
   repository are under the same licence.
 - vasm and vlink: their authors' terms. They are free for non-commercial use; ask the authors
