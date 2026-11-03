@@ -12,10 +12,13 @@ and VRAM, line counter / frame timing, auto-animation counter, inputs (AES,
 nothing pressed, no memory card, no cartridge), open bus, watchdog (option).
 Host: command + P1-P3 written into the ROM, cleared after 1 ms, 3 s timeout,
 2048-word buffer, as Brico16Bits CommandExtension.cpp.
-NOT emulated: Z80 and YM2610 (replaced by a responder that answers like the
-standard sound driver handshake, or stays silent), sound, sprites and fix
-layer (the screen shows the backdrop colour of each line), interrupts,
-cartridge, memory card. Checked word for word against MAME: 32/32 commands.
+Z80 (superzazu/z80 core, 4 MHz) wired as on the board (sound latch, NMI,
+reply latch, 2 KB RAM), running a built-in test M1 that only answers the
+standard handshake ($03 reset -> $00, $01 -> $01), or no program at all (like
+an AES without cartridge).
+NOT emulated: YM2610 and sound, Z80 ROM banking, sprites and fix layer (the
+screen shows the backdrop colour of each line), interrupts, cartridge, memory
+card. Checked word for word against MAME: 32/32 commands with both Z80 setups.
 
 Run: double-click, or  python Brico68k_Emulator.py [ROM]
 Text mode: python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234" [--rom ROM]
@@ -36,7 +39,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -172,7 +175,8 @@ def main_cli(argv):
     ap.add_argument("--rom", default=None)
     ap.add_argument("--run", nargs="*", default=None, help="commands to run, e.g. \"TestWRAM\" \"Echo 1234\"")
     ap.add_argument("--check", action="store_true")
-    ap.add_argument("--z80", choices=["standard", "none"], default="standard")
+    ap.add_argument("--z80", choices=["testm1", "none"], default="testm1",
+                    help="testm1: Z80 runs the built-in test M1; none: Z80 without program")
     ap.add_argument("--watchdog", action="store_true", help="emulate the watchdog (MVS-like, 135 ms)")
     ap.add_argument("rom_pos", nargs="?")
     a = ap.parse_args(argv)
@@ -189,7 +193,7 @@ def main_cli(argv):
     core = Core(core_path())
     core.load(rom)
     core.power_on()
-    core.lib.neo_set_options(1 if a.z80 == "standard" else 0, 1 if a.watchdog else 0)
+    core.lib.neo_set_options(1 if a.z80 == "testm1" else 0, 1 if a.watchdog else 0)
     for _ in range(60):
         core.lib.neo_run_frame()
     host = Host(core, rom)
@@ -232,10 +236,10 @@ def main_gui(rom_arg=None):
     b_pause = ttk.Button(top, text="Pause", command=lambda: toggle_pause()); b_pause.pack(side="left", padx=4)
 
     opts = ttk.Frame(root); opts.pack(fill="x", padx=8)
-    z80_var = tk.StringVar(value=cfg.get("z80", "Standard sound driver (simulated)"))
-    Z80_CHOICES = ["Standard sound driver (simulated)", "No answer (dead Z80 / no M1)"]
+    Z80_CHOICES = ["Z80 + built-in test M1 (handshake only)", "Z80 without program (AES with no cartridge)"]
+    z80_var = tk.StringVar(value=cfg.get("z80") if cfg.get("z80") in Z80_CHOICES else Z80_CHOICES[0])
     ttk.Label(opts, text="Z80:").pack(side="left")
-    ttk.Combobox(opts, textvariable=z80_var, values=Z80_CHOICES, state="readonly", width=34).pack(side="left", padx=6)
+    ttk.Combobox(opts, textvariable=z80_var, values=Z80_CHOICES, state="readonly", width=42).pack(side="left", padx=6)
     wd_var = tk.BooleanVar(value=cfg.get("watchdog", False))
     ttk.Checkbutton(opts, text="Watchdog (135 ms, as MAME MVS; MAME has none on AES)", variable=wd_var,
                     command=lambda: apply_options()).pack(side="left", padx=12)
@@ -306,7 +310,7 @@ def main_gui(rom_arg=None):
 
     def apply_options():
         if st["core"]:
-            st["core"].lib.neo_set_options(0 if z80_var.get().startswith("No") else 1, 1 if wd_var.get() else 0)
+            st["core"].lib.neo_set_options(0 if "without" in z80_var.get() else 1, 1 if wd_var.get() else 0)
 
     def power_on():
         if not refresh_missing():
@@ -426,8 +430,8 @@ def main_gui(rom_arg=None):
                                        e_cmd.icursor("end")))
     rom_var.trace_add("write", refresh_missing)
     root.protocol("WM_DELETE_WINDOW", on_close)
-    out(f"{APP_NAME} {APP_VERSION} - Musashi 68000 + Neo Geo AES model, Brico16Bits-like host. No MAME needed.\n"
-        "Not emulated: Z80/YM2610 (simulated answer), sound, sprites, fix layer.\n", "info")
+    out(f"{APP_NAME} {APP_VERSION} - Musashi 68000 + Z80 + Neo Geo AES model, Brico16Bits-like host. No MAME needed.\n"
+        "Z80 runs a built-in test M1 (handshake only). Not emulated: YM2610/sound, sprites, fix layer.\n", "info")
     if refresh_missing():
         power_on()
     e_cmd.focus_set()

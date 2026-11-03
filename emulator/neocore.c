@@ -11,8 +11,13 @@
  *   control with the 9-bit line counter $F8-$1FF and the auto-animation
  *   counter), inputs as read by MAME "aes" with nothing plugged in, open bus
  *   = word under the PC (prefetch).
- * NOT emulated: Z80 / YM2610 (replaced by a responder that behaves like the
- *   standard SM1/M1 driver handshake, or stays silent), sprites and fix layer
+ * Z80 (superzazu/z80, MIT) at 4 MHz runs the built-in test M1 (handshake
+ *   driver: $03 = reset, reply $00; $01 = reply $01), or no program at all
+ *   (ROM reads $FF, like an AES without cartridge). Wiring as MAME: sound
+ *   latch on port $00 (read releases it, write clears it), NMI = latch
+ *   pending AND enabled (out $08 / out $18), reply latch on port $0C, RAM
+ *   $F800-$FFFF. The 68000 RESET instruction does not reset the Z80 (MAME).
+ * NOT emulated: YM2610 (ports $04-$07 read 0), Z80 ROM banking, sprites and fix layer
  *   (only the backdrop colour is rendered, one colour per line), interrupts
  *   (Brico68k keeps them masked), cartridge, memory card.
  * Brico16Bits host (Commands/CommandExtension.cpp): writes the command and
@@ -23,6 +28,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "m68k.h"
+#include "z80.h"
 
 #ifdef _WIN32
 #define EXPORT __declspec(dllexport)
@@ -55,12 +61,22 @@ static uint64_t wdog_kick;
 static int      wdog_enabled;
 static int      wdog_resets;
 
-/* Z80 responder */
-static int      z80_mode = 1;                /* 0 = no answer, 1 = standard driver */
-static uint8_t  z80_reply;
-static int      z80_pending = -1;
-static uint64_t z80_due;
+/* Z80 side */
+static int      z80_mode = 1;                /* 0 = no program ($FF), 1 = built-in test M1 */
+static z80      zc;
+static uint8_t  m1[0x10000];
+static uint8_t  z80ram[0x800];
+static uint8_t  snd_latch, snd_pending, nmi_enable, nmi_line;
+static uint8_t  z80_reply;                   /* soundlatch2, read by the 68000 at $320000 */
 static uint32_t z80_commands;
+static uint64_t z80_time;                    /* Z80 T-states, 64-bit (zc.cyc is 32-bit on Windows) */
+
+/* test M1 (same bytes as tools/make_test_cart.py and bricobanc z80_reference_service.asm):
+   $0000: di / ld sp,$ffff / xor a / out ($0c),a / out ($08),a (NMI on) / ei / idle: jp idle
+   $0066 NMI: in a,($00) / cp 3 / jp z,0 / cp 1 / jp nz,done / ld a,1 / out ($0c),a / done: retn */
+static const uint8_t TEST_M1_BOOT[] = { 0xf3,0x31,0xff,0xff,0xaf,0xd3,0x0c,0xd3,0x08,0xfb,0xc3,0x0a,0x00 };
+static const uint8_t TEST_M1_NMI[]  = { 0xdb,0x00,0xfe,0x03,0xca,0x00,0x00,0xfe,0x01,0xc2,0x76,0x00,
+                                        0x3e,0x01,0xd3,0x0c,0xed,0x45 };
 
 /* host */
 enum { H_IDLE = 0, H_SENT = 1, H_WAIT = 2, H_DONE = 3, H_TIMEOUT = 4 };
@@ -100,22 +116,68 @@ static uint16_t open_bus(void)
 	return 0xFFFF;
 }
 
-static void z80_command(uint8_t c)
+static uint8_t z_read(void *u, uint16_t a) { (void)u; return a < 0xF800 ? m1[a] : z80ram[a - 0xF800]; }
+static void z_write(void *u, uint16_t a, uint8_t v) { (void)u; if (a >= 0xF800) z80ram[a - 0xF800] = v; }
+
+static void update_nmi(void)
 {
-	z80_commands++;
-	if (z80_mode == 0) return;
-	if (c == 0x01 || c == 0x03) {         /* $01: answer $01, $03: reset -> $00 */
-		z80_pending = (c == 0x01) ? 0x01 : 0x00;
-		z80_due = now() + Z80_DELAY;
+	uint8_t line = (uint8_t)(snd_pending && nmi_enable);   /* MAME INPUT_MERGER_ALL_HIGH */
+	if (line && !nmi_line) z80_gen_nmi(&zc);
+	nmi_line = line;
+}
+
+static uint8_t z_in(z80 *z, uint8_t port)
+{
+	(void)z;
+	if (port == 0x00) { snd_pending = 0; update_nmi(); return snd_latch; }   /* latch read releases it */
+	if (port >= 0x04 && port <= 0x07) return 0x00;                           /* YM2610 not emulated */
+	if ((port & 0x0F) >= 0x08 && (port & 0x0F) <= 0x0B) return 0x00;        /* bank select: no banking */
+	return 0xFF;
+}
+
+static void z_out(z80 *z, uint8_t port, uint8_t v)
+{
+	(void)z;
+	if (port == 0x00) { snd_latch = 0; return; }                             /* clear_w */
+	if (port == 0x08 || port == 0x18) { nmi_enable = (uint8_t)(port == 0x08); update_nmi(); return; }
+	if (port == 0x0C) { z80_reply = v; return; }
+}
+
+static void z80_reset(void)
+{
+	z80_init(&zc);
+	zc.read_byte = z_read; zc.write_byte = z_write;
+	zc.port_in = z_in; zc.port_out = z_out;
+	snd_pending = 0; nmi_enable = 0; nmi_line = 0;
+	z80_reply = 0;
+}
+
+static void z80_load_program(void)
+{
+	memset(m1, 0xFF, sizeof m1);
+	if (z80_mode == 1) {
+		memcpy(m1, TEST_M1_BOOT, sizeof TEST_M1_BOOT);
+		memcpy(m1 + 0x66, TEST_M1_NMI, sizeof TEST_M1_NMI);
 	}
 }
 
-static void z80_update(void)
+/* run the Z80 (4 MHz = 68000 cycles / 3) up to the current 68000 time */
+static void z80_sync(void)
 {
-	if (z80_pending >= 0 && now() >= z80_due) {
-		z80_reply = (uint8_t)z80_pending;
-		z80_pending = -1;
+	uint64_t target = now() / 3;
+	while (z80_time < target) {
+		unsigned long before = zc.cyc;
+		z80_step(&zc);
+		z80_time += (uint64_t)(unsigned long)(zc.cyc - before);
 	}
+}
+
+static void z80_command(uint8_t c)
+{
+	z80_sync();
+	z80_commands++;
+	snd_latch = c; snd_pending = 1;          /* MAME soundlatch write -> data pending */
+	update_nmi();
 }
 
 static void vram_set_offset(uint16_t d)
@@ -155,7 +217,7 @@ static unsigned read16(unsigned a, int lsb_only)
 	if (a < 0x200000) { unsigned o = a & 0xFFFF; return (wram[o] << 8) | wram[o + 1]; }
 	if (a < 0x300000) return 0xFFFF;                        /* no cartridge (P2) */
 	if (a < 0x320000) return 0xFF00;                        /* P1: nothing pressed */
-	if (a < 0x340000) { z80_update(); return (unsigned)z80_reply << 8; }
+	if (a < 0x340000) { z80_sync(); return (unsigned)z80_reply << 8; }
 	if (a < 0x360000) return 0xFF00;                        /* P2 */
 	if (a < 0x380000) return open_bus();
 	if (a < 0x3A0000) return 0x7FFF;                        /* STATUS_B: AES, no memory card */
@@ -232,11 +294,11 @@ unsigned int m68k_read_disassembler_32(unsigned int a) { return m68k_read_memory
 static void reset_peripherals(void)
 {
 	memset(latch, 0, sizeof latch);
-	z80_pending = -1;
-	z80_reply = 0;
+	z80_reset();
+	z80_time = now() / 3;                   /* the Z80 restarts now */
 }
 
-void neo_reset_instr(void) { z80_pending = -1; z80_reply = 0; }   /* RESET line: audio side */
+void neo_reset_instr(void) { }   /* 68000 RESET instruction: not wired to the Z80 in MAME */
 
 /* ---- line events ------------------------------------------------------ */
 static void line_event(uint32_t line_abs)
@@ -286,12 +348,14 @@ EXPORT void neo_power_on(void)
 	anim_speed = anim_disabled = anim_frame_counter = anim_counter = 0;
 	memset(line_colour, 0, sizeof line_colour);
 	memset(frame_lines, 0, sizeof frame_lines);
-	reset_peripherals();
+	memset(z80ram, 0, sizeof z80ram);
+	z80_load_program();
 	h_state = H_IDLE; h_count = 0; h_overflow = 0; h_armed = 0; h_clear_pending = 0;
 	m68k_init();
 	m68k_set_cpu_type(M68K_CPU_TYPE_68000);
 	m68k_set_reset_instr_callback(neo_reset_instr);
 	now_base = 0; last_line = 0; frames = 0; wdog_resets = 0;
+	reset_peripherals();
 	m68k_pulse_reset();
 	wdog_kick = 0;
 }
@@ -305,7 +369,11 @@ EXPORT void neo_reset(void)                  /* console reset button: RAM kept *
 	wdog_kick = now();
 }
 
-EXPORT void neo_set_options(int z80, int watchdog) { z80_mode = z80; wdog_enabled = watchdog; }
+EXPORT void neo_set_options(int z80, int watchdog)
+{
+	if (z80 != z80_mode) { z80_mode = z80; z80_load_program(); reset_peripherals(); }
+	wdog_enabled = watchdog;
+}
 
 /* run for `cycles` CPU cycles, cut at every line boundary */
 EXPORT void neo_run(uint32_t cycles)
@@ -321,7 +389,7 @@ EXPORT void neo_run(uint32_t cycles)
 			line_event(last_line);
 		}
 		host_update();
-		z80_update();
+		z80_sync();
 		if (wdog_enabled && now_base - wdog_kick > WDOG_CYCLES) {
 			wdog_resets++;
 			neo_reset();
@@ -367,4 +435,5 @@ EXPORT uint32_t neo_reg(int r) { return m68k_get_reg(NULL, (m68k_register_t)r); 
 EXPORT uint64_t neo_cycles(void) { return now_base; }
 EXPORT int neo_watchdog_resets(void) { return wdog_resets; }
 EXPORT uint32_t neo_z80_commands(void) { return z80_commands; }
+EXPORT uint32_t neo_z80_pc(void) { return zc.pc; }
 EXPORT uint16_t neo_peek16(uint32_t a) { return (uint16_t)read16(a, 0); }

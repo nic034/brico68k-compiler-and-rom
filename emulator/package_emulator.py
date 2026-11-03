@@ -7,7 +7,8 @@ host = (here / "emu_host.py").read_text()
 cores = {"windows-x86_64": ("neocore.dll", here / "build/neocore.dll"),
          "linux-x86_64": ("libneocore.so", here / "build/libneocore_zig.so")}
 lines = ["# ===========================================================================",
-         "# Embedded emulator core: Musashi 4.60 68000 core (Karl Stenerud, MIT licence)",
+         "# Embedded emulator core: Musashi 4.60 68000 core (Karl Stenerud, MIT licence),",
+         "# superzazu/z80 Z80 core (Nicolas Allemand, MIT licence)",
          "# + neocore.c (Neo Geo AES model + host), built with zig 0.17.0 -O2:",
          "# Windows x86_64-windows-gnu DLL, Linux x86_64-linux-gnu.2.17 shared library.",
          "# Format: platform -> (file name, sha256, lzma data in base64).",

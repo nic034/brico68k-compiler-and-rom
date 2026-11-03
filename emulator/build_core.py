@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Rebuilds the emulator core and Brico68k_Emulator.py.
 
-1. clones Musashi (Karl Stenerud, MIT) at a pinned commit,
+1. clones Musashi (Karl Stenerud, MIT) and superzazu/z80 (Nicolas Allemand,
+   MIT) at pinned commits,
 2. enables address-error, trace and RESET-instruction emulation in m68kconf.h,
 3. generates m68kops.c/h with m68kmake,
 4. builds neocore.dll (x86_64-windows-gnu) and libneocore.so (x86_64-linux-gnu.2.17)
@@ -14,6 +15,8 @@ from pathlib import Path
 
 MUSASHI = "https://github.com/kstenerud/Musashi.git"
 MUSASHI_COMMIT = "313ebf1"
+Z80 = "https://github.com/superzazu/z80.git"
+Z80_COMMIT = "d64fe10"
 HERE = Path(__file__).resolve().parent
 B = HERE / "build"
 ZIG = [sys.executable, "-m", "ziglang", "cc"]
@@ -28,6 +31,8 @@ def main():
     shutil.rmtree(B, ignore_errors=True)
     run(["git", "clone", "-q", MUSASHI, str(B / "musashi")])
     run(["git", "-C", str(B / "musashi"), "checkout", "-q", MUSASHI_COMMIT])
+    run(["git", "clone", "-q", Z80, str(B / "z80")])
+    run(["git", "-C", str(B / "z80"), "checkout", "-q", Z80_COMMIT])
     src = B / "src"
     shutil.copytree(B / "musashi", src, ignore=shutil.ignore_patterns(".git", "test", "example"))
     conf = (src / "m68kconf.h").read_text()
@@ -39,10 +44,12 @@ def main():
                         "void neo_reset_instr(void);\n#define M68K_RESET_CALLBACK()       neo_reset_instr()")
     (src / "m68kconf.h").write_text(conf)
     shutil.copy(HERE / "neocore.c", src)
+    shutil.copy(B / "z80" / "z80.c", src)
+    shutil.copy(B / "z80" / "z80.h", src)
     host = ZIG + ["-O2"]
     run(host + ["-o", str(src / "m68kmake"), str(src / "m68kmake.c")])
     run([str(src / "m68kmake"), ".", "m68k_in.c"], cwd=src)
-    files = ["neocore.c", "m68kcpu.c", "m68kops.c", "m68kdasm.c", "softfloat/softfloat.c"]
+    files = ["neocore.c", "z80.c", "m68kcpu.c", "m68kops.c", "m68kdasm.c", "softfloat/softfloat.c"]
     run(ZIG + ["-target", "x86_64-windows-gnu", "-O2", "-s", "-shared", "-o", str(B / "neocore.dll")] + files, cwd=src)
     run(ZIG + ["-target", "x86_64-linux-gnu.2.17", "-O2", "-s", "-fPIC", "-shared", "-o",
                str(B / "libneocore_zig.so")] + files + ["-lm"], cwd=src)

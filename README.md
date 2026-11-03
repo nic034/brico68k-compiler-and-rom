@@ -9,7 +9,7 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.2 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.0: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.1: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
 | `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB padded with `$FF` (SHA-256 in `rom/Brico68k.bin.sha256`) |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
@@ -55,24 +55,35 @@ same commands as on the Brico16Bits console: `Help`, `Echo 1234`, `TestWRAM`, `T
 `Dump $100000 16`.
 
 The file embeds a small emulator core for Windows x64 and Linux x64. The core is the Musashi
-68000 (exact cycle counts) plus a Neo Geo AES model written from MAME's driver:
+68000 (exact cycle counts), a real Z80 (superzazu/z80) and a Neo Geo AES model written from
+MAME's driver:
 
 - **Emulated**: BIOS ROM, WRAM, both palette banks, the system latch, LSPC registers and VRAM,
   the line counter and frame timing, the auto-animation counter, AES inputs with nothing
   plugged in, and open bus.
 - **Host**: modelled on Brico16Bits. The command and P1-P3 are cleared after 1 ms, the timeout
   is 3 s, and the buffer holds 2048 words.
-- **Options**: watchdog (135 ms, as MAME MVS) and Z80 behaviour.
-- **Not emulated**: the Z80 and the YM2610, replaced by a responder that answers the standard
-  sound-driver handshake or stays silent. Sound, sprites, the fix layer, interrupts, a
-  cartridge and a memory card are not emulated either. The screen shows the backdrop colour
+- **Z80**: 4 MHz, wired as on the board: sound latch on port `$00` (NMI when a command is
+  pending and the NMI is enabled with `out ($08)` / `out ($18)`), reply latch on port `$0C`,
+  2 KB RAM. It runs a built-in test M1 that only answers the standard handshake
+  (`$03` reset gives `$00`, `$01` gives `$01`). It can also run without any program, like an
+  AES with no cartridge.
+- **Options**: watchdog (135 ms, as MAME MVS) and the Z80 program.
+- **Not emulated**: the YM2610 (ports `$04`-`$07` read 0) and sound, Z80 ROM banking, sprites,
+  the fix layer, interrupts, a cartridge and a memory card. The screen shows the backdrop colour
   of each line, which is enough for TestDAC and Color.
 
-Checked against MAME (`aes`, no cartridge, Z80 silent): 32 out of 32 test commands give
-word-for-word identical output, including TestTiming's 202,739 cycles per frame.
+Checked against MAME, 32 test commands each time, with word-for-word identical output:
+
+- `aes` without a cartridge, against the Z80 without a program: 32 out of 32;
+- `aes` with the bench test cartridge, whose real MAME Z80 runs the same M1, against the
+  built-in test M1: 32 out of 32. This covers TestZ80, TestAudio and PlayEyeSnd.
+
+TestTiming gives 202,739 cycles per frame in both.
 
 Text mode: `python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234"` and `--check`.
 Rebuild the core: `python3 emulator/build_core.py` (needs git and `pip install ziglang`).
+It fetches Musashi and the Z80 core at pinned commits.
 The build is reproducible: it gives the same binaries.
 
 ## ROM contents: 23 extensions
@@ -163,6 +174,7 @@ each well under the 3 s host limit.
 ## Licences
 
 - Brico68k Emulator core: Musashi 68000, MIT, © Karl Stenerud (`emulator/MUSASHI_LICENSE.txt`);
+  Z80 core superzazu/z80, MIT, © Nicolas Allemand (`emulator/Z80_LICENSE.txt`);
   `emulator/neocore.c` is written from MAME's Neo Geo driver behaviour (no MAME code is copied).
 - Brico68k firmware source: MIT, © Aurelien34. See `source/LICENSE`; the changes in this
   repository are under the same licence.
