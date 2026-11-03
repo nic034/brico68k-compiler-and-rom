@@ -9,7 +9,7 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.2 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.1: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.2: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
 | `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB padded with `$FF` (SHA-256 in `rom/Brico68k.bin.sha256`) |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
@@ -80,6 +80,12 @@ Checked against MAME, 32 test commands each time, with word-for-word identical o
   built-in test M1: 32 out of 32. This covers TestZ80, TestAudio and PlayEyeSnd.
 
 TestTiming gives 202,739 cycles per frame in both.
+
+The window shows the screen (scaled to the window, 2x at 1280x820), the console with coloured
+verdicts, and the extension list. The list can be filtered and gives the full description of the
+selected extension, with Run and Insert buttons. A busy indicator counts the emulated time against
+the 3 s host limit, and lamps show the 68000, host and Z80 state. Keys: Enter sends,
+Up/Down browses the history, F5 resets, F8 pauses, Ctrl+L clears.
 
 Text mode: `python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234"` and `--check`.
 Rebuild the core: `python3 emulator/build_core.py` (needs git and `pip install ziglang`).
