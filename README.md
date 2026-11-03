@@ -9,7 +9,7 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.2 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.2: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.3: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
 | `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB padded with `$FF` (SHA-256 in `rom/Brico68k.bin.sha256`) |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
@@ -81,7 +81,12 @@ Checked against MAME, 32 test commands each time, with word-for-word identical o
 
 TestTiming gives 202,739 cycles per frame in both.
 
-The window shows the screen (scaled to the window, 2x at 1280x820), the console with coloured
+Nothing to install with pip: the emulator uses only the Python standard library, and its core is
+embedded. The window needs Tkinter. It comes with Python on Windows (python.org installer); on
+Linux it may be a separate package (`sudo apt install python3-tk`), and the tool says so if it is
+missing.
+
+The window (light theme) shows the screen (scaled to the window, 2x at 1280x820), the console with coloured
 verdicts, and the extension list. The list can be filtered and gives the full description of the
 selected extension, with Run and Insert buttons. A busy indicator counts the emulated time against
 the 3 s host limit, and lamps show the 68000, host and Z80 state. Keys: Enter sends,

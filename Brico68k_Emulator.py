@@ -23,7 +23,9 @@ card. Checked word for word against MAME: 32/32 commands with both Z80 setups.
 Run: double-click, or  python Brico68k_Emulator.py [ROM]
 Text mode: python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234" [--rom ROM]
            python Brico68k_Emulator.py --check [--rom ROM]
-Python 3.8+, standard library only (tkinter for the window).
+Python 3.8+, standard library only: nothing to install with pip. The window
+needs Tkinter, which comes with Python on Windows (python.org installer) and is
+the python3-tk package on Linux distributions that split it out.
 """
 import base64
 import ctypes
@@ -39,7 +41,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -373,9 +375,10 @@ def main_gui(rom_arg=None):
     root.geometry(cfg.get("geometry") or "1280x820")
 
     # --- theme ---------------------------------------------------------------
-    C = dict(bg="#161b22", panel="#1f262e", field="#0d1117", border="#30363d", text="#e6edf3",
-             muted="#8b949e", accent="#58a6ff", ok="#3fb950", warn="#d29922", err="#f85149",
-             btn="#2a313a", btn_hover="#353d47", sel="#1f6feb")
+    # light theme (white panels, GitHub-like greys and blue accent)
+    C = dict(bg="#f3f5f7", panel="#ffffff", field="#ffffff", border="#d0d7de", text="#1f2328",
+             muted="#59636e", accent="#0969da", ok="#1a7f37", warn="#9a6700", err="#cf222e",
+             btn="#eef1f4", btn_hover="#e1e6eb", sel="#0969da", alert_bg="#ffebe9", alert_fg="#82071e")
     ui_font = ("Segoe UI", 10) if IS_WIN else ("DejaVu Sans", 10)
     ui_bold = (ui_font[0], 10, "bold")
     title_font = (ui_font[0], 15, "bold")
@@ -386,6 +389,7 @@ def main_gui(rom_arg=None):
     style.configure(".", background=C["bg"], foreground=C["text"], fieldbackground=C["field"],
                     bordercolor=C["border"], lightcolor=C["border"], darkcolor=C["border"], font=ui_font)
     style.configure("Panel.TFrame", background=C["panel"])
+    style.configure("Card.TFrame", background=C["panel"], borderwidth=1, relief="solid")
     style.configure("TLabel", background=C["bg"], foreground=C["text"])
     style.configure("Panel.TLabel", background=C["panel"], foreground=C["text"])
     style.configure("Muted.TLabel", background=C["panel"], foreground=C["muted"])
@@ -393,11 +397,12 @@ def main_gui(rom_arg=None):
     style.configure("Title.TLabel", background=C["bg"], foreground=C["text"], font=title_font)
     style.configure("Sub.TLabel", background=C["bg"], foreground=C["muted"])
     style.configure("TButton", background=C["btn"], foreground=C["text"], padding=(10, 4), relief="flat")
-    style.map("TButton", background=[("disabled", C["bg"]), ("active", C["btn_hover"])],
+    style.map("TButton", background=[("disabled", C["btn"]), ("active", C["btn_hover"])],
               foreground=[("disabled", C["muted"])])
     style.configure("Accent.TButton", background=C["sel"], foreground="#ffffff")
     style.configure("Small.TButton", padding=(6, 0))
-    style.map("Accent.TButton", background=[("disabled", C["bg"]), ("active", C["accent"])])
+    style.map("Accent.TButton", background=[("disabled", C["btn"]), ("active", "#0550ae")],
+              foreground=[("disabled", C["muted"])])
     style.configure("TCheckbutton", background=C["bg"], foreground=C["text"])
     style.map("TCheckbutton", background=[("active", C["bg"])])
     style.configure("TRadiobutton", background=C["bg"], foreground=C["text"])
@@ -411,7 +416,7 @@ def main_gui(rom_arg=None):
     style.configure("TEntry", fieldbackground=C["field"], foreground=C["text"], insertcolor=C["text"])
     style.configure("Treeview", background=C["field"], fieldbackground=C["field"], foreground=C["text"],
                     rowheight=22, borderwidth=0)
-    style.map("Treeview", background=[("selected", C["sel"])], foreground=[("selected", "#ffffff")])
+    style.map("Treeview", background=[("selected", "#ddf4ff")], foreground=[("selected", C["text"])])
     style.configure("Treeview.Heading", background=C["btn"], foreground=C["text"], relief="flat", font=ui_bold)
     style.configure("Vertical.TScrollbar", background=C["btn"], troughcolor=C["field"], arrowcolor=C["text"])
     style.configure("Busy.Horizontal.TProgressbar", troughcolor=C["field"], background=C["accent"])
@@ -458,11 +463,12 @@ def main_gui(rom_arg=None):
     z80_var.trace_add("write", lambda *_: apply_options())
 
     missing_var = tk.StringVar(value="")
-    missing_box = tk.Label(root, textvariable=missing_var, justify="left", anchor="w", bg="#3d1f20",
-                           fg="#ffd8d3", bd=0, padx=12, pady=8, font=ui_font, wraplength=1200)
+    missing_box = tk.Label(root, textvariable=missing_var, justify="left", anchor="w", bg=C["alert_bg"],
+                           fg=C["alert_fg"], bd=1, relief="solid", padx=12, pady=8, font=ui_font, wraplength=1200)
 
     # --- bottom: status bar, command bar (packed first: never pushed out) --------
-    statusbar = tk.Frame(root, bg=C["panel"]); statusbar.pack(fill="x", side="bottom")
+    statusbar = tk.Frame(root, bg=C["panel"], highlightthickness=1, highlightbackground=C["border"])
+    statusbar.pack(fill="x", side="bottom")
     lamps = {}
     for key, label in (("cpu", "68000"), ("host", "Host"), ("z80", "Z80")):
         f = tk.Frame(statusbar, bg=C["panel"]); f.pack(side="left", padx=(10, 6), pady=3)
@@ -488,11 +494,11 @@ def main_gui(rom_arg=None):
     # --- body ------------------------------------------------------------------
     body = ttk.Panedwindow(root, orient="horizontal"); body.pack(fill="both", expand=True, padx=14, pady=4)
 
-    left = ttk.Frame(body, style="Panel.TFrame", padding=10); body.add(left, weight=1)
+    left = ttk.Frame(body, style="Card.TFrame", padding=10); body.add(left, weight=1)
     ttk.Label(left, text="Screen", style="Head.TLabel").pack(anchor="w")
     screen_holder = tk.Frame(left, bg=C["panel"]); screen_holder.pack(fill="x", pady=(4, 2))
     canvas = tk.Canvas(screen_holder, width=640, height=448, bg="#000000", highlightthickness=1,
-                       highlightbackground=C["border"])
+                       highlightbackground="#8c959f")
     canvas.pack(anchor="n")
     for y in range(224):
         st["rects"].append(canvas.create_rectangle(0, 0, 0, 0, outline="", fill="#000000"))
@@ -501,16 +507,17 @@ def main_gui(rom_arg=None):
     cap.pack(anchor="w")
 
     rpane = ttk.Panedwindow(body, orient="vertical"); body.add(rpane, weight=1)
-    right = ttk.Frame(rpane, style="Panel.TFrame", padding=10); rpane.add(right, weight=3)
-    extp = ttk.Frame(rpane, style="Panel.TFrame", padding=10); rpane.add(extp, weight=1)
+    right = ttk.Frame(rpane, style="Card.TFrame", padding=10); rpane.add(right, weight=3)
+    extp = ttk.Frame(rpane, style="Card.TFrame", padding=10); rpane.add(extp, weight=1)
     rhead = ttk.Frame(right, style="Panel.TFrame"); rhead.pack(fill="x")
     b_save = ttk.Button(rhead, text="Save log", width=9, style="Small.TButton", command=lambda: save_log()); b_save.pack(side="right")
     b_copy = ttk.Button(rhead, text="Copy", width=6, style="Small.TButton", command=lambda: copy_log()); b_copy.pack(side="right", padx=4)
     b_clear = ttk.Button(rhead, text="Clear", width=6, style="Small.TButton", command=lambda: clear()); b_clear.pack(side="right")
     ttk.Label(rhead, text="Console", style="Head.TLabel").pack(side="left")
     cframe = ttk.Frame(right, style="Panel.TFrame"); cframe.pack(fill="both", expand=True, pady=(6, 0))
-    con = tk.Text(cframe, wrap="word", font=mono, state="disabled", bg=C["field"], fg=C["text"], bd=0,
-                  insertbackground=C["text"], padx=8, pady=6, selectbackground=C["sel"], highlightthickness=0)
+    con = tk.Text(cframe, wrap="word", font=mono, state="disabled", bg="#fbfcfd", fg=C["text"], bd=0,
+                  insertbackground=C["text"], padx=8, pady=6, selectbackground="#b6d7ff", highlightthickness=1,
+                  highlightbackground=C["border"], highlightcolor=C["border"])
     csb = ttk.Scrollbar(cframe, command=con.yview); con.configure(yscrollcommand=csb.set)
     csb.pack(side="right", fill="y"); con.pack(fill="both", expand=True)
     con.tag_configure("cmd", foreground=C["accent"], font=(mono[0], mono[1], "bold"))
@@ -6214,5 +6221,14 @@ if __name__ == "__main__":
     try:
         main_gui(args[0] if args and not args[0].startswith("-") else None).mainloop()
     except ImportError:
-        print("tkinter missing: use --run, or install Tk support for Python.")
+        # Tkinter is part of Python but some Linux distributions ship it apart; pip cannot install it.
+        if IS_WIN:
+            hint = "Reinstall Python from python.org and keep the 'tcl/tk and IDLE' option ticked."
+        elif sys.platform == "darwin":
+            hint = "Install Python from python.org (it includes Tk), or: brew install python-tk"
+        else:
+            hint = ("Install the Tk package of your distribution, e.g. sudo apt install python3-tk "
+                    "(Debian/Ubuntu), sudo dnf install python3-tkinter (Fedora), sudo pacman -S tk (Arch).")
+        print("The window needs Tkinter, which this Python does not have.\n" + hint +
+              "\nText mode works without it: python Brico68k_Emulator.py --run \"Help\"")
         sys.exit(1)
