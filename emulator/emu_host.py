@@ -29,6 +29,8 @@ class Core:
         lib.neo_peek16.argtypes = [ctypes.c_uint32]
         lib.neo_peek16.restype = ctypes.c_uint16
         lib.neo_z80_commands.restype = ctypes.c_uint32
+        lib.neo_fault_add.argtypes = [ctypes.c_int] * 4
+        lib.neo_fault_add.restype = ctypes.c_int
         self._vals = (ctypes.c_uint16 * 2048)()
         self._lines = (ctypes.c_uint16 * 224)()
 
@@ -150,3 +152,70 @@ class Host:
             if r:
                 return r
         return "timeout", "[Timeout]\n", 3.0
+
+
+# ---------------------------------------------------------------------------
+# Simulated faults
+# ---------------------------------------------------------------------------
+FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4}
+REGION_NAMES = {0: "WRAM", 1: "Palette RAM", 2: "VRAM lower (slow)", 3: "VRAM upper (fast)",
+                4: "LSPC line counter"}
+FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2}
+DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8}
+ADDR_RANGE = {0: (1, 15), 1: (1, 13), 2: (0, 14), 3: (0, 10)}
+
+FAULT_HELP = ("Fault syntax: REGION:data:BIT:0|1 (data bit stuck), REGION:addr:LINE:0|1 (address line stuck),\n"
+              "wram:lane:lower|upper (WRAM chip dead). REGION = wram, pal, vramlo, vramhi, line.\n"
+              "Bits: data 0-15 (line counter 0-8); address WRAM A1-A15, pal A1-A12 + 13 = bank select,\n"
+              "vramlo 0-14, vramhi 0-10. Example: --fault wram:data:5:1 --fault pal:addr:13:0")
+
+
+def parse_fault(spec):
+    """'wram:data:5:1' -> (region, kind, bit, value). Raises ValueError with a readable reason."""
+    parts = spec.strip().lower().split(":")
+    if len(parts) < 3 or parts[0] not in FAULT_REGIONS or parts[1] not in FAULT_KINDS:
+        raise ValueError(f"bad fault '{spec}'. " + FAULT_HELP.splitlines()[0])
+    region, kind = FAULT_REGIONS[parts[0]], FAULT_KINDS[parts[1]]
+    if kind == 2:
+        if region != 0 or parts[2] not in ("lower", "upper"):
+            raise ValueError("byte lane faults: wram:lane:lower or wram:lane:upper")
+        return region, kind, 0, 1 if parts[2] == "upper" else 0
+    if len(parts) != 4 or parts[3] not in ("0", "1") or not parts[2].isdigit():
+        raise ValueError(f"bad fault '{spec}': expected REGION:{parts[1]}:BIT:0|1")
+    bit, value = int(parts[2]), int(parts[3])
+    if kind == 0 and bit > DATA_BITS[region]:
+        raise ValueError(f"{REGION_NAMES[region]}: data bits 0-{DATA_BITS[region]}")
+    if kind == 1:
+        if region not in ADDR_RANGE:
+            raise ValueError("the line counter has no address lines")
+        lo, hi = ADDR_RANGE[region]
+        if not lo <= bit <= hi:
+            raise ValueError(f"{REGION_NAMES[region]}: address lines {lo}-{hi}")
+    return region, kind, bit, value
+
+
+def describe_fault(f):
+    region, kind, bit, value = f
+    name = REGION_NAMES[region]
+    if kind == 2:
+        return f"{name}: {'upper (D8-D15)' if value else 'lower (D0-D7)'} chip dead"
+    if kind == 0:
+        return f"{name}: data bit D{bit} stuck at {value}"
+    if region == 1 and bit == 13:
+        return f"{name}: bank select stuck at bank {value}"
+    return f"{name}: address line A{bit} stuck at {value}"
+
+
+def fault_spec(f):
+    region, kind, bit, value = f
+    r = {v: k for k, v in FAULT_REGIONS.items()}[region]
+    if kind == 2:
+        return f"{r}:lane:{'upper' if value else 'lower'}"
+    return f"{r}:{'data' if kind == 0 else 'addr'}:{bit}:{value}"
+
+
+def apply_faults(core, faults):
+    core.lib.neo_fault_clear()
+    for f in faults:
+        if core.lib.neo_fault_add(*f) != 0:
+            raise ValueError(f"fault refused by the core: {describe_fault(f)}")

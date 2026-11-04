@@ -155,6 +155,38 @@ b["reset"](); pump(0.3)
 b["send"]("Echo 3"); wait_idle()
 check("works after Reset", "0x0003" in console()[-40:])
 
+# simulated faults, through the dialog
+b["speed"].set("fast")
+b["faults_dialog"](); pump(0.3)
+fu = st["fault_ui"]
+fu["add"]("wram:lane:upper"); pump(0.1)
+check("fault lamp red with 1 fault", "1 fault" in b["lamps"]["fault"][1].cget("text"), b["lamps"]["fault"][1].cget("text"))
+b["send"]("TestWRAM"); wait_idle()
+check("WRAM chip dead -> TestWRAM failure", "Test Failure" in console()[-600:])
+fu["reg"].set("Palette RAM"); pump(0.05); fu["kind"].set("Data bit stuck"); pump(0.05)
+fu["bit"].set("11"); fu["lvl"].set("0"); fu["add_form"](); pump(0.1)
+check("form adds 'Palette RAM: data bit D11 stuck at 0'", any("D11 stuck at 0" in fu["list"].get(i) for i in range(fu["list"].size())))
+b["send"]("TestDAC"); wait_idle(); pump(0.5)
+band_r4 = st["core"].lines()[7]
+check("palette D11 stuck at 0 -> R4 band black on screen", band_r4 == 0, hex(band_r4))
+shot("06_faults.png")
+fu["bit"].set("99"); fu["add_form"](); pump(0.05)
+check("out-of-range bit refused with a message", "data bits" in fu["err"].get(), fu["err"].get())
+fu["reg"].set("WRAM"); pump(0.05); fu["kind"].set("Address line stuck"); pump(0.05)
+check("WRAM address line range shown", fu["bit"].get() == "1")
+fu["list"].selection_set(0); fu["remove"](); pump(0.1)
+check("remove selected", len(st["faults"]) == 1)
+fu["clear"](); pump(0.1)
+check("clear all", not st["faults"] and "No fault" in b["lamps"]["fault"][1].cget("text"))
+b["send"]("TestWRAM"); wait_idle()
+check("healthy again -> TestWRAM success", "success" in console()[-200:].lower())
+fu["add"]("vramlo:addr:3:0"); pump(0.1)
+import json
+cfgp = Path(sys.argv[1]).resolve().parent / "brico68k_emulator" / "config.json"
+check("faults saved in the settings", "vramlo:addr:3:0" in json.loads(cfgp.read_text()).get("faults", []))
+fu["clear"](); fu["win"].destroy(); pump(0.1)
+b["speed"].set("real")
+
 # save log
 lp = OUT / "log.txt"
 b["save_log"](str(lp))
@@ -169,6 +201,9 @@ for geo in ("1000x660", "1280x820", "1600x1000"):
     check(f"{geo}: screen ratio 320:224", abs(cw * 224 - ch * 320) <= 320, f"{cw}x{ch}")
     hidden = [w.winfo_class() + ":" + (w.cget("text") if "text" in w.keys() else "") for w in b["key_widgets"] if not w.winfo_viewable()]
     check(f"{geo}: every button / field visible", not hidden, ", ".join(hidden))
+    squeezed = [(w.cget("text") if "text" in w.keys() else w.winfo_class()) for w in b["key_widgets"]
+                if w.winfo_class() in ("TButton",) and w.winfo_width() < w.winfo_reqwidth() - 2]
+    check(f"{geo}: no button squeezed", not squeezed, ", ".join(squeezed))
     need = {"1000x660": 1.0, "1280x820": 1.5, "1600x1000": 2.0}[geo]
     check(f"{geo}: screen scale >= {need}", cw >= 320 * need, f"{cw}x{ch}")
     shot(f"04_{geo}.png")

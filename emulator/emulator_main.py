@@ -16,6 +16,9 @@ Z80 (superzazu/z80 core, 4 MHz) wired as on the board (sound latch, NMI,
 reply latch, 2 KB RAM), running a built-in test M1 that only answers the
 standard handshake ($03 reset -> $00, $01 -> $01), or no program at all (like
 an AES without cartridge).
+Simulated faults (window: Faults..., text mode: --fault): data bit stuck,
+address line stuck, WRAM chip dead, on WRAM, palette RAM (also seen on the
+screen), VRAM and the LSPC line counter - to see how each test reacts.
 NOT emulated: YM2610 and sound, Z80 ROM banking, sprites and fix layer (the
 screen shows the backdrop colour of each line), interrupts, cartridge, memory
 card. Checked word for word against MAME: 32/32 commands with both Z80 setups.
@@ -41,7 +44,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.3"
+APP_VERSION = "1.4"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -158,6 +161,7 @@ def save_config(cfg):
 
 
 HELP_BUILTIN = ("Built-in: Help (this list), Reset (console reset), Power (power cycle: clears RAM), Clear.\n"
+                "Simulated hardware faults: Faults... button (text mode: --fault, see --fault help).\n"
                 "Parameters: decimal, $hex or 0xhex, as on Brico16Bits (e.g. Dump $100000 16).\n")
 
 
@@ -180,8 +184,18 @@ def main_cli(argv):
     ap.add_argument("--z80", choices=["testm1", "none"], default="testm1",
                     help="testm1: Z80 runs the built-in test M1; none: Z80 without program")
     ap.add_argument("--watchdog", action="store_true", help="emulate the watchdog (MVS-like, 135 ms)")
+    ap.add_argument("--fault", action="append", default=[], metavar="SPEC",
+                    help="simulated hardware fault, repeatable, e.g. wram:data:5:1 (see --fault help)")
     ap.add_argument("rom_pos", nargs="?")
     a = ap.parse_args(argv)
+    if "help" in [f.lower() for f in a.fault]:
+        print(FAULT_HELP)
+        return 0
+    try:
+        faults = [parse_fault(f) for f in a.fault]
+    except ValueError as e:
+        print(f"ERROR: {e}")
+        return 2
     rom_path = a.rom or a.rom_pos or default_rom()
     missing = startup_check(rom_path)
     for w, d in missing:
@@ -196,6 +210,9 @@ def main_cli(argv):
     core.load(rom)
     core.power_on()
     core.lib.neo_set_options(1 if a.z80 == "testm1" else 0, 1 if a.watchdog else 0)
+    apply_faults(core, faults)
+    for f in faults:
+        print(f"FAULT: {describe_fault(f)}")
     for _ in range(60):
         core.lib.neo_run_frame()
     host = Host(core, rom)
@@ -274,7 +291,12 @@ def main_gui(rom_arg=None):
     st = {"core": None, "host": None, "rom": None, "running": False, "t_last": 0.0,
           "fps_t": time.time(), "fps_n": 0, "fps": 0.0, "history": list(cfg.get("history", []))[-50:],
           "hist_i": None, "busy_t0": None, "busy_name": "", "rects": [], "colours": [None] * 224,
-          "scale": 2, "log": []}
+          "scale": 2, "log": [], "faults": []}
+    for spec in cfg.get("faults", []):
+        try:
+            st["faults"].append(parse_fault(spec))
+        except ValueError:
+            pass
     st["hist_i"] = len(st["history"])
 
     # --- header ---------------------------------------------------------------
@@ -297,14 +319,16 @@ def main_gui(rom_arg=None):
     e_rom = ttk.Entry(bar, textvariable=rom_var, width=20); e_rom.pack(side="left", fill="x", expand=True, padx=(6, 0))
 
     opts = ttk.Frame(root); opts.pack(fill="x", padx=14, pady=(2, 6))
+    b_faults = ttk.Button(opts, text="Faults...", width=10, command=lambda: faults_dialog())
+    b_faults.pack(side="right")                 # packed first: never squeezed
     Z80_CHOICES = ["Test M1 (handshake only)", "No program (AES without cartridge)"]
     old = cfg.get("z80", "")
     z80_var = tk.StringVar(value=Z80_CHOICES[1] if ("without" in old or old.startswith("No")) else Z80_CHOICES[0])
     ttk.Label(opts, text="Z80").pack(side="left")
-    ttk.Combobox(opts, textvariable=z80_var, values=Z80_CHOICES, state="readonly", width=34).pack(side="left", padx=(6, 18))
+    ttk.Combobox(opts, textvariable=z80_var, values=Z80_CHOICES, state="readonly", width=30).pack(side="left", padx=(6, 14))
     wd_var = tk.BooleanVar(value=cfg.get("watchdog", False))
-    ttk.Checkbutton(opts, text="Watchdog 135 ms (MAME MVS behaviour)", variable=wd_var,
-                    command=lambda: apply_options()).pack(side="left", padx=(0, 18))
+    ttk.Checkbutton(opts, text="Watchdog 135 ms (as MAME MVS)", variable=wd_var,
+                    command=lambda: apply_options()).pack(side="left", padx=(0, 14))
     speed_var = tk.StringVar(value="fast" if cfg.get("fast") else "real")
     ttk.Label(opts, text="Speed").pack(side="left")
     ttk.Radiobutton(opts, text="Real time", value="real", variable=speed_var).pack(side="left", padx=(6, 2))
@@ -319,7 +343,7 @@ def main_gui(rom_arg=None):
     statusbar = tk.Frame(root, bg=C["panel"], highlightthickness=1, highlightbackground=C["border"])
     statusbar.pack(fill="x", side="bottom")
     lamps = {}
-    for key, label in (("cpu", "68000"), ("host", "Host"), ("z80", "Z80")):
+    for key, label in (("cpu", "68000"), ("host", "Host"), ("z80", "Z80"), ("fault", "No fault")):
         f = tk.Frame(statusbar, bg=C["panel"]); f.pack(side="left", padx=(10, 6), pady=3)
         dot = tk.Label(f, text="●", fg=C["muted"], bg=C["panel"], font=ui_font); dot.pack(side="left")
         txt = tk.Label(f, text=label, fg=C["text"], bg=C["panel"], font=ui_font); txt.pack(side="left")
@@ -476,6 +500,157 @@ def main_gui(rom_arg=None):
         if n:
             send(n)
 
+    def push_faults():
+        if st["core"]:
+            apply_faults(st["core"], st["faults"])
+        n = len(st["faults"])
+        lamp("fault", C["err"] if n else C["muted"], f"{n} fault{'s' if n > 1 else ''} active" if n else "No fault")
+        persist()
+
+    PRESETS = [
+        ("WRAM: upper chip dead (D8-D15)", "wram:lane:upper"),
+        ("WRAM: data D3 stuck at 1", "wram:data:3:1"),
+        ("WRAM: address line A9 stuck at 0", "wram:addr:9:0"),
+        ("Palette RAM: dark bit D15 stuck at 0", "pal:data:15:0"),
+        ("Palette RAM: R4 (D11) stuck at 0", "pal:data:11:0"),
+        ("Palette RAM: bank select stuck at bank 0", "pal:addr:13:0"),
+        ("VRAM lower: address line A3 stuck at 0", "vramlo:addr:3:0"),
+        ("VRAM upper: data D7 stuck at 1", "vramhi:data:7:1"),
+        ("LSPC line counter: bit 3 stuck at 1", "line:data:3:1"),
+    ]
+    REGIONS = [("WRAM", "wram"), ("Palette RAM", "pal"), ("VRAM lower (slow)", "vramlo"),
+               ("VRAM upper (fast)", "vramhi"), ("LSPC line counter", "line")]
+
+    def faults_dialog():
+        if st.get("fault_win") and st["fault_win"].winfo_exists():
+            st["fault_win"].lift(); return
+        w = tk.Toplevel(root); st["fault_win"] = w
+        w.title("Simulated faults"); w.configure(bg=C["bg"]); w.transient(root); w.resizable(False, False)
+        fr = ttk.Frame(w, padding=14); fr.pack(fill="both", expand=True)
+        ttk.Label(fr, text="Active faults (applied at once, kept across power cycles)", font=ui_bold).grid(
+            row=0, column=0, columnspan=4, sticky="w")
+        lb = tk.Listbox(fr, height=6, width=62, bg=C["field"], fg=C["text"], font=ui_font, bd=1,
+                        relief="solid", highlightthickness=0, selectbackground="#ddf4ff", selectforeground=C["text"])
+        lb.grid(row=1, column=0, columnspan=4, sticky="we", pady=(4, 4))
+
+        def refresh():
+            lb.delete(0, "end")
+            for f in st["faults"]:
+                lb.insert("end", describe_fault(f))
+            if not st["faults"]:
+                lb.insert("end", "(none: the console is healthy)")
+
+        def add(spec):
+            try:
+                f = parse_fault(spec)
+            except ValueError as ex:
+                err_var.set(str(ex)); return
+            if f in st["faults"]:
+                err_var.set("Already active."); return
+            st["faults"].append(f); err_var.set("")
+            push_faults(); refresh()
+            out(f"--- Fault added: {describe_fault(f)} ---\n", "warn")
+
+        def remove():
+            sel = lb.curselection()
+            if sel and st["faults"]:
+                f = st["faults"].pop(sel[0]); push_faults(); refresh()
+                out(f"--- Fault removed: {describe_fault(f)} ---\n", "info")
+
+        def clear_all():
+            if st["faults"]:
+                st["faults"].clear(); push_faults(); refresh()
+                out("--- All faults removed ---\n", "info")
+
+        bb = ttk.Frame(fr); bb.grid(row=2, column=0, columnspan=4, sticky="e")
+        ttk.Button(bb, text="Remove selected", command=remove).pack(side="left", padx=(0, 6))
+        ttk.Button(bb, text="Clear all", command=clear_all).pack(side="left")
+
+        ttk.Separator(fr).grid(row=3, column=0, columnspan=4, sticky="we", pady=10)
+        ttk.Label(fr, text="Add a fault", font=ui_bold).grid(row=4, column=0, columnspan=4, sticky="w")
+        reg_var = tk.StringVar(value=REGIONS[0][0]); kind_var = tk.StringVar(value="Data bit stuck")
+        bit_var = tk.StringVar(value="0"); lvl_var = tk.StringVar(value="1")
+        ttk.Label(fr, text="Component").grid(row=5, column=0, sticky="w", pady=3)
+        cb_reg = ttk.Combobox(fr, textvariable=reg_var, values=[r for r, _ in REGIONS], state="readonly", width=22)
+        cb_reg.grid(row=5, column=1, sticky="w")
+        ttk.Label(fr, text="Fault").grid(row=6, column=0, sticky="w", pady=3)
+        cb_kind = ttk.Combobox(fr, textvariable=kind_var, state="readonly", width=22); cb_kind.grid(row=6, column=1, sticky="w")
+        bit_lbl = ttk.Label(fr, text="Bit"); bit_lbl.grid(row=5, column=2, sticky="w", padx=(16, 6))
+        sp_bit = ttk.Spinbox(fr, textvariable=bit_var, from_=0, to=15, width=5); sp_bit.grid(row=5, column=3, sticky="w")
+        lvl_lbl = ttk.Label(fr, text="Stuck at"); lvl_lbl.grid(row=6, column=2, sticky="w", padx=(16, 6))
+        cb_lvl = ttk.Combobox(fr, textvariable=lvl_var, values=["0", "1"], state="readonly", width=7)
+        cb_lvl.grid(row=6, column=3, sticky="w")
+        range_var = tk.StringVar()
+        ttk.Label(fr, textvariable=range_var, style="Sub.TLabel").grid(row=7, column=0, columnspan=4, sticky="w")
+
+        def kinds_for(code):
+            k = ["Data bit stuck"]
+            if code != "line":
+                k.append("Address line stuck")
+            if code == "wram":
+                k.append("Chip dead (byte lane)")
+            return k
+
+        def update_form(*_):
+            code = dict(REGIONS)[reg_var.get()]
+            ks = kinds_for(code); cb_kind.configure(values=ks)
+            if kind_var.get() not in ks:
+                kind_var.set(ks[0])
+            k = kind_var.get()
+            if k.startswith("Chip"):
+                bit_lbl.configure(text="Chip"); sp_bit.grid_remove(); lvl_lbl.configure(text="Lane")
+                cb_lvl.configure(values=["lower (D0-D7)", "upper (D8-D15)"])
+                if not lvl_var.get().startswith(("lower", "upper")):
+                    lvl_var.set("upper (D8-D15)")
+                range_var.set("Writes to that chip are lost, it reads $FF.")
+                return
+            sp_bit.grid(); lvl_lbl.configure(text="Stuck at"); cb_lvl.configure(values=["0", "1"])
+            if lvl_var.get() not in ("0", "1"):
+                lvl_var.set("1")
+            if k.startswith("Data"):
+                hi = DATA_BITS[FAULT_REGIONS[code]]; lo = 0
+                bit_lbl.configure(text="Bit D")
+                range_var.set(f"Data bits D0-D{hi}" + (" (palette: also changes the colours on screen)" if code == "pal" else ""))
+            else:
+                lo, hi = ADDR_RANGE[FAULT_REGIONS[code]]
+                bit_lbl.configure(text="Line A")
+                range_var.set(f"Address lines A{lo}-A{hi}" + (" (13 = bank select)" if code == "pal" else ""))
+            sp_bit.configure(from_=lo, to=hi)
+            try:
+                if not lo <= int(bit_var.get()) <= hi:
+                    bit_var.set(str(lo))
+            except ValueError:
+                bit_var.set(str(lo))
+
+        def add_from_form():
+            code = dict(REGIONS)[reg_var.get()]; k = kind_var.get()
+            if k.startswith("Chip"):
+                add(f"wram:lane:{lvl_var.get().split()[0]}")
+            else:
+                add(f"{code}:{'data' if k.startswith('Data') else 'addr'}:{bit_var.get().strip()}:{lvl_var.get()}")
+
+        reg_var.trace_add("write", update_form); kind_var.trace_add("write", update_form)
+        ttk.Button(fr, text="Add fault", style="Accent.TButton", command=add_from_form).grid(
+            row=8, column=3, sticky="e", pady=(6, 0))
+        err_var = tk.StringVar()
+        ttk.Label(fr, textvariable=err_var, foreground=C["err"]).grid(row=8, column=0, columnspan=3, sticky="w")
+
+        ttk.Separator(fr).grid(row=9, column=0, columnspan=4, sticky="we", pady=10)
+        ttk.Label(fr, text="Typical AES faults", font=ui_bold).grid(row=10, column=0, columnspan=4, sticky="w")
+        pre_var = tk.StringVar(value=PRESETS[0][0])
+        ttk.Combobox(fr, textvariable=pre_var, values=[n for n, _ in PRESETS], state="readonly", width=44).grid(
+            row=11, column=0, columnspan=3, sticky="we", pady=4)
+        ttk.Button(fr, text="Add preset", command=lambda: add(dict(PRESETS)[pre_var.get()])).grid(row=11, column=3, sticky="e")
+        ttk.Button(fr, text="Close", command=w.destroy).grid(row=12, column=3, sticky="e", pady=(12, 0))
+        update_form(); refresh()
+        w.update_idletasks()                 # centred over the main window
+        x = root.winfo_rootx() + max(0, (root.winfo_width() - w.winfo_reqwidth()) // 2)
+        y = root.winfo_rooty() + max(0, (root.winfo_height() - w.winfo_reqheight()) // 3)
+        w.geometry(f"+{x}+{y}")
+        st["fault_ui"] = {"add": add, "remove": remove, "clear": clear_all, "list": lb, "reg": reg_var,
+                          "kind": kind_var, "bit": bit_var, "lvl": lvl_var, "add_form": add_from_form,
+                          "preset": pre_var, "err": err_var, "win": w}
+
     def power_on():
         if not refresh_missing():
             return
@@ -486,6 +661,7 @@ def main_gui(rom_arg=None):
             core.power_on()
             st["core"], st["rom"] = core, rom
             apply_options()
+            apply_faults(core, st["faults"])
             st["host"] = Host(core, rom)
         except Exception as ex:
             out(f"Cannot start: {ex}\n", "err")
@@ -495,6 +671,8 @@ def main_gui(rom_arg=None):
         major, minor = struct.unpack_from(">HH", rom, 0x88)
         out(f"--- Power on · {Path(rom_var.get()).name} · BricoNeo {major}.{minor} · "
             f"{len(st['host'].exts)} extensions · type Help ---\n", "info")
+        for f in st["faults"]:
+            out(f"--- Fault active: {describe_fault(f)} ---\n", "warn")
         st["running"] = True; st["t_last"] = time.time()
         b_pause.configure(text="Pause")
         persist()
@@ -639,6 +817,7 @@ def main_gui(rom_arg=None):
 
     def persist():
         save_config({"rom": rom_var.get(), "z80": z80_var.get(), "watchdog": wd_var.get(),
+                     "faults": [fault_spec(f) for f in st["faults"]],
                      "fast": speed_var.get() == "fast", "history": st["history"][-50:],
                      "geometry": root.winfo_geometry()})
 
@@ -661,8 +840,8 @@ def main_gui(rom_arg=None):
         # the extension pane never gets smaller than its filter row + 4 list rows + description
         h = rpane.winfo_height()
         try:
-            if h > 300 and h - rpane.sashpos(0) < 250:
-                rpane.sashpos(0, h - 250)
+            if h > 300 and h - rpane.sashpos(0) < 275:
+                rpane.sashpos(0, h - 275)
         except tk.TclError:
             pass
     rpane.bind("<Configure>", keep_ext_visible)
@@ -688,10 +867,12 @@ def main_gui(rom_arg=None):
         "Z80 runs a built-in test M1 (handshake only). Not emulated: YM2610/sound, sprites, fix layer.\n"
         "Keys: Enter send · Up/Down history · F5 reset · F8 pause · Ctrl+L clear\n", "info")
     apply_options()
+    lamp("fault", C["err"] if st["faults"] else C["muted"],
+         f"{len(st['faults'])} fault(s) active" if st["faults"] else "No fault")
     root.update_idletasks()
     try:
         body.sashpos(0, max(420, int(root.winfo_width() * 0.52)))
-        rpane.sashpos(0, max(150, min(int(rpane.winfo_height() * 0.62), rpane.winfo_height() - 250)))
+        rpane.sashpos(0, max(150, min(int(rpane.winfo_height() * 0.62), rpane.winfo_height() - 275)))
     except tk.TclError:
         pass
     layout_screen()
@@ -704,7 +885,8 @@ def main_gui(rom_arg=None):
                   "cmd": cmd_var, "reset": do_reset, "pause": toggle_pause, "z80": z80_var, "wd": wd_var,
                   "speed": speed_var, "save_log": save_log, "history": history, "busy": busy_var,
                   "lamps": lamps, "desc": desc_var, "rom": rom_var, "canvas": canvas,
-                  "key_widgets": [b_open, b_power, b_reset, b_pause, b_send, b_run, b_ins, b_clear, b_copy, b_save,
+                  "faults_dialog": faults_dialog,
+                  "key_widgets": [b_faults, b_open, b_power, b_reset, b_pause, b_send, b_run, b_ins, b_clear, b_copy, b_save,
                                   e_cmd, e_filter, tree, con, canvas]}
     return root
 

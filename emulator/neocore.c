@@ -88,6 +88,46 @@ static uint16_t h_values[HOST_WORDS];
 static int      h_count, h_overflow;
 static uint64_t h_done_cycles;
 
+/* ---- simulated faults (repair training / diagnostic checks) ----------------
+ * region: 0 WRAM, 1 palette RAM, 2 VRAM lower (slow, $0000-$7FFF),
+ *         3 VRAM upper (fast, $8000-$87FF), 4 LSPC line counter
+ * kind:   0 data bit stuck at `value` (what the CPU - and for the palette
+ *           the DAC - reads; the cell cannot hold the other level)
+ *         1 address line stuck at `value` (accesses fold onto the other half)
+ *         2 WRAM byte lane dead (value 0 = lower chip D0-D7, 1 = upper D8-D15):
+ *           writes lost, reads $FF (floating bus pulled up)
+ * Address lines: WRAM A1-A15, palette A1-A12 + 13 = bank select (latch Q7),
+ * VRAM lower 0-14, VRAM upper 0-10 (VRAM word address). Faults survive
+ * power cycles, as a real hardware fault does. */
+#define MAX_FAULTS 16
+static struct { int region, kind, bit, value; } faults[MAX_FAULTS];
+static int nfaults;
+
+static unsigned fault_data(int region, unsigned w)
+{
+	for (int i = 0; i < nfaults; i++)
+		if (faults[i].region == region && faults[i].kind == 0)
+			w = faults[i].value ? (w | (1u << faults[i].bit)) : (w & ~(1u << faults[i].bit));
+	return w;
+}
+
+static unsigned fault_addr(int region, unsigned idx, int shift)
+{
+	for (int i = 0; i < nfaults; i++)
+		if (faults[i].region == region && faults[i].kind == 1) {
+			unsigned m = 1u << (faults[i].bit - shift);
+			idx = faults[i].value ? (idx | m) : (idx & ~m);
+		}
+	return idx;
+}
+
+static int lane_dead(int lane)
+{
+	for (int i = 0; i < nfaults; i++)
+		if (faults[i].region == 0 && faults[i].kind == 2 && faults[i].value == lane) return 1;
+	return 0;
+}
+
 /* video output: backdrop colour per visible line */
 static uint16_t line_colour[VIS_LINES];
 static uint16_t frame_lines[VIS_LINES];
@@ -96,6 +136,15 @@ static uint32_t last_line;                   /* absolute line index of the last 
 
 static uint64_t now(void) { return now_base + (uint64_t)m68k_cycles_run(); }
 static unsigned pal_bank(void) { return latch[7] ? 0x1000 : 0; }
+/* palette cell index (13 bits: bank + 12-bit word address) after address faults */
+static unsigned pal_index(unsigned a) { return fault_addr(1, pal_bank() | ((a >> 1) & 0xFFF), 1) & 0x1FFF; }
+static unsigned wram_index(unsigned a) { return fault_addr(0, a & 0xFFFF, 0) & 0xFFFE; }
+static unsigned vram_phys(unsigned v)
+{
+	if (v & 0x8000) return 0x8000 | (fault_addr(3, v & 0x7FF, 0) & 0x7FF);
+	return fault_addr(2, v & 0x7FFF, 0) & 0x7FFF;
+}
+static uint16_t vram_read(unsigned v) { return (uint16_t)fault_data((v & 0x8000) ? 3 : 2, vram[vram_phys(v)]); }
 
 static unsigned vpos_now(void) { return (unsigned)((now() % FRAME_CYCLES) / LINE_CYCLES); }
 
@@ -103,6 +152,7 @@ static uint16_t video_control(void)
 {
 	unsigned v = vpos_now() + 0x100;
 	if (v >= 0x200) v -= FRAME_LINES;
+	v = fault_data(4, v) & 0x1FF;
 	return (uint16_t)((v << 7) | (anim_counter & 7));
 }
 
@@ -183,12 +233,12 @@ static void z80_command(uint8_t c)
 static void vram_set_offset(uint16_t d)
 {
 	vram_offset = (d & 0x8000) ? (d & 0x87FF) : d;
-	vram_read_buffer = vram[vram_offset];
+	vram_read_buffer = vram_read(vram_offset);
 }
 
 static void vram_write(uint16_t d)
 {
-	vram[vram_offset] = d;
+	vram[vram_phys(vram_offset)] = d;
 	vram_set_offset((uint16_t)((vram_offset & 0x8000) | ((vram_offset + vram_modulo) & 0x7FFF)));
 }
 
@@ -214,7 +264,13 @@ static unsigned read16(unsigned a, int lsb_only)
 	a &= 0xFFFFFE;
 	if (a < 0x000080) return latch[1] ? 0xFFFF : ((bios[a] << 8) | bios[a + 1]);
 	if (a < 0x100000) return 0xFFFF;                        /* no cartridge */
-	if (a < 0x200000) { unsigned o = a & 0xFFFF; return (wram[o] << 8) | wram[o + 1]; }
+	if (a < 0x200000) {
+		unsigned o = wram_index(a);
+		unsigned w = (wram[o] << 8) | wram[o + 1];
+		if (lane_dead(1)) w |= 0xFF00;
+		if (lane_dead(0)) w |= 0x00FF;
+		return fault_data(0, w);
+	}
 	if (a < 0x300000) return 0xFFFF;                        /* no cartridge (P2) */
 	if (a < 0x320000) return 0xFF00;                        /* P1: nothing pressed */
 	if (a < 0x340000) { z80_sync(); return (unsigned)z80_reply << 8; }
@@ -231,7 +287,7 @@ static unsigned read16(unsigned a, int lsb_only)
 		}
 	}
 	if (a < 0x400000) return open_bus();
-	if (a < 0x800000) return pal[pal_bank() + ((a >> 1) & 0xFFF)];
+	if (a < 0x800000) return fault_data(1, pal[pal_index(a)]);
 	if (a < 0xC00000) return 0xFFFF;                        /* memory card: none */
 	if (a < 0xD00000) {
 		host_port_read(a);
@@ -245,9 +301,9 @@ static void write16(unsigned a, unsigned d, unsigned mask)  /* mask: 0xFF00 / 0x
 {
 	a &= 0xFFFFFE;
 	if (a >= 0x100000 && a < 0x200000) {
-		unsigned o = a & 0xFFFF;
-		if (mask & 0xFF00) wram[o] = (uint8_t)(d >> 8);
-		if (mask & 0x00FF) wram[o + 1] = (uint8_t)d;
+		unsigned o = wram_index(a);
+		if ((mask & 0xFF00) && !lane_dead(1)) wram[o] = (uint8_t)(d >> 8);
+		if ((mask & 0x00FF) && !lane_dead(0)) wram[o + 1] = (uint8_t)d;
 		return;
 	}
 	if (a >= 0x300000 && a < 0x320000) { if (mask & 0x00FF) wdog_kick = now(); return; }
@@ -267,7 +323,7 @@ static void write16(unsigned a, unsigned d, unsigned mask)  /* mask: 0xFF00 / 0x
 		return;
 	}
 	if (a >= 0x400000 && a < 0x800000) {
-		uint16_t *p = &pal[pal_bank() + ((a >> 1) & 0xFFF)];
+		uint16_t *p = &pal[pal_index(a)];
 		*p = (uint16_t)((*p & ~mask) | (d & mask));
 		return;
 	}
@@ -305,7 +361,7 @@ static void line_event(uint32_t line_abs)
 {
 	unsigned vpos = line_abs % FRAME_LINES;
 	if (vpos >= VIS_FIRST && vpos < VIS_FIRST + VIS_LINES)
-		line_colour[vpos - VIS_FIRST] = pal[pal_bank() + 0xFFF];
+		line_colour[vpos - VIS_FIRST] = (uint16_t)fault_data(1, pal[fault_addr(1, pal_bank() | 0xFFF, 1) & 0x1FFF]);
 	if (vpos == VSSTART) {
 		if (anim_frame_counter == 0) { anim_frame_counter = anim_speed; anim_counter++; }
 		else anim_frame_counter--;
@@ -437,3 +493,20 @@ EXPORT int neo_watchdog_resets(void) { return wdog_resets; }
 EXPORT uint32_t neo_z80_commands(void) { return z80_commands; }
 EXPORT uint32_t neo_z80_pc(void) { return zc.pc; }
 EXPORT uint16_t neo_peek16(uint32_t a) { return (uint16_t)read16(a, 0); }
+
+EXPORT void neo_fault_clear(void) { nfaults = 0; }
+EXPORT int neo_fault_count(void) { return nfaults; }
+EXPORT int neo_fault_add(int region, int kind, int bit, int value)
+{
+	static const int data_bits[5] = { 15, 15, 15, 15, 8 };
+	static const int addr_lo[5] = { 1, 1, 0, 0, -1 }, addr_hi[5] = { 15, 13, 14, 10, -1 };
+	if (nfaults >= MAX_FAULTS || region < 0 || region > 4 || value < 0 || value > 1) return -1;
+	if (kind == 0 && (bit < 0 || bit > data_bits[region])) return -1;
+	if (kind == 1 && (addr_lo[region] < 0 || bit < addr_lo[region] || bit > addr_hi[region])) return -1;
+	if (kind == 2 && region != 0) return -1;
+	if (kind < 0 || kind > 2) return -1;
+	faults[nfaults].region = region; faults[nfaults].kind = kind;
+	faults[nfaults].bit = bit; faults[nfaults].value = value;
+	nfaults++;
+	return 0;
+}

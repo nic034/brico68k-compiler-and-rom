@@ -9,7 +9,7 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.2 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.3: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.4: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
 | `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB padded with `$FF` (SHA-256 in `rom/Brico68k.bin.sha256`) |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
@@ -91,6 +91,34 @@ verdicts, and the extension list. The list can be filtered and gives the full de
 selected extension, with Run and Insert buttons. A busy indicator counts the emulated time against
 the 3 s host limit, and lamps show the 68000, host and Z80 state. Keys: Enter sends,
 Up/Down browses the history, F5 resets, F8 pauses, Ctrl+L clears.
+
+### Simulated faults
+
+**Faults...** opens a dialog, and `--fault` does the same in text mode. You can break the console
+in the ways real boards fail, then see how each test reports it:
+
+- **data bit stuck** at 0 or 1: WRAM D0-D15, palette RAM D0-D15, VRAM lower or upper D0-D15,
+  LSPC line counter bits 0-8. A palette fault also changes the colours on screen, so TestDAC
+  shows the dead band.
+- **address line stuck** at 0 or 1: WRAM A1-A15, palette A1-A12 plus the bank select (13), VRAM
+  lower 0-14 and upper 0-10.
+- **WRAM chip dead**, lower (D0-D7) or upper (D8-D15) byte lane: writes are lost and reads give
+  `$FF`.
+
+The dialog also has presets for typical AES faults. Faults stay active across power cycles, like
+a real hardware fault, and a red lamp shows how many are active. Example:
+
+```
+python Brico68k_Emulator.py --fault wram:lane:upper --fault pal:data:11:0 --run TestWRAM TestPRAM
+python Brico68k_Emulator.py --fault help
+```
+
+Checked against the MAME bench with the same fault injected (`emulator/compare_mame_faults.py`):
+15 out of 15 outputs are identical. That covers WRAM data bits, a dead chip and address lines,
+palette data and address lines, the line counter, and VRAM data. MAME's probes cannot model the
+palette bank select, VRAM address lines or the on-screen effect, so those were checked by hand:
+TestPRAM reports bank independence, TestVRAML or TestVRAMU fails on the right half, and the R4
+band turns black.
 
 Text mode: `python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234"` and `--check`.
 Rebuild the core: `python3 emulator/build_core.py` (needs git and `pip install ziglang`).
