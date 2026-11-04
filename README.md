@@ -9,7 +9,7 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.2 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.4: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.5: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
 | `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB padded with `$FF` (SHA-256 in `rom/Brico68k.bin.sha256`) |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
@@ -86,15 +86,42 @@ embedded. The window needs Tkinter. It comes with Python on Windows (python.org 
 Linux it may be a separate package (`sudo apt install python3-tk`), and the tool says so if it is
 missing.
 
-The window (light theme) shows the screen (scaled to the window, 2x at 1280x820), the console with coloured
-verdicts, and the extension list. The list can be filtered and gives the full description of the
-selected extension, with Run and Insert buttons. A busy indicator counts the emulated time against
-the 3 s host limit, and lamps show the 68000, host and Z80 state. Keys: Enter sends,
-Up/Down browses the history, F5 resets, F8 pauses, Ctrl+L clears.
+The window (light theme) is a diagnostic dashboard:
+
+- **Sidebar**: the tests grouped by Memory, Video, Sound, Inputs and system, and Tools, each with a
+  result badge, plus a live thumbnail of the screen (click it to enlarge).
+- **Run all tests** chains every test in a sensible order: memory, video, Z80 and audio (with a
+  4 s wait for the beeps), inputs, TestWatchdog in two passes (only when the watchdog option is
+  on), then TestDAC last so its pattern stays on screen. The tools (Echo, Read, Write, Dump...)
+  need parameters and are not part of it. **Stop** ends the sequence.
+- **Report** tab: the verdict of the selected test in a coloured banner, its description, its
+  raw output and its emulated duration, with Run again and Copy.
+- **Console** tab: the Brico16Bits-like terminal. Commands typed there also update the badges.
+- **Screen** tab: the screen, scaled to the window and keeping the 320:224 ratio.
+- **Faults** and **Settings** tabs: see below; Settings also holds the ROM path, the Z80 program,
+  the watchdog and the speed.
+- A status bar with lamps (68000, host, Z80, faults), a busy indicator that counts the emulated
+  time against the 3 s host limit, and the frame rate.
+
+Badges are read from the text the ROM prints, the way a technician would read it:
+
+| Badge | Meaning |
+|---|---|
+| PASS | the last `=>` line says success; TestAudio got its Z80 ACK |
+| FAIL | failure line, `ERROR` line, 68000 exception, or timeout |
+| CHECK | inconclusive, out of tolerance, or the test could not run |
+| N/A | not applicable here: TestBRAM on AES, PlayEyeSnd (no sound), TestWatchdog with the watchdog off |
+| LOOK | TestDAC: only your eyes can judge the 16 bands |
+| INFO | report only (TestInp, TestStatusA, TestSystype, tools): read the output |
+| ARMED | first TestWatchdog pass; run it again for the result |
+
+A badge is a reading aid, not a second opinion: the raw output in the Report tab is what the ROM
+said. With the Z80 option set to no program, the Z80 failures are marked as expected.
+Keys: Enter sends, Up/Down browses the history, F5 resets, F8 pauses, Ctrl+L clears the console.
 
 ### Simulated faults
 
-**Faults...** opens a dialog, and `--fault` does the same in text mode. You can break the console
+The **Faults** tab, and `--fault` in text mode, inject faults. You can break the console
 in the ways real boards fail, then see how each test reports it:
 
 - **data bit stuck** at 0 or 1: WRAM D0-D15, palette RAM D0-D15, VRAM lower or upper D0-D15,
@@ -105,8 +132,8 @@ in the ways real boards fail, then see how each test reports it:
 - **WRAM chip dead**, lower (D0-D7) or upper (D8-D15) byte lane: writes are lost and reads give
   `$FF`.
 
-The dialog also has presets for typical AES faults. Faults stay active across power cycles, like
-a real hardware fault, and a red lamp shows how many are active. Example:
+The tab also has presets for typical AES faults. Faults stay active across power cycles, like
+a real hardware fault; a red lamp and the tab title show how many are active. Example:
 
 ```
 python Brico68k_Emulator.py --fault wram:lane:upper --fault pal:data:11:0 --run TestWRAM TestPRAM
