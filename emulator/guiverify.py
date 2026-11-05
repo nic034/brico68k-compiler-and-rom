@@ -96,7 +96,7 @@ check("lamps", "running" in b["lamps"]["cpu"][1].cget("text") and "ready" in b["
 check("all badges empty before a run", all(badge(n) == "" for n in ext_rows))
 shot("01_start.png")
 
-# --- Run all, healthy console, default settings (Z80 test M1, no watchdog), fast -----------------------------
+# --- Run all, healthy console, default settings (Z80 test M1, watchdog on), fast -----------------------------
 b["speed"].set("fast")
 b["run_all"](); pump(0.2)
 check("Run all button shows progress", "Running" in str([w.cget("text") for w in b["key_widgets"][4:5]]))
@@ -105,12 +105,13 @@ pump(0.3)
 expect = {"TestWRAM": "PASS", "TestBRAM": "N/A", "TestPRAM": "PASS", "TestVRAML": "PASS", "TestVRAMU": "PASS",
           "MarchVRAML": "PASS", "MarchVRAMU": "PASS", "TestLSPC": "PASS", "TestTiming": "PASS", "TestDAC": "LOOK",
           "TestZ80": "PASS", "TestAudio": "PASS", "PlayEyeSnd": "N/A", "TestInp": "INFO", "TestStatusA": "INFO",
-          "TestSystype": "INFO", "TestWatchdog": "N/A"}
+          "TestSystype": "INFO", "TestWatchdog": "PASS"}
 for n, e in expect.items():
     check(f"Run all badge {n} = {e}", badge(n) == e, str(badge(n)))
 check("tools not run by Run all", all(badge(n) == "" for n in m.TOOLS))
-check("summary line", b["summary"].get().startswith("10 pass") and "1 look" in b["summary"].get(), b["summary"].get())
-check("console 'Run all done' with summary", "Run all done: 10 pass" in console())
+check("watchdog on by default", b["wd"].get() is True)
+check("summary line", b["summary"].get().startswith("11 pass") and "1 look" in b["summary"].get(), b["summary"].get())
+check("console 'Run all done' with summary", "Run all done: 11 pass" in console())
 check("TestDAC last: 16 colours on screen", len(set(st["colours"])) == 16, str(len(set(st["colours"]))))
 check("report shows the last test", "TestDAC" in report() and "LOOK" in b["verdict"].cget("text"))
 shot("02_runall.png")
@@ -120,7 +121,7 @@ tree.selection_set("MarchVRAMU"); pump(0.2)
 check("report verdict for selected test", b["verdict"].cget("text").startswith("PASS") and "success" in b["verdict"].cget("text"))
 check("report raw output", "> MarchVRAMU" in report() and "ms emulated" in report())
 tree.selection_set("TestWatchdog"); pump(0.1)
-check("watchdog N/A explained", "enable it in Settings" in b["verdict"].cget("text"))
+check("watchdog verdict after two passes", b["verdict"].cget("text").startswith("PASS"), b["verdict"].cget("text"))
 
 # GUI result = text mode (--run), for every test and every tool
 cmds = ["Echo $BEEF", "Read 0x320001", "Write $5A $100001", "WriteB $A5 $100000", "Dump $100000 8", "TestInp",
@@ -161,6 +162,12 @@ check("timeout verdict explained", "Timeout" in b["verdict"].cget("text"))
 b["send"]("TestWRAM"); wait_idle()
 check("next run is PASS again", badge("TestWRAM") == "PASS")
 
+# palette RAM: a byte write sets both bytes (UDS/LDS ignored, neogeodev wiki); WRAM keeps byte lanes
+b["send"]("WriteB $12 $401FFE"); wait_idle(); b["send"]("Read $401FFE"); wait_idle()
+check("palette byte write sets both bytes", console().rstrip().splitlines()[-2:][0].strip() == "0x1212", console()[-60:])
+b["send"]("Write $0 $100000"); wait_idle(); b["send"]("WriteB $56 $100001"); wait_idle(); b["send"]("Read $100000"); wait_idle()
+check("WRAM byte write keeps the other byte", "0x0056" in console()[-40:], console()[-60:])
+
 # built-ins, errors, history
 b["send"]("Help"); pump(0.2)
 check("Help lists the extensions", "23 extensions in this ROM" in console())
@@ -183,12 +190,14 @@ tree.selection_set("TestAudio"); pump(0.1)
 check("no program: failure marked as expected", "Expected here" in b["verdict"].cget("text"))
 b["z80"].set("Test M1 (handshake only)"); pump(0.1)
 
-# Settings: watchdog -> Run all runs TestWatchdog twice and reads the result
-b["wd"].set(True); pump(0.1)
-b["run_all"](); wait_idle(60); pump(0.2)
-check("watchdog on: TestWatchdog PASS after two passes", badge("TestWatchdog") == "PASS", str(badge("TestWatchdog")))
-check("watchdog on: 11 pass", b["summary"].get().startswith("11 pass"), b["summary"].get())
+# Settings: watchdog off (like MAME's aes driver) -> TestWatchdog N/A, explained
 b["wd"].set(False); pump(0.1)
+b["run_all"](); wait_idle(60); pump(0.2)
+check("watchdog off: TestWatchdog N/A", badge("TestWatchdog") == "N/A", str(badge("TestWatchdog")))
+check("watchdog off: 10 pass", b["summary"].get().startswith("10 pass"), b["summary"].get())
+tree.selection_set("TestWatchdog"); pump(0.1)
+check("watchdog off explained", "switched off in Settings" in b["verdict"].cget("text"), b["verdict"].cget("text"))
+b["wd"].set(True); pump(0.1)
 
 # Stop during Run all
 b["run_all"](); pump(0.15)

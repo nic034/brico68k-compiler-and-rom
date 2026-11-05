@@ -2,7 +2,7 @@
 """Rebuilds the emulator core and Brico68k_Emulator.py.
 
 1. clones Musashi (Karl Stenerud, MIT) and superzazu/z80 (Nicolas Allemand,
-   MIT) at pinned commits,
+   MIT) at pinned commits (an existing clone at the right commit is reused),
 2. enables address-error, trace and RESET-instruction emulation in m68kconf.h,
 3. generates m68kops.c/h with m68kmake,
 4. builds neocore.dll (x86_64-windows-gnu) and libneocore.so (x86_64-linux-gnu.2.17)
@@ -27,13 +27,24 @@ def run(cmd, **kw):
     subprocess.run(cmd, check=True, **kw)
 
 
+def fetch(url, commit, dest):
+    """Clones url at commit into dest, or reuses a clone already there at that commit (offline rebuild)."""
+    if (dest / ".git").is_dir():
+        head = subprocess.run(["git", "-C", str(dest), "rev-parse", "HEAD"], capture_output=True, text=True).stdout
+        if head.startswith(commit):
+            print(f"= {dest.name} already at {commit}")
+            return
+        shutil.rmtree(dest)
+    run(["git", "clone", "-q", url, str(dest)])
+    run(["git", "-C", str(dest), "checkout", "-q", commit])
+
+
 def main():
-    shutil.rmtree(B, ignore_errors=True)
-    run(["git", "clone", "-q", MUSASHI, str(B / "musashi")])
-    run(["git", "-C", str(B / "musashi"), "checkout", "-q", MUSASHI_COMMIT])
-    run(["git", "clone", "-q", Z80, str(B / "z80")])
-    run(["git", "-C", str(B / "z80"), "checkout", "-q", Z80_COMMIT])
+    B.mkdir(exist_ok=True)
+    fetch(MUSASHI, MUSASHI_COMMIT, B / "musashi")
+    fetch(Z80, Z80_COMMIT, B / "z80")
     src = B / "src"
+    shutil.rmtree(src, ignore_errors=True)
     shutil.copytree(B / "musashi", src, ignore=shutil.ignore_patterns(".git", "test", "example"))
     conf = (src / "m68kconf.h").read_text()
     for name in ("M68K_EMULATE_ADDRESS_ERROR", "M68K_EMULATE_TRACE", "M68K_EMULATE_RESET"):

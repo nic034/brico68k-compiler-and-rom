@@ -9,7 +9,7 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.2 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.5: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.7: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
 | `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB padded with `$FF` (SHA-256 in `rom/Brico68k.bin.sha256`) |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
@@ -68,7 +68,14 @@ MAME's driver:
   2 KB RAM. It runs a built-in test M1 that only answers the standard handshake
   (`$03` reset gives `$00`, `$01` gives `$01`). It can also run without any program, like an
   AES with no cartridge.
-- **Options**: watchdog (135 ms, as MAME MVS) and the Z80 program.
+- **Watchdog**: on by default. Real AES and MVS boards both have it, in NEO-B1 (kicked by any
+  write to `REG_DIPSW` `$300001`, about 135 ms, it resets the whole system, Z80 included).
+  MAME's `aes` driver has none: switch it off in Settings, or `--no-watchdog`, to compare with it.
+- **Palette RAM byte writes** set both bytes of the word, as on the board (UDS/LDS are ignored
+  for palette writes and the 68000 puts the byte on both halves of the bus; neogeodev wiki,
+  "Palettes"). MAME writes one byte only. The ROM tests use word accesses; only `WriteB` to the
+  palette shows the difference.
+- **Options**: the watchdog and the Z80 program.
 - **Not emulated**: the YM2610 (ports `$04`-`$07` read 0) and sound, Z80 ROM banking, sprites,
   the fix layer, interrupts, a cartridge and a memory card. The screen shows the backdrop colour
   of each line, which is enough for TestDAC and Color.
@@ -154,7 +161,9 @@ TestPRAM reports bank independence, TestVRAML or TestVRAMU fails on the right ha
 band turns black.
 
 Text mode: `python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234"` and `--check`.
-Rebuild the core: `python3 emulator/build_core.py` (needs git and `pip install ziglang`).
+Rebuild the core: `python3 emulator/build_core.py` (needs git and `pip install ziglang`; clones
+already at the pinned commits in `emulator/build/` are reused, so a rebuild works offline). The
+build is reproducible: the same sources give the same core checksums.
 It fetches Musashi and the Z80 core at pinned commits.
 The build is reproducible: it gives the same binaries.
 
@@ -226,7 +235,7 @@ Brico16Bits recognises the byte order.
 5. Paste the whole of `bench/real_aes_session.txt` into the terminal. The `;` lines are comments
    and `Delay` waits, both built into the BricoNeo console.
 6. Compare the log with `bench/expected_healthy_aes.txt` (or `..._no_cartridge.txt`), produced by
-   the emulator with `python Brico68k_Emulator.py --script bench/real_aes_session.txt --watchdog`
+   the emulator with `python Brico68k_Emulator.py --script bench/real_aes_session.txt`
    (add `--z80 none` for the no-cartridge file). TestInp, TestStatusA and TestSystype depend
    on what is plugged in; the cycle count of TestTiming may differ slightly. Everything else
    should match on a healthy console. Look at the screen for TestDAC.
@@ -255,8 +264,11 @@ each well under the 3 s host limit.
 ### Known limits (read before trusting a result)
 
 - **Nothing here has been validated on real hardware yet.** MAME is the reference used.
-- **TestWatchdog**: MAME emulates the watchdog on MVS only. On AES in MAME the test reports
-  "no reset", which is expected there. Commands sent during the 1.5 s starve window are lost.
+- **TestWatchdog**: MAME emulates the watchdog on MVS only, although the AES has the same
+  NEO-B1 watchdog (Brico16Bits' own `Reset` command relies on it). On AES in MAME the test
+  reports "no reset"; on a real AES it must pass. Commands sent during the 1.5 s starve window
+  are lost. The reset is modelled as instant, as in MAME; on the board /RESET then stays low a
+  while (about 200 ms by Charles MacDonald's measures, unverified per the wiki).
 - **TestTiming** on PAL boards: the expected 312 lines is not verified (MAME is NTSC only).
   The CPU cycle check assumes no bus wait states, so it reports CHECK, not FAIL, when it is
   off by more than 0.5 %.

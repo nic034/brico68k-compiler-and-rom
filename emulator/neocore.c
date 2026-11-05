@@ -339,6 +339,11 @@ unsigned int m68k_read_memory_16(unsigned int a) { return read16(a, 0); }
 unsigned int m68k_read_memory_32(unsigned int a) { unsigned h = read16(a, 0); return (h << 16) | read16(a + 2, 0); }
 void m68k_write_memory_8(unsigned int a, unsigned int v)
 {
+	a &= 0xFFFFFF;
+	/* Palette RAM ignores UDS/LDS on writes: the 68000 puts the byte on both halves of the
+	 * bus, so a byte write sets both bytes of the word (neogeodev wiki, Palettes). MAME
+	 * writes one byte only. */
+	if (a >= 0x400000 && a < 0x800000) { write16(a & ~1u, (v & 0xFF) * 0x0101, 0xFFFF); return; }
 	if (a & 1) write16(a, v & 0xFF, 0x00FF); else write16(a, (v & 0xFF) << 8, 0xFF00);
 }
 void m68k_write_memory_16(unsigned int a, unsigned int v) { write16(a, v & 0xFFFF, 0xFFFF); }

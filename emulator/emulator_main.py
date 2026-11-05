@@ -9,7 +9,8 @@ a Brico16Bits-like host. Type the same commands as on the Brico16Bits console
 Emulated (modelled on MAME snk/neogeo.cpp): 68000 @ 12 MHz with exact cycle
 counts, BIOS ROM, WRAM, palette RAM (2 banks), system latch, LSPC registers
 and VRAM, line counter / frame timing, auto-animation counter, inputs (AES,
-nothing pressed, no memory card, no cartridge), open bus, watchdog (option).
+nothing pressed, no memory card, no cartridge), open bus, watchdog (NEO-B1, as on
+real AES and MVS boards; on by default, MAME's aes driver has none).
 Host: command + P1-P3 written into the ROM, cleared after 1 ms, 3 s timeout,
 2048-word buffer, as Brico16Bits CommandExtension.cpp.
 Z80 (superzazu/z80 core, 4 MHz) wired as on the board (sound latch, NMI,
@@ -26,7 +27,7 @@ that accesses VRAM too fast passes here and can fail on a real console. Checked 
 
 Run: double-click, or  python Brico68k_Emulator.py [ROM]
 Text mode: python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234" [--rom ROM]
-           python Brico68k_Emulator.py --script bench/real_aes_session.txt --watchdog
+           python Brico68k_Emulator.py --script bench/real_aes_session.txt
            python Brico68k_Emulator.py --check [--rom ROM]
 Python 3.8+, standard library only: nothing to install with pip. The window
 needs Tkinter, which comes with Python on Windows (python.org installer) and is
@@ -46,7 +47,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.6"
+APP_VERSION = "1.7"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -213,7 +214,9 @@ def main_cli(argv):
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--z80", choices=["testm1", "none"], default="testm1",
                     help="testm1: Z80 runs the built-in test M1; none: Z80 without program")
-    ap.add_argument("--watchdog", action="store_true", help="emulate the watchdog (MVS-like, 135 ms)")
+    ap.add_argument("--no-watchdog", action="store_true",
+                    help="no watchdog, like MAME's aes driver (real AES and MVS boards have one, in NEO-B1)")
+    ap.add_argument("--watchdog", action="store_true", help=argparse.SUPPRESS)   # default since 1.7, kept for old scripts
     ap.add_argument("--fault", action="append", default=[], metavar="SPEC",
                     help="simulated hardware fault, repeatable, e.g. wram:data:5:1 (see --fault help)")
     ap.add_argument("rom_pos", nargs="?")
@@ -239,7 +242,7 @@ def main_cli(argv):
     core = Core(core_path())
     core.load(rom)
     core.power_on()
-    core.lib.neo_set_options(1 if a.z80 == "testm1" else 0, 1 if a.watchdog else 0)
+    core.lib.neo_set_options(1 if a.z80 == "testm1" else 0, 0 if a.no_watchdog else 1)
     apply_faults(core, faults)
     for f in faults:
         print(f"FAULT: {describe_fault(f)}")
@@ -348,7 +351,7 @@ def run_all_plan(names, watchdog):
             if watchdog:
                 plan += [("cmd", n), ("wait", 2.0), ("cmd", n)]
             else:
-                plan.append(("skip", n, "NA", "Watchdog not emulated (AES in MAME has none): "
+                plan.append(("skip", n, "NA", "Watchdog switched off in Settings (as in MAME's aes driver): "
                                               "enable it in Settings to run this test."))
         elif n == "TestAudio":
             plan += [("cmd", n), ("wait", 4.0)]            # the 68000 beeps for ~3.5 s
@@ -603,8 +606,9 @@ def main_gui(rom_arg=None):
     for i, ch in enumerate(Z80_CHOICES):
         ttk.Radiobutton(sett, text=ch, value=ch, variable=z80_var).grid(row=4 + i, column=0, columnspan=3, sticky="w")
     ttk.Label(sett, text="Watchdog", style="CardBold.TLabel").grid(row=6, column=0, sticky="w", pady=(10, 0))
-    wd_var = tk.BooleanVar(value=cfg.get("watchdog", False))
-    ttk.Checkbutton(sett, text="Emulate the watchdog (135 ms, as MAME MVS; MAME has none on AES)", variable=wd_var).grid(row=7, column=0, columnspan=3, sticky="w")
+    # real AES and MVS boards both have the NEO-B1 watchdog: on by default since 1.7 (older settings said off by default)
+    wd_var = tk.BooleanVar(value=cfg.get("watchdog", True) if cfg.get("cfg_version", 1) >= 2 else True)
+    ttk.Checkbutton(sett, text="Watchdog (NEO-B1, about 135 ms: real AES and MVS boards have one; MAME's aes driver has none)", variable=wd_var).grid(row=7, column=0, columnspan=3, sticky="w")
     ttk.Label(sett, text="Speed", style="CardBold.TLabel").grid(row=8, column=0, sticky="w", pady=(10, 0))
     speed_var = tk.StringVar(value="fast" if cfg.get("fast") else "real")
     ttk.Radiobutton(sett, text="Real time (60 frames/s, like the console)", value="real", variable=speed_var).grid(row=9, column=0, columnspan=3, sticky="w")
@@ -1067,7 +1071,7 @@ def main_gui(rom_arg=None):
         st["after"] = root.after(5, tick)
 
     def persist():
-        save_config({"rom": rom_var.get(), "z80": z80_var.get(), "watchdog": wd_var.get(),
+        save_config({"cfg_version": 2, "rom": rom_var.get(), "z80": z80_var.get(), "watchdog": wd_var.get(),
                      "faults": [fault_spec(f) for f in st["faults"]], "fast": speed_var.get() == "fast",
                      "history": st["history"][-50:], "geometry": root.winfo_geometry()})
 
