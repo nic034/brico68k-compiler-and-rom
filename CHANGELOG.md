@@ -1,0 +1,100 @@
+# Changelog
+
+Newest first. Release notes used to be kept on Google Drive; they now live here only.
+Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
+Aurelien34/Brico16Bits `5859d6b`.
+
+## 2026-11-05 - Emulator 1.7 (`19f195d`)
+
+Checked against the neogeodev wiki.
+
+- **Watchdog on by default.** Real AES and MVS boards both have the NEO-B1 watchdog: kicked by
+  writing `REG_DIPSW` (`$300001`), about 8 frames (3 244 030 mclk), it resets the whole system,
+  Z80 included (already modelled). `--no-watchdog` or Settings give the behaviour of MAME's `aes`
+  driver, which has none. Settings saved by older versions are migrated to on.
+- **Palette RAM byte writes** set both bytes of the word, as on the board (UDS/LDS ignored, the
+  68000 puts the byte on both halves of the bus). MAME writes one byte. The ROM tests use words;
+  only `WriteB` to the palette differs.
+- Consistent with the wiki, nothing to change: colour word layout, line counter range
+  `$0F8`-`$1FF`, 68k/Z80 latches and NMI.
+- Not modelled: /RESET held low about 200 ms after a watchdog timeout (Charles MacDonald's
+  measure, marked unverified on the wiki; MAME does not model it either).
+- `build_core.py` reuses clones already at the pinned commits (offline rebuild). The unchanged
+  core rebuilt to the same checksums before the change.
+- Cores: Windows DLL `70b6c05d…`, Linux `.so` `c97dd30a…`.
+- Checks: 32/32 identical to MAME, 15/15 with faults (watchdog off, as MAME `aes`);
+  `guiverify.py` 156/156; Windows DLL under Wine (palette byte write gives `$1212`).
+
+## 2026-11-05 - ROM VRAM timing + Emulator 1.6 (`91793a2`)
+
+ROM SHA-256 `79c5fb48de32345ddca940e232949d07d749e641cfa82bb7f3d9754ca6f02075`
+(BricoNeo 1.35, 23 extensions), rebuilt from `source/` to the same checksum.
+
+- **ROM: VRAM read too close to the address write.** The LSPC returns valid data 16 CPU cycles
+  after `REG_VRAMADDR` is written (neogeodev wiki, "VRAM"). TestVRAML/U and MarchVRAML/U read
+  12 cycles after the end of the write (16 start to start). Two `nop` now give a margin either
+  way, as jwestfall69's diag BIOS does. Every other VRAM access already had margin. MAME does
+  not model the delay, so the output is unchanged there (32/32, 15/15 with faults); only a real
+  board can show the difference. MarchVRAML: 1.64 s -> 1.75 s of the 3 s host limit.
+- **Emulator 1.6**
+  - Console accepts `; comment` and `Delay ms` like the BricoNeo console; **Run script...** and
+    `--script FILE` play `bench/real_aes_session.txt`.
+  - Any `--option` selects text mode (`--fault help` and `--script` used to open the window).
+  - Window position restored only when it is on this screen; tick timer cancelled on close.
+  - Core extracted under a checksum name, so a running older window (Windows locks loaded DLLs)
+    no longer blocks an update; older cores are removed.
+  - Help text no longer points to the removed Faults... dialog.
+  - `compare_mame.py` no longer overrides `BRICO_SOUND_ROM` with a local path.
+  - `guiverify.py`: 152 checks.
+
+## 2026-11-05 - Real console session (`3763e80`)
+
+- `bench/real_aes_session.txt`: every test, to paste into the BricoNeo serial console.
+- `bench/expected_healthy_aes.txt` (cartridge in) and `expected_healthy_aes_no_cartridge.txt`:
+  what a healthy console should answer, produced by the emulator.
+- README: step-by-step procedure.
+
+## 2026-11-04 - Emulator 1.5: diagnostic dashboard (`ec31bc2`)
+
+- Sidebar with the tests grouped by category, a result badge per test (PASS, FAIL, CHECK, N/A,
+  LOOK, INFO, ARMED, RUNNING) and a live screen thumbnail.
+- **Run all tests**: memory, video, Z80, audio (4 s wait for the beeps), inputs, TestWatchdog in
+  two passes when the watchdog is on, TestDAC last. Stop button.
+- Tabs: Report, Console, Screen, Faults (inline, was a dialog), Settings.
+- Fixes found while testing: a 68000 exception (stack in a dead WRAM, e.g. TestAudio) is FAIL
+  and points to TestWRAM; "Cannot run" is CHECK; Z80 failures with "no program" are marked as
+  expected; power on and reset boot 60 frames like `--run`; the report shows RUNNING instead of
+  the previous result.
+- `guiverify.py`: 141 checks.
+
+## 2026-11-04 - Emulator 1.4: simulated faults (`de0f0ed`)
+
+- Faults... button, or `--fault` in text mode:
+  - data bit stuck at 0 or 1: WRAM, palette RAM (also visible on screen), VRAM lower and upper,
+    LSPC line counter;
+  - address line stuck at 0 or 1: WRAM, palette (bank select included), VRAM;
+  - WRAM chip dead (lower or upper byte).
+- Typical AES faults as presets; faults kept across power cycles and saved in the settings.
+- Example: `python Brico68k_Emulator.py --fault wram:lane:upper --run TestWRAM`
+- Checks: 15/15 identical to MAME with the same fault injected; palette bank, VRAM address lines
+  and the on-screen effect checked by hand (MAME cannot inject them); 32/32 without fault;
+  window 72/72; Windows DLL under Wine.
+
+## 2026-11-03 - Emulator 1.0 to 1.3, Compiler 1.2, ROM (`a06469c` to `c769399`)
+
+- **ROM**: BricoNeo 1.35 from upstream `52c1c92` (1.35 + PlayEyeSnd) with the review merged and
+  new tests TestDAC, TestTiming, TestWatchdog, TestZ80. TestCart added then removed:
+  23 extensions. SHA-256 `f5db7a23…` (superseded on 2026-11-05).
+- **Compiler 1.2**: vasm/vlink built in, English interface.
+- **Emulator 1.0**: one `.py`, no MAME and no BricoNeo needed; Musashi 68000, AES model written
+  from MAME, Brico16Bits-like host (1 ms clear, 3 s timeout).
+- **1.1**: real Z80 running a built-in test M1.
+- **1.2**: redesigned window. `guiverify.py` added.
+- **1.3**: light theme, clear message when Tkinter is missing.
+- Checks: 32/32 identical to MAME with and without a Z80 program; window 59/59; Windows core
+  under Wine; reproducible build.
+
+## Still open
+
+- Not tested on a real console or on real Windows.
+- PAL timing (312 lines) not verified.

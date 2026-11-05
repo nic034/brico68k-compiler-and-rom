@@ -14,6 +14,8 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
 | `emulator/` | Emulator core source (Neo Geo model + host) and its build script |
+| `bench/` | Session to paste into the real BricoNeo console, and the expected healthy output |
+| `CHANGELOG.md` | What changed, release by release, with checksums and checks |
 
 ## Quick start
 
