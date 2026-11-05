@@ -16,15 +16,17 @@ Z80 (superzazu/z80 core, 4 MHz) wired as on the board (sound latch, NMI,
 reply latch, 2 KB RAM), running a built-in test M1 that only answers the
 standard handshake ($03 reset -> $00, $01 -> $01), or no program at all (like
 an AES without cartridge).
-Simulated faults (window: Faults..., text mode: --fault): data bit stuck,
+Simulated faults (window: Faults tab, text mode: --fault): data bit stuck,
 address line stuck, WRAM chip dead, on WRAM, palette RAM (also seen on the
 screen), VRAM and the LSPC line counter - to see how each test reacts.
 NOT emulated: YM2610 and sound, Z80 ROM banking, sprites and fix layer (the
 screen shows the backdrop colour of each line), interrupts, cartridge, memory
-card. Checked word for word against MAME: 32/32 commands with both Z80 setups.
+card, and the LSPC VRAM access delays of real boards (neither does MAME): code
+that accesses VRAM too fast passes here and can fail on a real console. Checked word for word against MAME: 32/32 commands with both Z80 setups.
 
 Run: double-click, or  python Brico68k_Emulator.py [ROM]
 Text mode: python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234" [--rom ROM]
+           python Brico68k_Emulator.py --script bench/real_aes_session.txt --watchdog
            python Brico68k_Emulator.py --check [--rom ROM]
 Python 3.8+, standard library only: nothing to install with pip. The window
 needs Tkinter, which comes with Python on Windows (python.org installer) and is
@@ -44,7 +46,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.5"
+APP_VERSION = "1.6"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -73,7 +75,8 @@ def core_path():
         raise RuntimeError(f"No embedded emulator core for this system ({platform.system()} {platform.machine()}): "
                            "Windows x64 and Linux x64 are supported.")
     name, sha, data = cores[plat]
-    dest = WORK_DIR / name
+    stem, ext = os.path.splitext(name)
+    dest = WORK_DIR / f"{stem}-{sha[:12]}{ext}"
     if not (dest.is_file() and hashlib.sha256(dest.read_bytes()).hexdigest() == sha):
         raw = lzma.decompress(base64.b64decode(data))
         if hashlib.sha256(raw).hexdigest() != sha:
@@ -82,6 +85,12 @@ def core_path():
         tmp = dest.with_name(dest.name + ".tmp")
         tmp.write_bytes(raw)
         os.replace(tmp, dest)
+        for old in list(WORK_DIR.glob(f"{stem}-*{ext}")) + [WORK_DIR / name]:
+            if old != dest:
+                try:
+                    old.unlink()                # an older core; may be in use by another window
+                except OSError:
+                    pass
     return dest
 
 
@@ -160,8 +169,9 @@ def save_config(cfg):
         pass
 
 
-HELP_BUILTIN = ("Built-in: Help (this list), Reset (console reset), Power (power cycle: clears RAM), Clear.\n"
-                "Simulated hardware faults: Faults... button (text mode: --fault, see --fault help).\n"
+HELP_BUILTIN = ("Built-in: Help (this list), Reset (console reset), Power (power cycle: clears RAM), Clear,\n"
+                "Delay ms and ; comment (as on the BricoNeo console). Run script... plays a whole file.\n"
+                "Simulated hardware faults: Faults tab (text mode: --fault, see --fault help).\n"
                 "Parameters: decimal, $hex or 0xhex, as on Brico16Bits (e.g. Dump $100000 16).\n")
 
 
@@ -175,11 +185,31 @@ def help_text(host):
 # ---------------------------------------------------------------------------
 # Text mode
 # ---------------------------------------------------------------------------
+def parse_script(text):
+    """BricoNeo console script -> steps: ('cmd', line) / ('wait', seconds) / ('note', comment).
+    Same conventions as the Brico16Bits console: ';' starts a comment, 'Delay ms' waits."""
+    steps = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith(";"):
+            steps.append(("note", line[1:].strip()))
+        elif line.split()[0].lower() == "delay":
+            parts = line.split()
+            ms = parse_uint(parts[1]) if len(parts) > 1 else 0
+            steps.append(("wait", ms / 1000.0))
+        else:
+            steps.append(("cmd", line))
+    return steps
+
+
 def main_cli(argv):
     import argparse
     ap = argparse.ArgumentParser(description=APP_NAME)
     ap.add_argument("--rom", default=None)
     ap.add_argument("--run", nargs="*", default=None, help="commands to run, e.g. \"TestWRAM\" \"Echo 1234\"")
+    ap.add_argument("--script", metavar="FILE", help="run a BricoNeo console script (';' comments, 'Delay ms')")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--z80", choices=["testm1", "none"], default="testm1",
                     help="testm1: Z80 runs the built-in test M1; none: Z80 without program")
@@ -216,12 +246,28 @@ def main_cli(argv):
     for _ in range(60):
         core.lib.neo_run_frame()
     host = Host(core, rom)
-    for line in a.run or ["Help"]:
-        print(f"> {line}")
-        if line.strip().lower() == "help":
+    if a.script:
+        try:
+            steps = parse_script(Path(a.script).read_text(encoding="utf-8", errors="replace"))
+        except OSError as e:
+            print(f"ERROR: cannot read the script: {e}")
+            return 2
+    else:
+        steps = [("cmd", line) for line in (a.run or ["Help"])]
+    for kind, arg in steps:
+        if kind == "note":
+            print(f"; {arg}")
+            continue
+        if kind == "wait":
+            print(f"> Delay {arg * 1000:.0f}")
+            for _ in range(round(arg * 60)):
+                core.lib.neo_run_frame()
+            continue
+        print(f"> {arg}")
+        if arg.strip().lower() == "help":
             print(help_text(host), end="")
             continue
-        st, text, secs = host.run_blocking(line)
+        st, text, secs = host.run_blocking(arg)
         print(text, end="")
         print(f"[{st}, {secs * 1000:.0f} ms emulated]")
     return 0
@@ -324,7 +370,16 @@ def main_gui(rom_arg=None):
     root = tk.Tk()
     root.title(f"{APP_NAME} {APP_VERSION}")
     root.minsize(1000, 660)
-    root.geometry(cfg.get("geometry") or "1280x820")
+    geo = cfg.get("geometry") or "1280x820"
+    mg = re.match(r"(\d+)x(\d+)([+-]-?\d+)?([+-]-?\d+)?$", geo)
+    if mg:
+        w, h = min(int(mg.group(1)), root.winfo_screenwidth()), min(int(mg.group(2)), root.winfo_screenheight())
+        geo = f"{max(w, 1000)}x{max(h, 660)}"
+        if mg.group(3) and mg.group(4):
+            x, y = int(mg.group(3).replace("+", "")), int(mg.group(4).replace("+", ""))
+            if 0 <= x < root.winfo_screenwidth() - 100 and 0 <= y < root.winfo_screenheight() - 100:
+                geo += f"+{x}+{y}"
+    root.geometry(geo if mg else "1280x820")
 
     # --- theme (light) -----------------------------------------------------------
     C = dict(bg="#f3f5f7", panel="#ffffff", field="#ffffff", border="#d0d7de", text="#1f2328",
@@ -463,6 +518,7 @@ def main_gui(rom_arg=None):
     b_save = ttk.Button(chead, text="Save log", command=lambda: save_log()); b_save.pack(side="right")
     b_copy = ttk.Button(chead, text="Copy", command=lambda: copy_text(con)); b_copy.pack(side="right", padx=6)
     b_clear = ttk.Button(chead, text="Clear", command=lambda: clear()); b_clear.pack(side="right")
+    b_script = ttk.Button(chead, text="Run script...", command=lambda: run_script()); b_script.pack(side="right", padx=(0, 6))
     ttk.Label(chead, text="Brico16Bits console: every command and its raw output", style="CardMuted.TLabel").pack(side="left")
     ebar = ttk.Frame(conf, style="Card.TFrame", borderwidth=0); ebar.pack(fill="x", side="bottom", pady=(8, 0))
     b_send = ttk.Button(ebar, text="Send", width=8, style="Accent.TButton", command=lambda: send()); b_send.pack(side="right")
@@ -710,15 +766,32 @@ def main_gui(rom_arg=None):
             return
         names = [n for n, *_ in st["host"].exts]
         st["results"].clear(); fill_tree(); update_summary()
-        st["plan"] = run_all_plan(names, wd_var.get()); st["plan_total"] = len(st["plan"])
+        st["plan"] = run_all_plan(names, wd_var.get()); st["plan_total"] = len(st["plan"]); st["plan_label"] = "Run all"
         out("--- Run all tests ---\n", "info")
         nb.select(rep)
+        next_step()
+
+    def run_script(path=None):
+        if not st["host"] or st["plan"]:
+            return
+        p = path or filedialog.askopenfilename(title="BricoNeo console script",
+                                               filetypes=[("Text", "*.txt"), ("All files", "*")],
+                                               initialdir=str(TOOL_DIR / "bench") if (TOOL_DIR / "bench").is_dir() else str(TOOL_DIR))
+        if not p:
+            return
+        try:
+            steps = parse_script(Path(p).read_text(encoding="utf-8", errors="replace"))
+        except OSError as ex:
+            out(f"Cannot read the script: {ex}\n", "err"); return
+        st["plan"] = [s for s in steps if s[0] != "note"]; st["plan_total"] = len(st["plan"]); st["plan_label"] = "Script"
+        out(f"--- Script {Path(p).name}: {st['plan_total']} steps ---\n", "info")
+        nb.select(conf)
         next_step()
 
     def stop_plan():
         if st["plan"]:
             st["plan"] = []; st["wait_until"] = None
-            out("--- Run all stopped ---\n", "info")
+            out(f"--- {st.get('plan_label', 'Run all')} stopped ---\n", "info")
 
     def next_step():
         """Starts the next step of the plan (when the host is idle)."""
@@ -728,6 +801,7 @@ def main_gui(rom_arg=None):
                 _, n, s, why = step
                 record(n, n, "skip", "", 0.0, (s, why)); continue
             if step[0] == "wait":
+                out(f"> Delay {step[1] * 1000:.0f}\n", "cmd")
                 st["wait_until"] = st["core"].lib.neo_cycles() + int(step[1] * 12e6); return
             send(step[1], from_plan=True)
             return
@@ -792,6 +866,8 @@ def main_gui(rom_arg=None):
                 st["history"].append(line)
             st["hist_i"] = len(st["history"])
         out(f"> {line}\n", "cmd")
+        if line.startswith(";"):
+            return
         word = line.split()[0].lower()
         if word == "clear":
             clear(); return
@@ -802,6 +878,13 @@ def main_gui(rom_arg=None):
             out("Power on first.\n", "err"); return
         if word == "help":
             out(help_text(host)); return
+        if word == "delay":
+            parts = line.split()
+            ms = parse_uint(parts[1]) if len(parts) > 1 else 0
+            st["wait_until"] = st["core"].lib.neo_cycles() + ms * 12000
+            if not st["running"]:
+                toggle_pause()
+            return
         if word == "reset":
             do_reset(); return
         err = host.start(line)
@@ -956,7 +1039,8 @@ def main_gui(rom_arg=None):
                 draw(); st["fps_n"] += n
             if not st["plan"] and st["plan_total"] and not (host and host.pending) and st["wait_until"] is None:
                 if st["plan_total"] > 1:
-                    out(f"--- Run all done: {summary.get()} ---\n", "info")
+                    lbl = st.get("plan_label", "Run all")
+                    out(f"--- {lbl} done" + (f": {summary.get()}" if lbl == "Run all" else "") + " ---\n", "info")
                 st["plan_total"] = 0
         if st["busy_t0"] is not None and core:
             el = (core.lib.neo_cycles() - st["busy_t0"]) / 12e6
@@ -980,7 +1064,7 @@ def main_gui(rom_arg=None):
             st["fps"] = st["fps_n"] / (now - st["fps_t"]); st["fps_t"] = now; st["fps_n"] = 0
             if core:
                 status.set(f"{st['fps']:.0f} frames/s · PC ${core.lib.neo_pc():06X} · {core.lib.neo_cycles() / 12e6:.1f} s")
-        root.after(5, tick)
+        st["after"] = root.after(5, tick)
 
     def persist():
         save_config({"rom": rom_var.get(), "z80": z80_var.get(), "watchdog": wd_var.get(),
@@ -988,7 +1072,12 @@ def main_gui(rom_arg=None):
                      "history": st["history"][-50:], "geometry": root.winfo_geometry()})
 
     def on_close():
-        persist(); root.destroy()
+        persist()
+        try:
+            root.after_cancel(st["after"])
+        except (KeyError, tk.TclError):
+            pass
+        root.destroy()
 
     # --- bindings --------------------------------------------------------------------------------
     e_cmd.bind("<Return>", lambda _e: send())
@@ -1027,9 +1116,9 @@ def main_gui(rom_arg=None):
         body.sashpos(0, 300)
     except tk.TclError:
         pass
-    root.after(5, tick)
+    st["after"] = root.after(5, tick)
     root._b68k = {"send": send, "state": st, "status": status, "console": con, "missing": missing_var,
-                  "tree": tree, "run_all": run_all, "run_selected": run_selected, "stop": stop_plan,
+                  "tree": tree, "run_all": run_all, "run_script": run_script, "run_selected": run_selected, "stop": stop_plan,
                   "cmd": cmd_var, "reset": do_reset, "pause": toggle_pause, "z80": z80_var, "wd": wd_var,
                   "speed": speed_var, "save_log": save_log, "history": history, "busy": busy_var,
                   "lamps": lamps, "rom": rom_var, "notebook": nb, "tabs": {"report": rep, "console": conf,
@@ -1045,10 +1134,10 @@ def main_gui(rom_arg=None):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    if "--run" in args or "--check" in args:
+    if any(x.startswith("-") for x in args):          # any option = text mode; the window only takes a ROM path
         sys.exit(main_cli(args))
     try:
-        main_gui(args[0] if args and not args[0].startswith("-") else None).mainloop()
+        main_gui(args[0] if args else None).mainloop()
     except ImportError:
         # Tkinter is part of Python but some Linux distributions ship it apart; pip cannot install it.
         if IS_WIN:

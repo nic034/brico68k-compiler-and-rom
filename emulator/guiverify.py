@@ -257,6 +257,31 @@ lp = OUT / "log.txt"
 b["save_log"](str(lp))
 check("Save log writes the console", lp.is_file() and "MarchVRAML" in lp.read_text(encoding="utf-8"))
 
+# console script (same file as on the real BricoNeo console): ; comments, Delay
+b["speed"].set("fast")
+b["send"]("Clear"); pump(0.1)
+b["send"]("; just a comment"); pump(0.1)
+check("typed ; comment is ignored", "Unknown command" not in console())
+b["speed"].set("real")                      # fast mode would finish a short Delay before the check
+b["send"]("Delay 500"); pump(0.1)
+check("typed Delay waits", st["wait_until"] is not None)
+wait_idle()
+check("typed Delay ends", st["wait_until"] is None)
+b["speed"].set("fast")
+b["run_script"](str(Path(sys.argv[1]).resolve().parent / "bench" / "real_aes_session.txt")); pump(0.1)
+check("Run script opens the Console tab", nb.select() == str(tabs["console"]))
+check("script finished", wait_idle(90))
+pump(0.3)
+c = console()
+check("script ran every command", all(f"> {n}" in c for n in ("TestWRAM", "MarchVRAML", "TestAudio", "TestDAC")))
+check("script Delay steps shown", "> Delay 4000" in c and "> Delay 2000" in c)
+check("no timeout in the script (Delay after TestAudio works)", "[Timeout]" not in c)
+check("script done line", "--- Script done ---" in c)
+check("script updates the badges", badge("TestVRAML") == "PASS" and badge("TestZ80") == "PASS")
+b["send"]("Help"); pump(0.2)
+check("Help mentions Delay and Run script", "Delay ms" in console() and "Run script" in console())
+b["speed"].set("real")
+
 # window sizes, every tab
 b["speed"].set("real")
 for geo in ("1000x660", "1280x820", "1600x1000"):

@@ -50,6 +50,7 @@ EXT_TEST_VRAM:
     WatchDog
     ; Set address to be read
     move.w d7,REG_VRAMADD
+    Nop2                    ; LSPC: data is valid >=16 CPU cycles after the address write
     ; Read VRAM data
     move.w REG_VRAMRW, d1
     ; Compare

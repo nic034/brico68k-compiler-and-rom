@@ -43,6 +43,7 @@ EXT_TEST_MARCH_VRAM:
 .pass2Loop:
     WatchDog
     move.w d4, REG_VRAMADD
+    Nop2                    ; LSPC: data is valid >=16 CPU cycles after the address write
     move.w REG_VRAMRW, d1
     cmp.w #$0000, d1
     bne .error2
@@ -61,6 +62,7 @@ EXT_TEST_MARCH_VRAM:
 .pass3Loop:
     WatchDog
     move.w d4, REG_VRAMADD
+    Nop2                    ; LSPC: data is valid >=16 CPU cycles after the address write
     move.w REG_VRAMRW, d1
     cmp.w #$FFFF, d1
     bne .error3
@@ -81,6 +83,7 @@ EXT_TEST_MARCH_VRAM:
 .pass4Loop:
     WatchDog
     move.w d4, REG_VRAMADD
+    Nop2                    ; LSPC: data is valid >=16 CPU cycles after the address write
     move.w REG_VRAMRW, d1
     cmp.w #$0000, d1
     bne .error4
@@ -100,6 +103,7 @@ EXT_TEST_MARCH_VRAM:
 .pass5Loop:
     WatchDog
     move.w d4, REG_VRAMADD
+    Nop2                    ; LSPC: data is valid >=16 CPU cycles after the address write
     move.w REG_VRAMRW, d1
     cmp.w #$FFFF, d1
     bne .error5
@@ -118,6 +122,7 @@ EXT_TEST_MARCH_VRAM:
 .pass6Loop:
     WatchDog
     move.w d4, REG_VRAMADD
+    Nop2                    ; LSPC: data is valid >=16 CPU cycles after the address write
     move.w REG_VRAMRW, d1
     cmp.w #$0000, d1
     bne .error6

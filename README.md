@@ -72,6 +72,12 @@ MAME's driver:
 - **Not emulated**: the YM2610 (ports `$04`-`$07` read 0) and sound, Z80 ROM banking, sprites,
   the fix layer, interrupts, a cartridge and a memory card. The screen shows the backdrop colour
   of each line, which is enough for TestDAC and Color.
+- **Not modelled either, in MAME or here**: the LSPC VRAM access delays of real boards (a read
+  is valid 16 CPU cycles after the address write; 12 cycles between two writes). Code that
+  accesses VRAM too fast passes in both and can fail on a real console.
+- **Scripts**: the console accepts `; comment` and `Delay ms` like the BricoNeo console, and
+  **Run script...** (or `--script FILE` in text mode) plays a whole file, such as
+  `bench/real_aes_session.txt`.
 
 Checked against MAME, 32 test commands each time, with word-for-word identical output:
 
@@ -186,6 +192,10 @@ Bold entries are new in this repository.
   version sent an EOT after its first line, so its later messages were lost. It now sends
   one EOT before the beeps and no longer leaks stack on the error path.
 - **Write**: odd addresses no longer crash with a 68000 address error.
+- **VRAM tests**: two `nop` between the VRAM address write and the read, so the read comes more
+  than 16 CPU cycles after the address (neogeodev wiki, "VRAM"). It came 12 cycles after the end
+  of the write before. MAME does not model this delay, so only a real board can show the
+  difference. MarchVRAML now takes 1.75 s of the 3 s host limit.
 - **RAM tests**: more precise reports (address, expected, read, bad bits, byte lane), plus
   general optimizations.
 
@@ -195,7 +205,7 @@ Bold entries are new in this repository.
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `5859d6b` (2026-10-22, "Fixed remote keyboard detection"). Compatible **without modification**. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | announces BricoNeo **1.35**, 23 extensions, SHA-256 `f5db7a238d8b266ac1f48b68e24333de0fb6052bb2b191a862c75274f0624128` |
+| This ROM | announces BricoNeo **1.35**, 23 extensions, SHA-256 `79c5fb48de32345ddca940e232949d07d749e641cfa82bb7f3d9754ca6f02075` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
@@ -216,7 +226,8 @@ Brico16Bits recognises the byte order.
 5. Paste the whole of `bench/real_aes_session.txt` into the terminal. The `;` lines are comments
    and `Delay` waits, both built into the BricoNeo console.
 6. Compare the log with `bench/expected_healthy_aes.txt` (or `..._no_cartridge.txt`), produced by
-   the emulator with `python bench/make_expected.py`. TestInp, TestStatusA and TestSystype depend
+   the emulator with `python Brico68k_Emulator.py --script bench/real_aes_session.txt --watchdog`
+   (add `--z80 none` for the no-cartridge file). TestInp, TestStatusA and TestSystype depend
    on what is plugged in; the cycle count of TestTiming may differ slightly. Everything else
    should match on a healthy console. Look at the screen for TestDAC.
 
