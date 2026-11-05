@@ -28,6 +28,8 @@ that accesses VRAM too fast passes here and can fail on a real console. Checked 
 Run: double-click, or  python Brico68k_Emulator.py [ROM]
 Text mode: python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234" [--rom ROM]
            python Brico68k_Emulator.py --script bench/real_aes_session.txt
+           python Brico68k_Emulator.py --compare putty.log     (real console log vs emulator)
+           python Brico68k_Emulator.py --diagnose putty.log    (which modelled fault explains it)
            python Brico68k_Emulator.py --check [--rom ROM]
 Python 3.8+, standard library only: nothing to install with pip. The window
 needs Tkinter, which comes with Python on Windows (python.org installer) and is
@@ -47,7 +49,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.7"
+APP_VERSION = "1.8"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -205,15 +207,221 @@ def parse_script(text):
     return steps
 
 
+# ---------------------------------------------------------------------------
+# Real console log vs emulator
+# ---------------------------------------------------------------------------
+VARIES = {"TestInp": "depends on the controllers, switches and memory card plugged in",
+          "TestStatusA": "depends on coins, service button and memory card",
+          "TestSystype": "depends on the board and its jumpers"}
+VERDICT_ONLY = {"TestTiming": "the measured cycle counts can differ slightly on a real board"}
+
+
+def _norm(text):
+    return [l.rstrip() for l in (text or "").splitlines() if l.strip()]
+
+
+def replay_log(core, rom, entries):
+    """Runs the commands of a real log, in order, on a powered-on core.
+    Returns the emulator output for each entry (None: comment, Delay or console built-in)."""
+    return [exp for _, exp in replay_iter(core, rom, entries)]
+
+
+def replay_iter(core, rom, entries):
+    host = Host(core, rom)
+    for e in entries:
+        out = []
+        words = e["line"].split()
+        w = words[0].lower() if words else ""
+        if e["name"] == ";" or not words:
+            out.append(None)
+        elif w == "delay":
+            ms = parse_uint(words[1]) if len(words) > 1 else 0
+            for _ in range(round(ms * 60 / 1000)):
+                core.lib.neo_run_frame()
+            out.append(None)
+        elif w == "reset":                             # Brico16Bits Reset: the watchdog resets the console
+            core.lib.neo_reset()
+            for _ in range(60):
+                core.lib.neo_run_frame()
+            out.append(None)
+        elif w[:1] in "*@" or host.find(w) is None:    # loop / binary modes and other built-ins
+            out.append(None)
+        else:
+            out.append(host.run_blocking(e["line"])[1])
+        yield e, out[0]
+
+
+def compare_rows(entries, expected):
+    rows = []
+    for e, exp in zip(entries, expected):
+        if exp is None:
+            continue
+        name, real = e["name"], e["output"]
+        rs, rv = classify(name, "timeout" if "[Timeout]" in real else "eot", real)
+        es, _ = classify(name, "timeout" if "[Timeout]" in exp else "eot", exp)
+        if _norm(real) == _norm(exp):
+            match = "same"
+        elif name in VARIES:
+            match = "varies"
+        elif name in VERDICT_ONLY and rs == es:
+            match = "same verdict"
+        else:
+            match = "DIFFERENT"
+        rows.append({"line": e["line"], "name": name, "real": real, "expected": exp, "real_status": rs,
+                     "real_verdict": rv, "exp_status": es, "match": match,
+                     "note": VARIES.get(name) or VERDICT_ONLY.get(name, "")})
+    return rows
+
+
+def compare_diff(row):
+    import difflib
+    d = difflib.unified_diff(_norm(row["expected"]), _norm(row["real"]), "expected (emulator)", "real console",
+                             lineterm="", n=1)
+    return "\n".join(list(d)[2:])
+
+
+def compare_summary(rows):
+    n = {k: sum(1 for r in rows if r["match"] == k) for k in ("same", "same verdict", "varies", "DIFFERENT")}
+    fails = sum(1 for r in rows if r["real_status"] == "FAIL")
+    return (f"{len(rows)} commands compared: {n['same']} same, {n['same verdict']} same verdict, "
+            f"{n['varies']} vary with the hardware plugged in, {n['DIFFERENT']} different; "
+            f"{fails} FAIL on the real console")
+
+
+def compare_report(rows, log_name, setup):
+    out = [f"Real console log: {log_name}", f"Emulator: {setup}", ""]
+    out.append(f"  {'Command':<26}{'Real':<9}{'Emulator':<10}Match")
+    for r in rows:
+        out.append(f"  {r['line'][:25]:<26}{STATUS_STYLE[r['real_status']][0]:<9}"
+                   f"{STATUS_STYLE[r['exp_status']][0]:<10}{r['match']}")
+    out += ["", compare_summary(rows)]
+    for r in rows:
+        if r["match"] in ("DIFFERENT", "varies", "same verdict"):
+            out += ["", f"=== {r['line']} ({r['match']}{': ' + r['note'] if r['note'] else ''})", compare_diff(r)]
+    return "\n".join(out) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Fault dictionary: which modelled fault explains a real console log
+# ---------------------------------------------------------------------------
+def all_single_faults():
+    """Every single fault the core models: data bits and address lines stuck at 0/1, WRAM chip dead."""
+    out = []
+    for region in FAULT_REGIONS.values():
+        out += [(region, 0, bit, v) for bit in range(DATA_BITS[region] + 1) for v in (0, 1)]
+        if region in ADDR_RANGE:
+            lo, hi = ADDR_RANGE[region]
+            out += [(region, 1, bit, v) for bit in range(lo, hi + 1) for v in (0, 1)]
+    return out + [(0, 2, 0, 0), (0, 2, 0, 1)]
+
+
+_DX = {}
+
+
+def _dx_init(rom, raw, z80, wd, limit=None):
+    if "core" not in _DX:
+        _DX["core"] = Core(core_path())
+    _DX.update(rom=rom, z80=z80, wd=wd, limit=limit,
+               entries=parse_console_log(raw, [n for n, *_ in parse_extensions(rom)]))
+
+
+def _dx_score(fault, limit=None):
+    """(fault, commands compared, commands still different) for one candidate (None = healthy).
+    Stops early (None as the list) once more than `limit` commands differ: worse than no fault at all."""
+    core, rom = _DX["core"], _DX["rom"]
+    limit = _DX.get("limit") if limit is None else limit
+    core.load(rom); core.power_on(); core.lib.neo_set_options(_DX["z80"], _DX["wd"])
+    apply_faults(core, [fault] if fault else [])
+    for _ in range(60):
+        core.lib.neo_run_frame()
+    n, diff = 0, []
+    for e, exp in replay_iter(core, rom, _DX["entries"]):
+        if exp is None:
+            continue
+        n += 1
+        if compare_rows([e], [exp])[0]["match"] == "DIFFERENT":
+            diff.append(e["line"])
+            if limit is not None and len(diff) > limit:
+                return fault, None, None
+    return fault, n, diff
+
+
+def diagnose(rom, raw, z80=None, wd=1, progress=None):
+    """Replays the log under every single modelled fault and ranks them by commands left unexplained.
+    z80=None tries both Z80 settings on a healthy console and keeps the closer one."""
+    if z80 is None:
+        scores = {}
+        for mode in (1, 0):
+            _dx_init(rom, raw, mode, wd)
+            scores[mode] = len(_dx_score(None, limit=None)[2])
+        z80 = 1 if scores[1] <= scores[0] else 0
+    _dx_init(rom, raw, z80, wd)
+    base = _dx_score(None)
+    limit = len(base[2])
+    faults = all_single_faults()
+    results = []
+    workers = max(1, min(8, (os.cpu_count() or 2) - 1))
+    try:
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=workers, initializer=_dx_init, initargs=(rom, raw, z80, wd, limit)) as ex:
+            for i, r in enumerate(ex.map(_dx_score, faults, chunksize=4)):
+                results.append(r)
+                if progress:
+                    progress(i + 1, len(faults))
+    except Exception:                                   # no multiprocessing here: one process does it all
+        results = []
+        _DX["limit"] = limit
+        for i, f in enumerate(faults):
+            results.append(_dx_score(f))
+            if progress:
+                progress(i + 1, len(faults))
+    results = sorted((r for r in results if r[2] is not None), key=lambda r: (len(r[2]), r[0]))
+    return {"z80": z80, "watchdog": wd, "tried": len(faults), "compared": base[1], "healthy_diff": base[2],
+            "candidates": [{"fault": describe_fault(f), "spec": fault_spec(f), "explained": n - len(d),
+                            "total": n, "still_different": d} for f, n, d in results]}
+
+
+def diagnose_report(d, log_name, top=8):
+    out = [f"Diagnosis of {log_name}: {d['tried']} single faults tried "
+           f"(Z80 {'test M1' if d['z80'] else 'no program'}, watchdog {'on' if d['watchdog'] else 'off'})."]
+    n = d["compared"]
+    if not d["healthy_diff"]:
+        out.append(f"The log matches a healthy console ({n}/{n} commands): nothing to explain.")
+        return "\n".join(out) + "\n"
+    out.append(f"Healthy console: {n - len(d['healthy_diff'])}/{n} commands match; different: "
+               + ", ".join(d["healthy_diff"]))
+    better = [c for c in d["candidates"] if len(c["still_different"]) < len(d["healthy_diff"])]
+    exact = [c for c in better if not c["still_different"]]
+    best = exact + [c for c in better if c["still_different"]][:3] if exact else better[:top]
+    if not best:
+        out.append("No single modelled fault explains the log better than a healthy console.")
+    else:
+        out.append("Best candidates (equal scores = the log cannot tell them apart):")
+        for i, c in enumerate(best, 1):
+            rest = "explains every command" if not c["still_different"] else \
+                "still different: " + ", ".join(c["still_different"])
+            out.append(f"  {i}. {c['fault']}  [{c['spec']}]  {c['explained']}/{c['total']}, {rest}")
+    out.append("Limits: one stuck-at fault at a time, in the modelled chips only (WRAM, palette RAM, VRAM, "
+               "line counter). Intermittent faults, shorts between lines, timing faults and other chips "
+               "are not in the dictionary.")
+    return "\n".join(out) + "\n"
+
+
 def main_cli(argv):
     import argparse
     ap = argparse.ArgumentParser(description=APP_NAME)
     ap.add_argument("--rom", default=None)
     ap.add_argument("--run", nargs="*", default=None, help="commands to run, e.g. \"TestWRAM\" \"Echo 1234\"")
     ap.add_argument("--script", metavar="FILE", help="run a BricoNeo console script (';' comments, 'Delay ms')")
+    ap.add_argument("--compare", metavar="LOG",
+                    help="compare a session log of the real BricoNeo console with the emulator")
+    ap.add_argument("--diagnose", metavar="LOG",
+                    help="find which modelled fault explains a real console log (fault dictionary)")
+    ap.add_argument("--json", action="store_true", help="--compare / --diagnose: machine-readable output")
     ap.add_argument("--check", action="store_true")
-    ap.add_argument("--z80", choices=["testm1", "none"], default="testm1",
-                    help="testm1: Z80 runs the built-in test M1; none: Z80 without program")
+    ap.add_argument("--z80", choices=["testm1", "none"], default=None,
+                    help="testm1 (default): Z80 runs the built-in test M1; none: Z80 without program "
+                         "(--diagnose picks the closer one when not given)")
     ap.add_argument("--no-watchdog", action="store_true",
                     help="no watchdog, like MAME's aes driver (real AES and MVS boards have one, in NEO-B1)")
     ap.add_argument("--watchdog", action="store_true", help=argparse.SUPPRESS)   # default since 1.7, kept for old scripts
@@ -239,16 +447,53 @@ def main_cli(argv):
     if missing:
         return 1
     rom = Path(rom_path).read_bytes()
+    if a.diagnose:
+        try:
+            raw = Path(a.diagnose).read_bytes()
+        except OSError as e:
+            print(f"ERROR: cannot read the log: {e}")
+            return 2
+        if not parse_console_log(raw, [n for n, *_ in parse_extensions(rom)]):
+            print("ERROR: no BricoNeo command found in this log ('> Command' lines)")
+            return 2
+        core_path()                                   # extract the core once, before the worker processes
+
+        def prog(i, n):
+            if i % 16 == 0 or i == n:
+                print(f"PROGRESS {i} {n}", file=sys.stderr, flush=True)
+        d = diagnose(rom, raw, None if a.z80 is None else (1 if a.z80 == "testm1" else 0),
+                     0 if a.no_watchdog else 1, prog)
+        print(json.dumps(d) if a.json else diagnose_report(d, Path(a.diagnose).name), end="\n" if a.json else "")
+        return 0
     core = Core(core_path())
     core.load(rom)
     core.power_on()
-    core.lib.neo_set_options(1 if a.z80 == "testm1" else 0, 0 if a.no_watchdog else 1)
+    core.lib.neo_set_options(0 if a.z80 == "none" else 1, 0 if a.no_watchdog else 1)
     apply_faults(core, faults)
     for f in faults:
         print(f"FAULT: {describe_fault(f)}")
     for _ in range(60):
         core.lib.neo_run_frame()
     host = Host(core, rom)
+    if a.compare:
+        try:
+            raw = Path(a.compare).read_bytes()
+        except OSError as e:
+            print(f"ERROR: cannot read the log: {e}")
+            return 2
+        entries = parse_console_log(raw, [n for n, *_ in host.exts])
+        if not entries:
+            print("ERROR: no BricoNeo command found in this log ('> Command' lines)")
+            return 2
+        rows = compare_rows(entries, replay_log(core, rom, entries))
+        setup = (f"Z80 {'no program' if a.z80 == 'none' else 'test M1'}, watchdog "
+                 f"{'off' if a.no_watchdog else 'on'}, " + (", ".join(describe_fault(f) for f in faults) or "no fault"))
+        if a.json:
+            print(json.dumps({"setup": setup, "summary": compare_summary(rows),
+                              "rows": [dict(r, diff=compare_diff(r)) for r in rows]}))
+        else:
+            print(compare_report(rows, Path(a.compare).name, setup), end="")
+        return 0
     if a.script:
         try:
             steps = parse_script(Path(a.script).read_text(encoding="utf-8", errors="replace"))
@@ -536,6 +781,39 @@ def main_gui(rom_arg=None):
         t.tag_configure("cmd", foreground=C["accent"], font=(mono[0], mono[1], "bold"))
         t.tag_configure("info", foreground=C["muted"]); t.tag_configure("err", foreground=C["err"])
         t.tag_configure("ok", foreground=C["ok"]); t.tag_configure("warn", foreground=C["warn"])
+
+    # Compare tab: a session log of the real console, replayed here
+    cmpf = ttk.Frame(nb, style="Card.TFrame", padding=14); nb.add(cmpf, text="Compare")
+    cmph = ttk.Frame(cmpf, style="Card.TFrame", borderwidth=0); cmph.pack(fill="x")
+    b_cmp_open = ttk.Button(cmph, text="Open real console log...", style="Accent.TButton", command=lambda: compare_open())
+    b_cmp_open.pack(side="left")
+    b_cmp_diag = ttk.Button(cmph, text="Find the fault", command=lambda: compare_diagnose())
+    b_cmp_diag.pack(side="left", padx=6)
+    b_cmp_apply = ttk.Button(cmph, text="Apply to Faults", command=lambda: compare_apply())
+    b_cmp_apply.pack(side="left")
+    cmp_info = tk.StringVar(value="Session log of the BricoNeo console (PuTTY: Session > Logging > All session "
+                                  "output). Every command is replayed here with the current Settings and faults.")
+    cmp_lbl = ttk.Label(cmpf, textvariable=cmp_info, style="CardMuted.TLabel", wraplength=700, justify="left")
+    cmp_lbl.pack(fill="x", pady=(6, 6))
+    cmpf.bind("<Configure>", lambda e: cmp_lbl.configure(wraplength=max(300, e.width - 30)))
+    cmp_pane = ttk.Panedwindow(cmpf, orient="vertical"); cmp_pane.pack(fill="both", expand=True)
+    cmp_tf = ttk.Frame(cmp_pane, style="Card.TFrame", borderwidth=0); cmp_pane.add(cmp_tf, weight=1)
+    cmp_tree = ttk.Treeview(cmp_tf, columns=("cmd", "real", "emu", "match"), show="headings", selectmode="browse",
+                            height=6)
+    for col, txt, w, s in (("cmd", "Command", 220, True), ("real", "Real console", 110, False),
+                           ("emu", "Emulator", 100, False), ("match", "Match", 130, False)):
+        cmp_tree.heading(col, text=txt, anchor="w"); cmp_tree.column(col, width=w, stretch=s)
+    cmp_sb = ttk.Scrollbar(cmp_tf, command=cmp_tree.yview); cmp_tree.configure(yscrollcommand=cmp_sb.set)
+    cmp_sb.pack(side="right", fill="y"); cmp_tree.pack(fill="both", expand=True)
+    for k, (lbl, fg, bg) in STATUS_STYLE.items():
+        cmp_tree.tag_configure("s_" + k, foreground=fg)
+    cmp_tree.tag_configure("diff", background="#ffebe9"); cmp_tree.tag_configure("vary", background="#fff8c5")
+    cmp_text = tk.Text(cmp_pane, wrap="word", font=mono, bg="#fbfcfd", fg=C["text"], bd=0, padx=10, pady=8, height=8,
+                       highlightthickness=1, highlightbackground=C["border"], state="disabled")
+    cmp_pane.add(cmp_text, weight=1)
+    cmp_text.tag_configure("add", foreground=C["err"]); cmp_text.tag_configure("del", foreground=C["ok"])
+    cmp_text.tag_configure("head", foreground=C["accent"], font=(mono[0], mono[1], "bold"))
+    cmp_text.tag_configure("info", foreground=C["muted"])
 
     # Screen tab
     scrf = ttk.Frame(nb, style="Card.TFrame", padding=14); nb.add(scrf, text="Screen")
@@ -1012,8 +1290,146 @@ def main_gui(rom_arg=None):
                 for cv, _, rects in st["screens"]:
                     cv.itemconfigure(rects[y], fill=fill)
 
+    # --- Compare tab: work in a separate process (the core in this window keeps its state) --------
+    st["job"] = None; st["cmp"] = None; st["diag"] = None
+
+    def cmp_show(text_parts):
+        cmp_text.configure(state="normal"); cmp_text.delete("1.0", "end")
+        for txt, tag in text_parts:
+            cmp_text.insert("end", txt, tag)
+        cmp_text.configure(state="disabled")
+
+    def job_args():
+        args = [sys.executable, str(Path(__file__).resolve()), "--rom", rom_var.get(), "--json"]
+        if not wd_var.get():
+            args.append("--no-watchdog")
+        return args
+
+    def start_job(kind, args):
+        import subprocess, threading
+        if st["job"]:
+            return
+        job = {"kind": kind, "progress": None, "out": None, "err": "", "done": False}
+        st["job"] = job
+
+        def work():
+            try:
+                pr = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                      creationflags=0x08000000 if IS_WIN else 0)
+                err = []
+                for line in pr.stderr:
+                    if line.startswith("PROGRESS"):
+                        _, i, n = line.split(); job["progress"] = (int(i), int(n))
+                    else:
+                        err.append(line)
+                job["out"] = pr.stdout.read(); pr.wait(); job["err"] = "".join(err)
+            except Exception as ex:
+                job["err"] = str(ex)
+            job["done"] = True
+        threading.Thread(target=work, daemon=True).start()
+
+    def poll_job():
+        job = st["job"]
+        if not job:
+            return
+        if not job["done"]:
+            p = job["progress"]
+            cmp_info.set(("Replaying the log under every modelled fault... " + (f"{p[0]}/{p[1]}" if p else ""))
+                         if job["kind"] == "diag" else "Replaying the log in the emulator...")
+            return
+        st["job"] = None
+        try:
+            data = json.loads(job["out"].strip().splitlines()[-1])
+        except (ValueError, IndexError, AttributeError):
+            msg = (job["out"] or "").strip() or job["err"].strip() or "no output"
+            cmp_info.set("Failed: " + msg.splitlines()[-1]); return
+        if job["kind"] == "cmp":
+            show_compare(data)
+        else:
+            show_diagnosis(data)
+
+    def compare_open(path=None):
+        p = path or filedialog.askopenfilename(title="Session log of the real BricoNeo console",
+                                               filetypes=[("Logs", "*.log *.txt"), ("All files", "*")])
+        if not p:
+            return
+        st["cmp_log"] = p; st["diag"] = None
+        args = job_args() + ["--compare", p, "--z80", "none" if z80_var.get().startswith("No") else "testm1"]
+        for f in st["faults"]:
+            args += ["--fault", fault_spec(f)]
+        nb.select(cmpf)
+        start_job("cmp", args)
+
+    def show_compare(data):
+        st["cmp"] = data
+        cmp_tree.delete(*cmp_tree.get_children())
+        for i, r in enumerate(data["rows"]):
+            tags = ["s_" + r["real_status"]]
+            if r["match"] == "DIFFERENT":
+                tags.append("diff")
+            elif r["match"] == "varies":
+                tags.append("vary")
+            cmp_tree.insert("", "end", iid=str(i), values=(r["line"], STATUS_STYLE[r["real_status"]][0],
+                                                           STATUS_STYLE[r["exp_status"]][0], r["match"]), tags=tags)
+        cmp_info.set(f"{Path(st['cmp_log']).name}: {data['summary']}.  Emulator: {data['setup']}")
+        diffs = [r for r in data["rows"] if r["match"] == "DIFFERENT"]
+        if diffs:
+            cmp_tree.selection_set(str(data["rows"].index(diffs[0])))
+        else:
+            cmp_show([("Every command gives the same output as the emulator", "head"),
+                      (" (apart from the ones marked 'varies', which depend on what is plugged in).\n", "info")])
+
+    def cmp_select(_e=None):
+        sel = cmp_tree.selection()
+        if not sel or not st["cmp"]:
+            return
+        r = st["cmp"]["rows"][int(sel[0])]
+        parts = [(f"{r['line']}: real console {STATUS_STYLE[r['real_status']][0]}, emulator "
+                  f"{STATUS_STYLE[r['exp_status']][0]}, {r['match']}\n", "head"),
+                 (r["real_verdict"] + "\n", "info")]
+        if r["note"]:
+            parts.append(("Note: " + r["note"] + "\n", "info"))
+        if r["match"] == "same":
+            parts.append(("\n" + r["real"], None))
+        else:
+            parts.append(("\n- expected (emulator)   + real console\n", "info"))
+            for line in r["diff"].splitlines():
+                parts.append((line + "\n", "add" if line.startswith("+") else "del" if line.startswith("-") else None))
+        cmp_show(parts)
+
+    def compare_diagnose():
+        if not st.get("cmp_log"):
+            compare_open()
+            if not st.get("cmp_log"):
+                return
+        nb.select(cmpf)
+        start_job("diag", job_args() + ["--diagnose", st["cmp_log"]])
+
+    def show_diagnosis(d):
+        st["diag"] = d
+        cmp_info.set(f"{Path(st['cmp_log']).name}: {d['tried']} single faults tried.")
+        rep_text = diagnose_report(d, Path(st["cmp_log"]).name)
+        parts = []
+        for line in rep_text.splitlines():
+            parts.append((line + "\n", "head" if line.startswith(("Diagnosis", "Best", "Healthy", "The log", "No single"))
+                          else "info" if line.startswith("Limits") else None))
+        cmp_show(parts)
+
+    def compare_apply():
+        d = st["diag"]
+        if not d or not d["candidates"] or len(d["candidates"][0]["still_different"]) >= len(d["healthy_diff"]):
+            cmp_info.set("Run 'Find the fault' first: nothing to apply."); return
+        spec = d["candidates"][0]["spec"]
+        if parse_fault(spec) not in st["faults"]:
+            fault_add(spec)
+        if d["z80"] == 0:
+            z80_var.set(Z80_CHOICES[1])
+        cmp_info.set(f"Applied: {d['candidates'][0]['fault']}. The emulator now behaves like the real console; "
+                     "run the tests or open the log again to check.")
+
     # --- main loop ------------------------------------------------------------------------------
     def tick():
+        poll_job()
         core = st["core"]; now = time.time()
         if core and st["running"]:
             fast = speed_var.get() == "fast"
@@ -1087,6 +1503,7 @@ def main_gui(rom_arg=None):
     e_cmd.bind("<Return>", lambda _e: send())
     e_cmd.bind("<Up>", lambda _e: history(-1)); e_cmd.bind("<Down>", lambda _e: history(1))
     tree.bind("<<TreeviewSelect>>", on_select)
+    cmp_tree.bind("<<TreeviewSelect>>", cmp_select)
     tree.bind("<Double-1>", lambda _e: run_selected()); tree.bind("<Return>", lambda _e: run_selected())
     thumb.bind("<Button-1>", lambda _e: nb.select(scrf))
     big_holder.bind("<Configure>", layout_big)
@@ -1125,7 +1542,9 @@ def main_gui(rom_arg=None):
                   "tree": tree, "run_all": run_all, "run_script": run_script, "run_selected": run_selected, "stop": stop_plan,
                   "cmd": cmd_var, "reset": do_reset, "pause": toggle_pause, "z80": z80_var, "wd": wd_var,
                   "speed": speed_var, "save_log": save_log, "history": history, "busy": busy_var,
-                  "lamps": lamps, "rom": rom_var, "notebook": nb, "tabs": {"report": rep, "console": conf,
+                  "lamps": lamps, "rom": rom_var, "notebook": nb, "compare_open": compare_open, "compare_diagnose": compare_diagnose,
+                  "compare_apply": compare_apply, "compare_tree": cmp_tree, "compare_text": cmp_text,
+                  "compare_info": cmp_info, "tabs": {"report": rep, "console": conf, "compare": cmpf,
                   "screen": scrf, "faults": flt, "settings": sett}, "verdict": verdict, "report_text": rtext,
                   "summary": summary, "fault_add": fault_add, "fault_remove": fault_remove,
                   "fault_clear": fault_clear, "fault_list": flb, "fault_form": (reg_var, kind_var, bit_var, lvl_var,

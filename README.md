@@ -9,7 +9,7 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.2 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.7: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.8: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
 | `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB padded with `$FF` (SHA-256 in `rom/Brico68k.bin.sha256`) |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
@@ -236,11 +236,20 @@ Brico16Bits recognises the byte order.
 4. Type `?`: the Extensions section must list the 23 commands.
 5. Paste the whole of `bench/real_aes_session.txt` into the terminal. The `;` lines are comments
    and `Delay` waits, both built into the BricoNeo console.
-6. Compare the log with `bench/expected_healthy_aes.txt` (or `..._no_cartridge.txt`), produced by
-   the emulator with `python Brico68k_Emulator.py --script bench/real_aes_session.txt`
-   (add `--z80 none` for the no-cartridge file). TestInp, TestStatusA and TestSystype depend
-   on what is plugged in; the cycle count of TestTiming may differ slightly. Everything else
-   should match on a healthy console. Look at the screen for TestDAC.
+6. In the emulator, **Compare** tab > **Open real console log...** (or
+   `python Brico68k_Emulator.py --compare putty.log`). Every command of the log is replayed in the
+   emulator and the outputs are compared, command by command: `same`, `varies` (TestInp,
+   TestStatusA and TestSystype depend on what is plugged in), `same verdict` (TestTiming: cycle
+   counts may differ slightly) or `DIFFERENT`, with the diff. Look at the screen for TestDAC.
+   `bench/expected_healthy_aes.txt` (and `..._no_cartridge.txt`) give the same reference as text.
+7. If something differs: **Find the fault** (or `--diagnose putty.log`). The log is replayed under
+   each of the 256 single faults the emulator models (data bit or address line stuck at 0 or 1 in
+   WRAM, palette RAM, VRAM and the line counter, WRAM chip dead), and the faults are ranked by how
+   many commands they explain. **Apply to Faults** puts the best one in the emulator. It takes
+   about 1.5 min on 2 cores, much less with more cores (the work is spread over processes).
+   Limits: one stuck-at fault at a time, modelled chips only. Intermittent faults, shorts between
+   lines, timing faults and the other chips are not in the dictionary, so "no candidate" does not
+   mean "no fault".
 
 ## Testing
 

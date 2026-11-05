@@ -291,11 +291,55 @@ b["send"]("Help"); pump(0.2)
 check("Help mentions Delay and Run script", "Delay ms" in console() and "Run script" in console())
 b["speed"].set("real")
 
+# Compare tab: logs of a (simulated) real console, replayed in a separate process
+here = Path(__file__).resolve().parent
+emu_file = str(Path(sys.argv[1]).resolve())
+script = str(Path(sys.argv[1]).resolve().parent / "bench" / "real_aes_session.txt")
+for name, extra in (("fake_healthy.log", []), ("fake_wram.log", ["--fault", "wram:lane:upper"])):
+    subprocess.run([sys.executable, str(here / "make_fake_console_log.py"), emu_file, script, str(OUT / name)] + extra,
+                   check=True, capture_output=True)
+
+
+def wait_job(timeout):
+    t = time.time() + timeout
+    pump(0.3)
+    while time.time() < t and st["job"] is not None:
+        pump(0.2)
+    pump(0.3)
+    return st["job"] is None
+
+
+ct = b["compare_tree"]
+b["compare_open"](str(OUT / "fake_healthy.log"))
+check("compare: healthy log replayed", wait_job(120) and len(ct.get_children()) == 18, str(len(ct.get_children())))
+check("compare: healthy log all same", all(ct.item(i, "values")[3] == "same" for i in ct.get_children()))
+check("compare: summary shown", "18 same" in b["compare_info"].get(), b["compare_info"].get())
+b["compare_open"](str(OUT / "fake_wram.log"))
+wait_job(120)
+diffs = [ct.item(i, "values")[0] for i in ct.get_children() if ct.item(i, "values")[3] == "DIFFERENT"]
+check("compare: dead WRAM chip log -> 4 different", diffs == ["TestWRAM", "TestAudio", "TestWatchdog", "TestWatchdog"],
+      str(diffs))
+pump(0.2)
+ctext = b["compare_text"].get("1.0", "end")
+check("compare: first difference shown as a diff", "TestWRAM" in ctext and "+=> Test Failure" in ctext, ctext[:200])
+shot("08_compare.png")
+b["compare_diagnose"]()
+check("diagnosis finished", wait_job(600))
+ctext = b["compare_text"].get("1.0", "end")
+check("diagnosis: dead upper WRAM chip found first", "1. WRAM: upper (D8-D15) chip dead" in ctext, ctext[:400])
+shot("09_diagnosis.png")
+b["compare_apply"](); pump(0.2)
+check("Apply to Faults adds the fault", any("upper (D8-D15) chip dead" in b["fault_list"].get(i)
+                                          for i in range(b["fault_list"].size())))
+b["compare_open"](str(OUT / "fake_wram.log")); wait_job(120)
+check("with the fault applied the log matches", all(ct.item(i, "values")[3] == "same" for i in ct.get_children()))
+b["fault_clear"](); pump(0.1)
+
 # window sizes, every tab
 b["speed"].set("real")
 for geo in ("1000x660", "1280x820", "1600x1000"):
     root.geometry(geo); pump(0.6)
-    for tname in ("report", "console", "screen", "faults", "settings"):
+    for tname in ("report", "console", "compare", "screen", "faults", "settings"):
         nb.select(tabs[tname]); pump(0.25)
         layout_checks(f"{geo} {tname}")
         if tname == "screen":

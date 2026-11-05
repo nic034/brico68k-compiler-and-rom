@@ -4,6 +4,26 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-05 - Emulator 1.8: compare with the real console, fault dictionary
+
+- **Compare** tab and `--compare LOG`: reads a PuTTY / Tera Term session log of the BricoNeo
+  console (colour codes, CR LF, prompt redraws and backspace corrections handled), replays every
+  command in the emulator with the current settings and faults, and compares the outputs command
+  by command (`same`, `varies`, `same verdict`, `DIFFERENT`, with a diff).
+- **Find the fault** and `--diagnose LOG`: replays the log under each of the 256 single faults the
+  core models and ranks them by commands explained; a fault that explains less than a healthy
+  console is dropped early. The Z80 setting (cartridge or not) is chosen automatically. **Apply
+  to Faults** loads the best candidate. Work runs in a separate process (worker processes for the
+  dictionary), so the machine shown in the window keeps its state.
+- `--json` for both, used by the window.
+- `emulator/make_fake_console_log.py`: test helper that writes the log a real console would give
+  (the Brico16Bits console output, reproduced from its source).
+- Checks: a simulated log of a console with a dead upper WRAM chip gives 4 different commands
+  against a healthy emulator, 18/18 same with that fault, and the dictionary ranks
+  `wram:lane:upper` first (the only fault explaining every command). `guiverify.py` 171/171.
+- Not checked: worker processes on real Windows (spawn mode); a failure falls back to one process,
+  a hang would not.
+
 ## 2026-11-05 - Emulator 1.7 (`19f195d`)
 
 Checked against the neogeodev wiki.

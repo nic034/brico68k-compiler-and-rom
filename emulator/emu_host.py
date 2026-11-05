@@ -219,3 +219,80 @@ def apply_faults(core, faults):
     for f in faults:
         if core.lib.neo_fault_add(*f) != 0:
             raise ValueError(f"fault refused by the core: {describe_fault(f)}")
+
+
+# ---------------------------------------------------------------------------
+# Real console logs (PuTTY / Tera Term session log of the BricoNeo console)
+# ---------------------------------------------------------------------------
+_ESC = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
+# Brico16Bits built-in commands (Commands/*.cpp, COMMAND_NAME), lower case
+CONSOLE_BUILTINS = {"loadbank", "storebank", "bootsel", "clearbuffer", "dbg", "delay", "free", "freq", "listroms",
+                    "ls", "readword", "readwords", "reset", "sendrompart", "setromw", "trace", "?"}
+
+
+def clean_terminal(raw):
+    """Terminal output -> plain lines, as the screen showed them: colour codes removed, CR, backspace
+    and erase-line applied (the console redraws its prompt with CR + ESC[2K and erases with BS SP BS)."""
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    lines, line, col = [], [], 0
+    pos = 0
+    for m in list(_ESC.finditer(raw)) + [None]:
+        chunk = raw[pos:m.start()] if m else raw[pos:]
+        for ch in chunk:
+            if ch == "\n":
+                lines.append("".join(line).rstrip()); line, col = [], 0
+            elif ch == "\r":
+                col = 0
+            elif ch == "\b":
+                col = max(0, col - 1)
+            elif ch < " " and ch != "\t":
+                continue                                  # bell and other controls
+            else:
+                if col < len(line):
+                    line[col] = ch
+                else:
+                    line.append(ch)
+                col += 1
+        if m is None:
+            break
+        seq = m.group()
+        if seq in ("\x1b[2K", "\x1b[K", "\x1b[0K"):
+            if seq == "\x1b[2K":
+                line, col = [], 0
+            else:
+                del line[col:]
+        elif seq in ("\x1b[2J", "\x1b[H"):
+            if seq == "\x1b[2J":
+                lines.append(""); line, col = [], 0
+        pos = m.end()
+    if line:
+        lines.append("".join(line).rstrip())
+    return lines
+
+
+def parse_console_log(raw, ext_names):
+    """Session log -> [{'line': typed command, 'name': extension or built-in, 'output': text}].
+    A command line is '> ' followed by an extension name, a console built-in or ';'. Other lines
+    (extension output, even when it starts with '> ') belong to the command above them."""
+    exts = {n.lower(): n for n in ext_names}
+    entries, cur = [], None
+    for line in clean_terminal(raw):
+        if line.startswith(">"):
+            rest = line[1:].strip()
+            word = rest.split()[0].lstrip("*@") if rest else ""
+            if not rest:
+                cur = None                                 # idle prompt
+                continue
+            if rest.startswith(";") or word.lower() in exts or word.lower() in CONSOLE_BUILTINS:
+                name = ";" if rest.startswith(";") else exts.get(word.lower(), word)
+                cur = {"line": rest, "name": name, "output": []}
+                entries.append(cur)
+                continue
+        if cur is not None:
+            cur["output"].append(line)
+    for e in entries:
+        while e["output"] and not e["output"][-1].strip():
+            e["output"].pop()
+        e["output"] = "\n".join(e["output"]) + ("\n" if e["output"] else "")
+    return entries
