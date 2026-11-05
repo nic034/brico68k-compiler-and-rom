@@ -1,0 +1,26 @@
+; Brico68k - full session for a real Neo Geo through the BricoNeo console
+; Paste the whole file into the serial terminal (PuTTY, Tera Term...). Lines starting with ; are ignored.
+; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
+Echo $1234
+TestWRAM
+TestBRAM
+TestPRAM
+TestVRAML
+TestVRAMU
+MarchVRAML
+MarchVRAMU
+TestLSPC
+TestTiming
+TestZ80
+TestAudio
+; the 68000 beeps for about 3.5 s: anything sent meanwhile would time out
+Delay 4000
+TestInp
+TestStatusA
+TestSystype
+TestWatchdog
+; first pass starves the watchdog: wait for the reset, then read the result
+Delay 2000
+TestWatchdog
+TestDAC
+; TestDAC leaves 16 colour bands on screen: one band per colour bit, a black band = dead bit

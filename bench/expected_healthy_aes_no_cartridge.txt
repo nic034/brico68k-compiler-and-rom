@@ -1,0 +1,177 @@
+==== Echo $1234
+0x1234
+==== TestWRAM
+Work RAM (WRAM) test
+> Data bus walking 1/0 Test Success
+> 0000 Test Success
+> FFFF Test Success
+> AAAA Test Success
+> 5555 Test Success
+> Increment Test Success
+=> Test Success
+
+==== TestBRAM
+Backup RAM (BRAM) test - DESTRUCTIVE: erases the MVS backup RAM (bookkeeping, settings, scores)
+  N/A: AES detected (STATUS_B bit7=0) - the AES has no backup RAM ($D00000 unmapped, saves go to the memory card)
+=> Test N/A (AES)
+
+==== TestPRAM
+Palette RAM (PRAM) test - both banks
+-- Palette bank 0 --
+> Data bus walking 1/0 Test Success
+> 0000 Test Success
+> FFFF Test Success
+> AAAA Test Success
+> 5555 Test Success
+> Increment Test Success
+-- Palette bank 1 --
+> Data bus walking 1/0 Test Success
+> 0000 Test Success
+> FFFF Test Success
+> AAAA Test Success
+> 5555 Test Success
+> Increment Test Success
+> Bank 0 / bank 1 independence Test Success
+=> Test Success
+
+==== TestVRAML
+VRAM test
+=> Test success
+
+==== TestVRAMU
+VRAM test
+=> Test success
+
+==== MarchVRAML
+March-C VRAM test
+> Pass 1 up(w0)    OK
+> Pass 2 up(r0,w1) OK
+> Pass 3 up(r1,w0) OK
+> Pass 4 dn(r0,w1) OK
+> Pass 5 dn(r1,w0) OK
+> Pass 6 up(r0)    OK
+=> Test success
+
+==== MarchVRAMU
+March-C VRAM test
+> Pass 1 up(w0)    OK
+> Pass 2 up(r0,w1) OK
+> Pass 3 up(r1,w0) OK
+> Pass 4 dn(r0,w1) OK
+> Pass 5 dn(r1,w0) OK
+> Pass 6 up(r0)    OK
+=> Test success
+
+==== TestLSPC
+LSPC2-A2 register test
+> REG_VRAMMOD   OK
+> REG_VRAMADD   OK
+> VRAM auto-inc OK
+=> Test success
+
+==== TestTiming
+Video timing test (LSPC line counter, $3C0006)
+> Lines per frame: 264 (NTSC flag, expected 264)
+> Line counter range: $00F8 - $01FF
+> Sequence: every line step is +1
+> CPU cycles per frame: 202739 (expected 202752 = 384 x 264 x 2)
+> Auto-animation counter: 8/8 frame steps OK
+=> Test success
+
+==== TestZ80
+Z80 handshake test (ACTIVE: stops any sound)
+Needs a standard SM1/M1 sound driver.
+> Reply after $03 reset: $0000
+=> Test INCONCLUSIVE: no fresh, stable $01 reply
+Check M1/SM1, Z80, Z80 RAM, NMI, sound latches, clock/reset.
+
+==== TestAudio
+Neo-Geo UniBIOS-like audio test
+ERROR: no Z80 ACK $01 (Z80, M1/SM1 ROM or NEO-D0/sound latch?)
+
+==== Delay 4000
+==== TestInp
+  (AES detected: no physical DIP bank - bits below are open-bus, not real switches)
+87654321 DIP Switches (NEO-F0)
+11111111
+
+DCBARLDU Player 1 controls (NEO-C1)
+00000000
+  Up      : released
+  Down    : released
+  Left    : released
+  Right   : released
+  Button A: released
+  Button B: released
+  Button C: released
+  Button D: released
+
+
+DCBARLDU Player 2 controls (NEO-C1)
+00000000
+  Up      : released
+  Down    : released
+  Left    : released
+  Right   : released
+  Button A: released
+  Button B: released
+  Button C: released
+  Button D: released
+
+
+P2 Select, P2 Start, P1 Select, P1 Start (NEO-C1)
+0000
+  P1 Start : released
+  P1 Select: released
+  P2 Start : released
+  P2 Select: released
+
+
+Service button, Coin-in 2, Coin-in 1 (STATUS_A bits 2-0, 1 = pressed)
+  (AES detected: no coin slots / service button - bits below are not inputs)
+111
+
+Memory card / Hardware mode (STATUS_B $380000)
+  Bits 7654 (raw)           : 0111
+  Memory card (CD1 bit4, CD2 bit5) : no card (CD1=1, CD2=1)
+  Hardware mode             : AES
+
+==== TestStatusA
+STATUS_A breakdown ($320001) - AES/MVS-aware (bits per MAME neogeo.cpp)
+  Raw bits 76543210: 00000000
+  Hardware detected : AES (STATUS_B bit7=0)
+  Bits 0-2: N/A on AES (no coin slots - home console, not arcade)
+  Bits 3-4: hw-detect bits, exact meaning undocumented even in
+            MAME ('what is this?' - UniBIOS uses them for
+            AES/MVS sensing). Raw value above, no verdict guessed.
+  Bits 5-7: N/A on AES (no uPD4990A RTC chip on this board)
+
+
+==== TestSystype
+SYSTYPE breakdown ($300080/$300081) - AES/MVS-aware (bits per MAME neogeo.cpp)
+  Hardware detected          : AES (STATUS_B bit7=0)
+  $300080 is NOT a real register on AES (unmapped in MAME's
+  aes_main_map - no TEST switch / no JAMMA harness on AES).
+  Raw word below is open-bus/undefined, NOT a TEST/JAMMA value: 0xFF00
+
+
+==== TestWatchdog
+Watchdog test ARMED: the 68000 stops kicking the watchdog now.
+Expect a reset in ~0.13 s. Wait 2 s, then run TestWatchdog
+again to read the result (commands sent meanwhile are lost).
+
+==== Delay 2000
+==== TestWatchdog
+Watchdog test result:
+> The watchdog reset the 68000 after ~133 ms (44560 loops of 3 us)
+  MAME MVS: 135 ms. Real boards: about 0.13 s.
+=> Test success (run again to re-arm)
+
+==== TestDAC
+RGB DAC test pattern, top to bottom:
+  R4 R3 R2 R1 R0 | G4 G3 G2 G1 G0 | B4 B3 B2 B1 B0 | white
+A black band = that bit never reaches the screen (DAC resistor,
+palette RAM data line, buffer/latch, trace). Relative level per
+bit, MAME model (220/470/1k/2k2/3k9 ohm): 100/47/22/10/6 %.
+Shown until the next command.
+

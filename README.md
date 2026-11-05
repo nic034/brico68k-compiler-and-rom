@@ -203,6 +203,23 @@ The ROM keeps the BricoNeo header and the BricoExt layout (magic at `$80`, flags
 `jmp` at `$8E`, extension table at `$A0`). The reset vector upper word is `$00C0`, so
 Brico16Bits recognises the byte order.
 
+## Testing on a real console (BricoNeo running Brico16Bits)
+
+1. Console off. Put the BricoNeo in the SP1 (BIOS) socket, pin 1 the right way. Insert a game
+   cartridge: on an AES the Z80 program comes from the cartridge, so TestZ80 and TestAudio need one.
+2. Connect the USB cable. Open the first serial port with PuTTY or Tera Term and **turn session
+   logging on** (PuTTY: Session > Logging > All session output).
+3. Drop `rom/Brico68k.bin` at the root of the `BricoNeo` USB drive. The root loads it in RAM only
+   and resets the console: your bank 0 is untouched, and the next power cycle brings it back.
+   (Put it in a bank folder to keep it.)
+4. Type `?`: the Extensions section must list the 23 commands.
+5. Paste the whole of `bench/real_aes_session.txt` into the terminal. The `;` lines are comments
+   and `Delay` waits, both built into the BricoNeo console.
+6. Compare the log with `bench/expected_healthy_aes.txt` (or `..._no_cartridge.txt`), produced by
+   the emulator with `python bench/make_expected.py`. TestInp, TestStatusA and TestSystype depend
+   on what is plugged in; the cycle count of TestTiming may differ slightly. Everything else
+   should match on a healthy console. Look at the screen for TestDAC.
+
 ## Testing
 
 `tools/mame_bench.py` runs the ROM in a real MAME, with a simulated Brico16Bits host written
