@@ -4,6 +4,17 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-06 - Header version 1.3501, Version says "Nic034 fork"
+
+ROM SHA-256 `083455becae63b8fc09e914679777ddf69aa8fdade61ec2dea356f6fb570e6db` (fork 1.35-nic034-01, header 1.3501), rebuilt from `source/` to the same
+checksum.
+
+- Header version 1.3501 (minor = 35 x 100 + build): Brico16Bits now shows "Found BricoNeo ROM
+  version 1.3501" for this fork. `build.py` and the Compiler check that it matches `FORK_VERSION`.
+- `Version` says it is the Nic034 fork (not an Aurelien34 release), the upstream base and the
+  source repository.
+- Checks: 35/35 identical to MAME with and without the test cartridge, GUI 168/168.
+
 ## 2026-11-06 - Fork version 1.35-nic034-01
 
 ROM SHA-256 `7713a97e1696240246582df40f05ccb75a98b9746dd5fda69c92b82e2605d3c5` (fork

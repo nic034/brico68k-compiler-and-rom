@@ -71,7 +71,7 @@
 	; Magic word - 8 bytes
 	dc.b "BricoNeo"
 	; Version - 4 bytes
-	BRICONEO_VERSION 1,35
+	BRICONEO_VERSION 1,3501			; fork 1.35-nic034-01: minor = 35 x 100 + build (Brico16Bits shows "1.3501")
 	; Special modes
 	dc.w BRICO_SPECIAL_FLAG_ENABLE_EXTENSIONS + BRICO_SPECIAL_FLAG_68K_SENDS_COMMANDS + BRICO_SPECIAL_FLAG_NEODIAG_MIRRORS
 
@@ -118,7 +118,7 @@ EXTENSIONS_TABLE:
 	align 1
 	dc.b "Fork version "
 	FORK_VERSION
-	dc.b " (the header shows 1.35, the upstream base). Prints it with its source. (no WRAM used)",0
+	dc.b ": Nic034 fork of Aurelien34/Brico68k 1.35 (header 1.3501 = 1.35 + build 01). Prints it with its source. (no WRAM used)",0
 	align 1
 	dc.l $ffffffff ; No more extensions
 
