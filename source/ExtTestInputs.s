@@ -20,7 +20,7 @@ EXT_TEST_INPUTS:
 	move.b REG_STATUS_B,d7
 	btst #7,d7
 	bne .dipIsReal
-	Print "  (AES detected: no physical DIP bank - bits below are open-bus, not real switches)"
+	Print "  (AES: no DIP bank - bits below are open bus, not real switches)"
 	PrintLn ""
 .dipIsReal:
 	move.l #.lblDipSwitches,a1
@@ -345,4 +345,4 @@ EXT_TEST_INPUTS:
 .data
 
     ; Jump back to the command loop
-    jmp WAIT_FOR_COMMAND
+    jmp WAIT_FOR_COMMAND

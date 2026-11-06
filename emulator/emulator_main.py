@@ -9,7 +9,7 @@ a Brico16Bits-like host. Type the same commands as on the Brico16Bits console
 Emulated (modelled on MAME snk/neogeo.cpp): 68000 @ 12 MHz with exact cycle
 counts, BIOS ROM, WRAM, palette RAM (2 banks), system latch, LSPC registers
 and VRAM, line counter / frame timing, auto-animation counter, inputs (AES,
-nothing pressed, no memory card, no cartridge), open bus, watchdog (NEO-B1, as on
+nothing pressed, no memory card), open bus, watchdog (NEO-B1, as on
 real AES and MVS boards; on by default, MAME's aes driver has none).
 Host: command + P1-P3 written into the ROM, cleared after 1 ms, 3 s timeout,
 2048-word buffer, as Brico16Bits CommandExtension.cpp.
@@ -17,15 +17,22 @@ Z80 (superzazu/z80 core, 4 MHz) wired as on the board (sound latch, NMI,
 reply latch, 2 KB RAM), running a built-in test M1 that only answers the
 standard handshake ($03 reset -> $00, $01 -> $01), or no program at all (like
 an AES without cartridge).
+Cartridge (window: Cartridge tab, one at a time; text mode: --cart): none, the
+built-in test cartridge, a game ROM set (folder or MAME zip: P1/P2 on the 68000
+bus with the P2 bank latch; S, C, V, M1 loaded and their size and CRC32 shown,
+checked against the official MAME list hash/neogeo.xml with --cart-list), or
+the jwestfall69 diagnostic PROG board (SRAM in both P windows).
 Simulated faults (window: Faults tab, text mode: --fault): data bit stuck,
 address line stuck, WRAM chip dead, on WRAM, palette RAM (also seen on the
-screen), VRAM and the LSPC line counter - to see how each test reacts.
+screen), VRAM, the LSPC line counter and the cartridge slot (data, address,
+strobes) - to see how each test reacts.
 NOT emulated: YM2610 and sound, Z80 ROM banking, sprites and fix layer (the
-screen shows the backdrop colour of each line), cartridge, memory card, and the
+screen shows the backdrop colour of each line; S, C, V are not used), protected
+cartridges (SMA, PVC, CMC, encrypted P), memory card, and the
 LSPC VRAM access delays of real boards (neither does MAME): code that accesses
 VRAM too fast passes here and can fail on a real console. Interrupts: VBLANK
 (IRQ1), LSPC timer (IRQ2) and IRQ3 at power-on, timed as in MAME. Checked word
-for word against MAME: 33/33 commands with both Z80 setups.
+for word against MAME: 46/46 commands, with and without the test cartridge.
 
 Run: double-click, or  python Brico68k_Emulator.py [ROM]
 Text mode: python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234" [--rom ROM]
@@ -33,6 +40,9 @@ Text mode: python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234" [--rom ROM]
            python Brico68k_Emulator.py --compare putty.log     (real console log vs emulator)
            python Brico68k_Emulator.py --diagnose putty.log    (which modelled fault explains it)
            python Brico68k_Emulator.py --check [--rom ROM]
+           python Brico68k_Emulator.py --cart kof98.zip --cart-list neogeo.xml --run CartTest
+           python Brico68k_Emulator.py --crc-plan kof98 --cart-list neogeo.xml > kof98_crc.txt
+               (P1/P2 CRC32 plan for CartCRC on a real console; NGH number accepted, e.g. 0242)
 Python 3.8+, standard library only: nothing to install with pip. The window
 needs Tkinter, which comes with Python on Windows (python.org installer) and is
 the python3-tk package on Linux distributions that split it out.
@@ -51,7 +61,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.11"
+APP_VERSION = "1.12"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -214,6 +224,7 @@ def parse_script(text):
 # Real console log vs emulator
 # ---------------------------------------------------------------------------
 VARIES = {"TestInp": "depends on the controllers, switches and memory card plugged in",
+          "CartTest": "depends on the cartridge: insert the same game set in the emulator (Cartridge tab) to compare",
           "TestStatusA": "depends on coins, service button and memory card",
           "TestSystype": "depends on the board and its jumpers"}
 VERDICT_ONLY = {"TestTiming": "the measured cycle counts can differ slightly on a real board"}
@@ -311,6 +322,8 @@ def all_single_faults():
     """Every single fault the core models: data bits and address lines stuck at 0/1, WRAM chip dead."""
     out = []
     for region in FAULT_REGIONS.values():
+        if region == 6:                      # cartridge slot: needs a cartridge, not in console logs yet
+            continue
         out += [(region, 0, bit, v) for bit in range(DATA_BITS[region] + 1) for v in (0, 1)]
         if region in ADDR_RANGE:
             lo, hi = ADDR_RANGE[region]
@@ -436,6 +449,14 @@ def main_cli(argv):
     ap.add_argument("--watchdog", action="store_true", help=argparse.SUPPRESS)   # default since 1.7, kept for old scripts
     ap.add_argument("--fault", action="append", default=[], metavar="SPEC",
                     help="simulated hardware fault, repeatable, e.g. wram:data:5:1 (see --fault help)")
+    ap.add_argument("--cart", default="none", metavar="CART",
+                    help="cartridge: none (default), test (built-in test cartridge), diag (diagnostic PROG "
+                         "board) or a game ROM set (folder or MAME .zip)")
+    ap.add_argument("--cart-list", metavar="XML", help="official MAME list (hash/neogeo.xml): identifies the "
+                    "ROM set by CRC32, loads it with the list's layout and checks every chip")
+    ap.add_argument("--crc-plan", metavar="GAME", help="CartCRC plan from --cart-list for a set name (its "
+                    "clones too) or an NGH number: a script to paste into the BricoNeo console; with --cart, "
+                    "also run on the emulator and checked")
     ap.add_argument("rom_pos", nargs="?")
     a = ap.parse_args(argv)
     if "help" in [f.lower() for f in a.fault]:
@@ -446,6 +467,20 @@ def main_cli(argv):
     except ValueError as e:
         print(f"ERROR: {e}")
         return 2
+    crc_lst = crc_script = None
+    if a.crc_plan:
+        if not a.cart_list:
+            print("ERROR: --crc-plan needs the official MAME list: --cart-list hash/neogeo.xml")
+            return 2
+        try:
+            crc_lst = parse_softlist(a.cart_list)
+            crc_script = format_crc_plan(crc_lst, a.crc_plan, Path(a.cart_list).name)
+        except (OSError, ValueError, SyntaxError) as e:        # ET.ParseError is a SyntaxError
+            print(f"ERROR: CRC plan: {e}")
+            return 2
+        if a.cart == "none":
+            print(crc_script, end="")                            # for a real console: no ROM needed
+            return 0
     rom_path = a.rom or a.rom_pos or default_rom()
     missing = startup_check(rom_path)
     for w, d in missing:
@@ -474,8 +509,16 @@ def main_cli(argv):
                      0 if a.no_watchdog else 1, prog)
         print(json.dumps(d) if a.json else diagnose_report(d, Path(a.diagnose).name), end="\n" if a.json else "")
         return 0
+    try:
+        cart = make_cart(a.cart) if a.cart in ("none", "test", "diag") else load_cartridge(a.cart, a.cart_list)
+    except (OSError, ValueError) as e:
+        print(f"ERROR: cartridge: {e}")
+        return 2
     core = Core(core_path())
     core.load(rom)
+    core.load_cart(cart)
+    if cart.kind != "none":
+        print("CART: " + cart.report().replace("\n", "\nCART: "))
     core.power_on()
     core.lib.neo_set_options(0 if a.z80 == "none" else 1, 0 if a.no_watchdog else 1)
     apply_faults(core, faults)
@@ -484,6 +527,11 @@ def main_cli(argv):
     for _ in range(60):
         core.lib.neo_run_frame()
     host = Host(core, rom)
+    if crc_script:
+        print(crc_script, end="")
+        print("; --- run on the emulator, cartridge above:")
+        print(crc_check(host, crc_lst, a.crc_plan))
+        return 0
     if a.compare:
         try:
             raw = Path(a.compare).read_bytes()
@@ -539,7 +587,8 @@ CATEGORIES = [
     ("Video", ["TestVRAM", "TestLSPC", "TestTiming", "TestDAC"]),
     ("Sound", ["TestZ80", "TestAudio", "PlayEyeSnd"]),
     ("Inputs and system", ["TestInp", "TestStatusA", "TestSystype", "TestWatchdog"]),
-    ("Tools", ["Version", "Echo", "Read", "Write", "WriteB", "Dump", "Color"]),
+    ("Cartridge", ["CartTest"]),
+    ("Tools", ["Version", "Echo", "Read", "Write", "WriteB", "Dump", "Color", "CartCRC"]),
 ]
 TOOLS = set(CATEGORIES[-1][1])
 CHK_PROGRESS, CHK_PROG_MAGIC = 0x10FFF0, 0x10FFF2   # ChipCheck progress word and its magic ($C4EC)
@@ -682,7 +731,8 @@ def main_gui(rom_arg=None):
     st = {"core": None, "host": None, "rom": None, "running": False, "t_last": 0.0, "fps_t": time.time(),
           "fps_n": 0, "fps": 0.0, "history": list(cfg.get("history", []))[-50:], "hist_i": 0,
           "busy_t0": None, "busy_name": "", "busy_line": "", "screens": [], "colours": [None] * 224,
-          "results": {}, "plan": [], "plan_total": 0, "wait_until": None, "faults": [], "log": []}
+          "results": {}, "plan": [], "plan_total": 0, "wait_until": None, "faults": [], "log": [],
+          "cart": None}
     st["hist_i"] = len(st["history"])
     for spec in cfg.get("faults", []):
         try:
@@ -713,7 +763,7 @@ def main_gui(rom_arg=None):
     sbar = tk.Frame(root, bg=C["panel"], highlightthickness=1, highlightbackground=C["border"])
     sbar.pack(fill="x", side="bottom")
     lamps = {}
-    for key, label in (("cpu", "68000"), ("host", "Host"), ("z80", "Z80"), ("fault", "No fault")):
+    for key, label in (("cpu", "68000"), ("host", "Host"), ("z80", "Z80"), ("cart", "No cartridge"), ("fault", "No fault")):
         f = tk.Frame(sbar, bg=C["panel"]); f.pack(side="left", padx=(12, 4), pady=4)
         d = tk.Label(f, text="●", fg="#8c959f", bg=C["panel"], font=F); d.pack(side="left")
         t = tk.Label(f, text=label, fg=C["text"], bg=C["panel"], font=FS); t.pack(side="left")
@@ -837,6 +887,7 @@ def main_gui(rom_arg=None):
     # Faults tab
     flt = ttk.Frame(nb, style="Card.TFrame", padding=14); nb.add(flt, text="Faults")
     # Settings tab
+    cartf = ttk.Frame(nb, style="Card.TFrame", padding=14); nb.add(cartf, text="Cartridge")
     sett = ttk.Frame(nb, style="Card.TFrame", padding=14); nb.add(sett, text="Settings")
 
     for cv, s in ((thumb, 0.8), (big, 2.0)):
@@ -856,7 +907,7 @@ def main_gui(rom_arg=None):
     ttk.Label(flt, text="Add a fault", style="CardBold.TLabel").grid(row=5, column=0, columnspan=4, sticky="w")
     REGIONS = [("WRAM", "wram"), ("Palette RAM", "pal"), ("VRAM lower (slow)", "vramlo"),
                ("VRAM upper (fast)", "vramhi"), ("LSPC line counter", "line"),
-               ("BIOS socket (68000 -> BricoNeo)", "bios")]
+               ("BIOS socket (68000 -> BricoNeo)", "bios"), ("Cartridge slot (P bus)", "cart")]
     reg_var = tk.StringVar(value=REGIONS[0][0]); kind_var = tk.StringVar(value="Data bit stuck")
     bit_var = tk.StringVar(value="0"); lvl_var = tk.StringVar(value="1"); range_var = tk.StringVar(); ferr = tk.StringVar()
     ttk.Label(flt, text="Component", style="Card.TLabel").grid(row=6, column=0, sticky="w", pady=3)
@@ -906,12 +957,43 @@ def main_gui(rom_arg=None):
     ttk.Radiobutton(sett, text="Real time (60 frames/s, like the console)", value="real", variable=speed_var).grid(row=9, column=0, columnspan=3, sticky="w")
     ttk.Radiobutton(sett, text="Fast (as fast as this PC can)", value="fast", variable=speed_var).grid(row=10, column=0, columnspan=3, sticky="w")
     ttk.Separator(sett).grid(row=11, column=0, columnspan=3, sticky="we", pady=12)
+    CART_CHOICES = [("none", "No cartridge"),
+                    ("test", "Built-in test cartridge (generated P ROM: header + security code, 2 P2 banks)"),
+                    ("game", "Game cartridge: the ROM set below (P1, P2 on the 68000 bus; S, C, V, M1 loaded and checked)"),
+                    ("diag", "Diagnostic PROG board (jwestfall69 neogeo-diag-aes-prog: SRAM on the P bus)")]
+    ttk.Label(cartf, text="Inserted (one or the other; changing it powers the console off and on)",
+              style="CardBold.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
+    cart_var = tk.StringVar(value=cfg.get("cart", "none") if cfg.get("cart") in dict(CART_CHOICES) else "none")
+    for i, (val, label) in enumerate(CART_CHOICES):
+        ttk.Radiobutton(cartf, text=label, value=val, variable=cart_var).grid(row=1 + i, column=0, columnspan=4, sticky="w")
+    cart_set_var = tk.StringVar(value=cfg.get("cart_set", ""))
+    cart_list_var = tk.StringVar(value=cfg.get("cart_list", ""))
+    ttk.Separator(cartf).grid(row=5, column=0, columnspan=4, sticky="we", pady=10)
+    ttk.Label(cartf, text="Game ROM set", style="Card.TLabel").grid(row=6, column=0, sticky="w")
+    ttk.Entry(cartf, textvariable=cart_set_var).grid(row=6, column=1, sticky="we")
+    ttk.Button(cartf, text="Zip...", command=lambda: pick_cart(False)).grid(row=6, column=2, padx=(6, 0))
+    ttk.Button(cartf, text="Folder...", command=lambda: pick_cart(True)).grid(row=6, column=3, padx=(6, 0))
+    ttk.Label(cartf, text="Official MAME list", style="Card.TLabel").grid(row=7, column=0, sticky="w", pady=(4, 0), padx=(0, 8))
+    ttk.Entry(cartf, textvariable=cart_list_var).grid(row=7, column=1, sticky="we", pady=(4, 0))
+    ttk.Button(cartf, text="neogeo.xml...", command=lambda: pick_cart_list()).grid(row=7, column=2, columnspan=2, sticky="we", padx=(6, 0), pady=(4, 0))
+    ttk.Label(cartf, style="CardMuted.TLabel", justify="left", wraplength=760, text=(
+        "The list (MAME hash/neogeo.xml, optional) identifies the set by CRC32, loads it with the list's layout, "
+        "checks every chip and gives the CartCRC plan for each P file.")).grid(row=8, column=0, columnspan=4, sticky="we", pady=(4, 8))
+    cart_info = tk.StringVar(value="")               # same text as the box, for scripts and tests
+    cart_txt = tk.Text(cartf, height=12, wrap="none", relief="flat", bg=C["panel"], fg=C["text"], borderwidth=1,
+                       highlightthickness=1, highlightbackground=C["border"],
+                       font=("Consolas", 9) if platform.system() == "Windows" else ("DejaVu Sans Mono", 9))
+    cart_sb = ttk.Scrollbar(cartf, orient="vertical", command=cart_txt.yview); cart_txt.configure(yscrollcommand=cart_sb.set)
+    cart_txt.grid(row=9, column=0, columnspan=4, sticky="nsew"); cart_sb.grid(row=9, column=4, sticky="ns")
+    cart_txt.configure(state="disabled")
+    cartf.columnconfigure(1, weight=1); cartf.rowconfigure(9, weight=1)
     ttk.Label(sett, text="What is emulated", style="CardBold.TLabel").grid(row=12, column=0, sticky="w")
     ttk.Label(sett, style="CardMuted.TLabel", justify="left", wraplength=760, text=(
         "68000 (Musashi, exact cycle counts), Z80 (4 MHz) running a test M1, WRAM, palette RAM (2 banks), "
         "system latch, LSPC registers and VRAM, line counter and frame timing, AES inputs with nothing plugged in, "
         "open bus, VBLANK and timer interrupts, Brico16Bits host (1 ms clear, 3 s timeout).\nNot emulated: YM2610 "
-        "and sound, sprites, fix layer, cartridge, memory card. Checked word for word against MAME (33/33 commands).\n"
+        "and sound, sprites, fix layer, memory card, protected cartridges (SMA, PVC, CMC). Cartridge: P1/P2 "
+        "(P2 banks) or the PROG board SRAM on the 68000 bus; S, C, V, M1 are only loaded and checked.\n"
         "Keys: F5 reset, F8 pause, Ctrl+L clear the console, Up/Down command history.")).grid(
         row=13, column=0, columnspan=3, sticky="we")
     sett.columnconfigure(0, weight=1)
@@ -958,6 +1040,44 @@ def main_gui(rom_arg=None):
                                        initialdir=str(Path(rom_var.get()).parent) if rom_var.get() else str(TOOL_DIR))
         if p:
             rom_var.set(p); power_on()
+
+    def pick_cart(folder):
+        if folder:
+            p = filedialog.askdirectory(title="Game ROM set folder")
+        else:
+            p = filedialog.askopenfilename(title="Game ROM set (MAME zip)", filetypes=[("Zip", "*.zip"), ("All files", "*")])
+        if p:
+            cart_set_var.set(p); cart_var.set("game")
+
+    def pick_cart_list():
+        p = filedialog.askopenfilename(title="Official MAME list (hash/neogeo.xml)",
+                                       filetypes=[("MAME software list", "*.xml"), ("All files", "*")])
+        if p:
+            cart_list_var.set(p)
+            if cart_var.get() == "game":
+                cart_changed()
+
+    def build_cart():
+        """CartImage for the current choice; raises ValueError / OSError with a readable reason."""
+        k = cart_var.get()
+        if k != "game":
+            return make_cart(k)
+        if not cart_set_var.get().strip():
+            raise ValueError("choose the game ROM set (zip or folder) first")
+        return load_cartridge(cart_set_var.get().strip(), cart_list_var.get().strip() or None)
+
+    def show_cart(cart):
+        cart_info.set(cart.report() if cart.kind != "none" else "No cartridge inserted.")
+        cart_txt.configure(state="normal"); cart_txt.delete("1.0", "end")
+        cart_txt.insert("end", cart_info.get()); cart_txt.configure(state="disabled")
+        lamp("cart", C["ok"] if cart.kind != "none" else "#8c959f",
+             {"none": "No cartridge", "test": "Test cartridge", "diag": "PROG board"}.get(cart.kind, "Game cartridge"))
+
+    def cart_changed(*_):
+        persist()
+        if st["core"]:
+            out("--- Cartridge changed: power off, insert, power on ---\n", "info")
+            power_on()
 
     def refresh_missing(*_):
         items = startup_check(rom_var.get().strip())
@@ -1121,7 +1241,12 @@ def main_gui(rom_arg=None):
         try:
             rom = Path(rom_var.get()).read_bytes()
             core = st["core"] or Core(core_path())
-            core.load(rom); core.power_on()
+            try:
+                cart = build_cart()
+            except (OSError, ValueError) as ex:
+                raise ValueError(f"cartridge: {ex} (Cartridge tab)") from None
+            core.load(rom); core.load_cart(cart); core.power_on()
+            st["cart"] = cart; show_cart(cart)
             st["core"], st["rom"] = core, rom
             apply_options(); apply_faults(core, st["faults"])
             st["host"] = Host(core, rom)
@@ -1134,6 +1259,8 @@ def main_gui(rom_arg=None):
         major, minor = struct.unpack_from(">HH", rom, 0x88)
         out(f"--- Power on · {Path(rom_var.get()).name} · BricoNeo {major}.{minor} · "
             f"{len(st['host'].exts)} extensions · type Help ---\n", "info")
+        if st["cart"].kind != "none":
+            out(f"--- Cartridge: {st['cart'].report()} ---\n", "info")
         for f in st["faults"]:
             out(f"--- Fault active: {describe_fault(f)} ---\n", "warn")
         st["running"] = True; st["t_last"] = time.time(); b_pause.configure(text="Pause")
@@ -1239,6 +1366,8 @@ def main_gui(rom_arg=None):
             st["faults"].clear(); push_faults(); out("--- All faults removed ---\n", "info")
 
     def kinds_for(code):
+        if code == "cart":
+            return ["Data bit stuck", "Data line unstable", "Address line stuck", "Strobe dead"]
         if code == "bios":
             return ["Address line stuck", "Address line unstable"]
         k = ["Data bit stuck"]
@@ -1254,6 +1383,12 @@ def main_gui(rom_arg=None):
         if kind_var.get() not in ks:
             kind_var.set(ks[0])
         k = kind_var.get()
+        if k.startswith("Strobe"):
+            bit_lbl.configure(text="Signal"); sp_bit.grid_remove(); lvl_lbl.configure(text="Strobe")
+            cb_lvl.configure(values=[s.upper() for s in STROBES])
+            if lvl_var.get().lower() not in STROBES:
+                lvl_var.set("ROMOEU")
+            range_var.set("Never asserted: its byte is not written (PORTWE) or floats high (ROMOE). Needs a cartridge."); return
         if k.startswith("Chip"):
             bit_lbl.configure(text="Chip"); sp_bit.grid_remove(); lvl_lbl.configure(text="Lane")
             cb_lvl.configure(values=["lower (D0-D7)", "upper (D8-D15)"])
@@ -1263,12 +1398,16 @@ def main_gui(rom_arg=None):
         sp_bit.grid(); lvl_lbl.configure(text="Stuck at"); cb_lvl.configure(values=["0", "1"])
         if k.endswith("unstable"):
             lvl_lbl.configure(text="Level"); cb_lvl.configure(values=["random"]); lvl_var.set("random")
-        elif lvl_var.get() == "random":
-            lvl_var.set("1")
-        if lvl_var.get() not in ("0", "1"):
+        elif lvl_var.get() not in ("0", "1"):     # was: "random" then always "1" (shown even for unstable)
             lvl_var.set("1")
         if k.startswith("Data"):
             lo, hi = 0, DATA_BITS[FAULT_REGIONS[code]]; bit_lbl.configure(text="Bit D")
+            if code == "cart":
+                range_var.set("Slot data lines D0-D15 (P1, P2, PROG board). Needs a cartridge.")
+                sp_bit.configure(from_=lo, to=hi)
+                if not bit_var.get().isdigit() or not lo <= int(bit_var.get()) <= hi:
+                    bit_var.set(str(lo))
+                return
             range_var.set(f"Data bits D0-D{hi}" + (" (palette: also changes the colours on screen)" if code == "pal" else ""))
         else:
             lo, hi = ADDR_RANGE[FAULT_REGIONS[code]]; bit_lbl.configure(text="Line A")
@@ -1285,6 +1424,8 @@ def main_gui(rom_arg=None):
         code = dict(REGIONS)[reg_var.get()]; k = kind_var.get()
         if k.startswith("Chip"):
             fault_add(f"wram:lane:{lvl_var.get().split()[0]}")
+        elif k.startswith("Strobe"):
+            fault_add(f"cart:strobe:{lvl_var.get().lower()}")
         else:
             if k.endswith("unstable"):
                 fault_add(f"{code}:float:{bit_var.get().strip()}")
@@ -1522,7 +1663,8 @@ def main_gui(rom_arg=None):
     def persist():
         save_config({"cfg_version": 2, "rom": rom_var.get(), "z80": z80_var.get(), "watchdog": wd_var.get(),
                      "faults": [fault_spec(f) for f in st["faults"]], "fast": speed_var.get() == "fast",
-                     "history": st["history"][-50:], "geometry": root.winfo_geometry()})
+                     "history": st["history"][-50:], "geometry": root.winfo_geometry(),
+                     "cart": cart_var.get(), "cart_set": cart_set_var.get(), "cart_list": cart_list_var.get()})
 
     def on_close():
         persist()
@@ -1553,6 +1695,7 @@ def main_gui(rom_arg=None):
                                        rdesc.configure(wraplength=max(300, e.width - 30))))
     reg_var.trace_add("write", update_form); kind_var.trace_add("write", update_form)
     z80_var.trace_add("write", apply_options); wd_var.trace_add("write", apply_options)
+    cart_var.trace_add("write", cart_changed)
     speed_var.trace_add("write", lambda *_: persist())
     rom_var.trace_add("write", refresh_missing)
     root.bind("<Control-l>", lambda _e: clear()); root.bind("<F5>", lambda _e: do_reset())
@@ -1578,10 +1721,11 @@ def main_gui(rom_arg=None):
                   "lamps": lamps, "rom": rom_var, "notebook": nb, "compare_open": compare_open, "compare_diagnose": compare_diagnose,
                   "compare_apply": compare_apply, "compare_tree": cmp_tree, "compare_text": cmp_text,
                   "compare_info": cmp_info, "tabs": {"report": rep, "console": conf, "compare": cmpf,
-                  "screen": scrf, "faults": flt, "settings": sett}, "verdict": verdict, "report_text": rtext,
+                  "screen": scrf, "faults": flt, "cartridge": cartf, "settings": sett}, "verdict": verdict, "report_text": rtext,
                   "summary": summary, "fault_add": fault_add, "fault_remove": fault_remove,
                   "fault_clear": fault_clear, "fault_list": flb, "fault_form": (reg_var, kind_var, bit_var, lvl_var,
                   fault_add_form, ferr), "big": big, "thumb": thumb,
+                  "cart": cart_var, "cart_set": cart_set_var, "cart_list": cart_list_var, "cart_info": cart_info,
                   "busy_bar": busy_bar, "key_widgets": [b_power, b_reset, b_pause, b_open, b_runall, b_run, b_stop, tree, thumb]}
     return root
 

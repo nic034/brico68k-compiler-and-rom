@@ -31,12 +31,28 @@ class Core:
         lib.neo_z80_commands.restype = ctypes.c_uint32
         lib.neo_fault_add.argtypes = [ctypes.c_int] * 4
         lib.neo_fault_add.restype = ctypes.c_int
+        lib.neo_cart_load.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+        lib.neo_cart_load.restype = ctypes.c_int
+        lib.neo_cart_writes.restype = ctypes.c_uint32
+        lib.neo_cart_latch_writes.restype = ctypes.c_uint32
+        lib.neo_cart_bank.restype = ctypes.c_int
+        self.cart = None
         self._vals = (ctypes.c_uint16 * 2048)()
         self._lines = (ctypes.c_uint16 * 224)()
 
     def load(self, rom):
         if self.lib.neo_load_bios(rom, len(rom)) != 0:
             raise ValueError("ROM larger than 128 KB")
+
+    def load_cart(self, cart):
+        """cart: None, 'none', 'test', 'diag' or a CartImage (see load_cartridge). Like a real
+        cartridge it stays in across power cycles; insert it with the console off."""
+        if isinstance(cart, str) or cart is None:
+            cart = make_cart(cart or "none")
+        data = cart.data or None
+        if self.lib.neo_cart_load(cart.mode, data, len(cart.data)) != 0:
+            raise ValueError(f"cartridge refused by the core ({len(cart.data)} bytes)")
+        self.cart = cart
 
     def power_on(self):
         self.lib.neo_power_on()
@@ -180,21 +196,470 @@ class Host:
 
 
 # ---------------------------------------------------------------------------
+# Test cartridge P ROM (same bytes as tools/make_test_cart.py, checked by compare_mame.py)
+# ---------------------------------------------------------------------------
+# Security code: 61 words (neogeodev wiki "Security code", word 25 = $6606 as in the system ROM)
+SECURITY_CODE = [
+    0x7600, 0x4A6D, 0x0A14, 0x6600, 0x003C, 0x206D, 0x0A04, 0x3E2D, 0x0A08, 0x13C0,
+    0x0030, 0x0001, 0x3210, 0x0C01, 0x00FF, 0x671A, 0x3028, 0x0002, 0xB02D, 0x0ACE,
+    0x6610, 0x3028, 0x0004, 0xB02D, 0x0ACF, 0x6606, 0xB22D, 0x0AD0, 0x6708, 0x5088,
+    0x51CF, 0xFFD4, 0x3607, 0x4E75, 0x206D, 0x0A04, 0x3E2D, 0x0A08, 0x3210, 0xE049,
+    0x0C01, 0x00FF, 0x671A, 0x3010, 0xB02D, 0x0ACE, 0x6612, 0x3028, 0x0002, 0xE048,
+    0xB02D, 0x0ACF, 0x6606, 0xB22D, 0x0AD0, 0x6708, 0x5888, 0x51CF, 0xFFD8, 0x3607,
+    0x4E75]
+TEST_CART_SEC = 0x186
+
+
+def test_cart_prom():
+    """3 MB P ROM in 68000 order: pseudo-random words (fixed seed) + a game header
+    ("NEO-GEO", NGH $0999, P ROM size $300000, security code pointer $182 -> $186)."""
+    import random
+    rnd = random.Random(0xB1C068)
+    p = bytearray(rnd.getrandbits(8) for _ in range(3 * 0x100000))
+    p[0x100:0x108] = b"NEO-GEO\x00"
+    p[0x108:0x10A] = (0x0999).to_bytes(2, "big")
+    p[0x10A:0x10E] = (0x300000).to_bytes(4, "big")
+    p[0x182:0x186] = TEST_CART_SEC.to_bytes(4, "big")
+    for i, w in enumerate(SECURITY_CODE):
+        p[TEST_CART_SEC + 2 * i:TEST_CART_SEC + 2 * i + 2] = w.to_bytes(2, "big")
+    return bytes(p)
+
+
+# ---------------------------------------------------------------------------
+# Cartridges: none, built-in test cartridge, a game ROM set (folder or MAME zip), the
+# diagnostic PROG board. Only P1/P2 are on the 68000 bus (the core gets them); S, C, V
+# and M1 are loaded and checked (size, CRC32) but not used: the core renders no fix
+# layer or sprites and has no YM2610.
+# ---------------------------------------------------------------------------
+CART_MODES = {"none": 0, "test": 1, "game": 1, "diag": 2}
+CHIP_AREAS = {"maincpu": "P", "fixed": "S", "audiocpu": "M1", "ymsnd:adpcma": "V", "ymsnd:adpcmb": "V",
+              "ymsnd": "V", "sprites": "C"}
+MAX_FILE = 64 << 20          # largest Neo Geo chip is 16 MB; refuse anything silly
+MAX_SET = 512 << 20
+
+
+class CartImage:
+    def __init__(self, kind, data=b"", name="", chips=None, notes=None):
+        self.kind, self.mode, self.data, self.name = kind, CART_MODES[kind], data, name
+        self.chips = chips or []        # dicts: chip, file, size, crc, expected, status
+        self.notes = notes or []
+
+    def describe(self):
+        if self.kind == "none":
+            return "No cartridge"
+        if self.kind == "diag":
+            return "Diagnostic PROG board (SRAM 1 MiB)"
+        banks = max(0, len(self.data) // 0x100000 - 1)
+        return f"{self.name or 'Game cartridge'} (P1 + {banks} P2 bank{'s' if banks != 1 else ''})"
+
+    def report(self):
+        lines = [self.describe()]
+        for c in self.chips:
+            exp = f" list {c['expected']}" if c.get("expected") and c["expected"] != c.get("crc") else ""
+            size = f"{c['size']:#x}" if c.get("size") is not None else "-"
+            lines.append(f"  {c['chip']:<3} {c['file'] or '-':<22} {size:>9}  CRC32 {c.get('crc') or '-':<8}{exp}  {c['status']}")
+        lines += [f"  {n}" for n in self.notes]
+        return "\n".join(lines)
+
+
+def make_cart(kind):
+    if kind == "none":
+        return CartImage("none")
+    if kind == "test":
+        return CartImage("test", test_cart_prom(), "Built-in test cartridge (NGH 0999)",
+                         notes=["Generated P ROM: header + security code at $186, pseudo-random words "
+                                "(same bytes as the MAME bench cartridge 'brtest')."])
+    if kind == "diag":
+        import random
+        rnd = random.Random(0x5EA)       # SRAM power-on content: anything
+        return CartImage("diag", bytes(rnd.getrandbits(8) for _ in range(0x100000)),
+                         "Diagnostic PROG board", notes=[
+                             "jwestfall69 neogeo-diag-aes-prog: one 1 MiB 16-bit SRAM read in P1 and P2, "
+                             "written through P2 (byte lanes by /PORTWEU, /PORTWEL)."])
+    raise ValueError(f"unknown cartridge '{kind}': none, test, diag or a ROM set path")
+
+
+def _crc(data):
+    import zlib
+    return f"{zlib.crc32(data) & 0xFFFFFFFF:08x}"
+
+
+def _word_swap(data):
+    b = bytearray(data)
+    b[0::2], b[1::2] = data[1::2], data[0::2]
+    return bytes(b)
+
+
+def read_rom_set(path):
+    """{file name (lower case): bytes} from a folder (top level) or a .zip (MAME romset)."""
+    from pathlib import Path
+    import zipfile
+    p, files, total = Path(path), {}, 0
+    if p.is_dir():
+        items = [(f.name, f.stat().st_size, f.read_bytes) for f in sorted(p.iterdir()) if f.is_file()]
+    elif zipfile.is_zipfile(p):
+        z = zipfile.ZipFile(p)
+        items = [(Path(i.filename).name, i.file_size, (lambda i=i: z.read(i)))
+                 for i in z.infolist() if not i.is_dir()]
+    else:
+        raise ValueError(f"{p.name}: not a folder nor a zip file")
+    for name, size, read in items:
+        if not name or name.startswith(".") or name.lower().endswith((".xml", ".txt", ".md", ".dat")):
+            continue
+        if size > MAX_FILE or total + size > MAX_SET:
+            raise ValueError(f"{name}: too large for a Neo Geo ROM set")
+        total += size
+        files[name.lower()] = read()
+    if not files:
+        raise ValueError(f"{p.name}: no ROM file")
+    return files
+
+
+def parse_softlist(xml_path):
+    """MAME software list (hash/neogeo.xml) -> {name: {"description", "areas": {area: (size,
+    [ (name|None, offset, size, crc|None, loadflag|None) ])}}}. The file is the user's: parsed
+    with expat, entities not expanded beyond the standard ones."""
+    import xml.etree.ElementTree as ET
+    out = {}
+    for sw in ET.parse(str(xml_path)).getroot().iter("software"):
+        areas = {}
+        for part in sw.iter("part"):
+            for da in part.iter("dataarea"):
+                roms = []
+                for r in da.iter("rom"):
+                    roms.append((r.get("name"), int(r.get("offset", "0"), 0), int(r.get("size", "0"), 0),
+                                 (r.get("crc") or "").lower() or None, r.get("loadflag")))
+                areas[da.get("name")] = (int(da.get("size", "0"), 0), roms)
+        out[sw.get("name")] = {"description": (sw.findtext("description") or "").strip(), "areas": areas,
+                               "cloneof": sw.get("cloneof")}
+    return out
+
+
+def _build_area(size, roms, files, by_crc):
+    """MAME ROM loading for one data area: load16_word_swap, load16_byte, continue, ignore."""
+    region = bytearray(size)                 # MAME regions start zero-filled
+    cur, pos, flag = None, 0, None
+    for name, off, sz, crc, lf in roms:
+        if name:
+            cur = by_crc.get(crc) if crc else None
+            if cur is None:
+                cur = files.get(name.lower())
+            if cur is None:
+                return None
+            pos, flag = 0, lf
+        elif lf == "ignore":
+            pos += sz
+            continue
+        elif lf != "continue" or cur is None:
+            continue                         # fill/unknown: left zero
+        chunk = cur[pos:pos + sz]
+        pos += sz
+        mode = flag if lf == "continue" else lf
+        if mode == "load16_word_swap":
+            chunk = _word_swap(chunk)
+        if mode == "load16_byte":
+            end = min(off + 2 * len(chunk), size)
+            region[off:end:2] = chunk[:(end - off + 1) // 2]
+        else:
+            region[off:off + len(chunk)] = chunk[:max(0, size - off)]
+    return bytes(region)
+
+
+def _p_window(maincpu):
+    """MAME maincpu region -> P1 MB + whole 1 MB P2 banks (a smaller chip is mirrored, as it
+    ignores the upper address lines)."""
+    if not maincpu:
+        raise ValueError("no P ROM")
+    p1 = maincpu[:0x100000]
+    while len(p1) < 0x100000:
+        p1 = (p1 + p1)[:0x100000]
+    p2 = maincpu[0x100000:]
+    if len(p2) % 0x100000:
+        last = p2[len(p2) // 0x100000 * 0x100000:]
+        while len(last) < 0x100000:
+            last = (last + last)[:0x100000]
+        p2 = p2[:len(p2) // 0x100000 * 0x100000] + last
+    data = p1 + p2
+    if len(data) > 0x1000000:
+        raise ValueError("P ROM larger than 16 MB")
+    return data
+
+
+def _chip_of(name):
+    m = re.search(r"(?:^|[-_.])(?:e|s)?(p|s|m|v|c)(\d)(?:[._-]|$)", name.lower())
+    return {"p": "P", "s": "S", "m": "M1", "v": "V", "c": "C"}[m.group(1)] if m else "?"
+
+
+CRC_CHUNK = 0x40000          # CartCRC: at most 256 KiB per command (< 1.5 s, BricoNeo timeout 3 s)
+
+
+def crc_plan(software):
+    """CartCRC commands for each P file of a software list entry (parse_softlist value), in the
+    file's byte order: [(file, expected CRC32, size, [command, ...], remark)]. The first command
+    of a file starts its CRC (P3 = 0); the next ones continue it from the CRC the ROM keeps in
+    WRAM: P3 = $FFFFFFFF where the previous one stopped, $FFFFFFFE after a jump (a file
+    whose halves are swapped, ROM_CONTINUE). So the plan is fixed text, pasted at once.
+    remark != "": CartCRC cannot check this file (the commands are left out)."""
+    if "maincpu" not in software["areas"]:
+        return []
+    files, cur = [], None
+    for name, off, sz, crc, lf in software["areas"]["maincpu"][1]:
+        if name:
+            cur = {"file": name, "crc": crc, "segs": [], "flag": lf}
+            files.append(cur)
+        elif lf == "continue" and cur is not None:
+            cur["segs"].append((off, sz))
+            continue
+        else:
+            if cur is not None and lf in ("ignore", "fill"):
+                cur["skip"] = lf                # file bytes not all loaded: its CRC is not computable
+            continue
+        cur["segs"].append((off, sz))
+    out = []
+    for f in files:
+        size = sum(s for _, s in f["segs"])
+        remark = ""
+        if f.get("skip"):
+            remark = f"'{f['skip']}' entries in the list: part of the file is not in the P ROM space"
+        elif f["flag"] != "load16_word_swap":
+            remark = f"loaded '{f['flag'] or 'plain'}' in the list: CartCRC reads the word-swapped MAME order only"
+        elif any(o % 4 or s % 4 for o, s in f["segs"]):
+            remark = "offset or size not a multiple of 4 bytes"
+        elif any(o + s > 0x900000 for o, s in f["segs"]):
+            remark = "beyond P2 bank 7: CartCRC selects banks 0-7 only"
+        cmds, nxt = [], None
+        if not remark:
+            for off, sz in f["segs"]:
+                o, end = off, off + sz
+                while o < end:
+                    boundary = (o // 0x100000 + 1) * 0x100000      # never across a window or bank
+                    n = min(CRC_CHUNK, end - o, boundary - o)
+                    if o < 0x100000:
+                        p1 = o
+                    else:
+                        bank, w = divmod(o - 0x100000, 0x100000)
+                        p1 = (0x200000 + w) | (bank << 24)
+                    p3 = "0" if not cmds else ("$FFFFFFFF" if p1 == nxt else "$FFFFFFFE")
+                    cmds.append(f"CartCRC ${p1:X} ${n:X} {p3}")
+                    nxt, o = p1 + n, o + n
+        out.append((f["file"], f["crc"], size, cmds, remark))
+    return out
+
+
+def crc_family(lst, key):
+    """Software list entries for a key: a set name (its parent and the parent's clones) or an
+    NGH number as CartTest prints it (e.g. 0242: every set whose P files are named 242-...)."""
+    key = key.strip().lower()
+    if key in lst:
+        parent = lst[key].get("cloneof") or key
+        names = [n for n, sw in lst.items() if n == parent or sw.get("cloneof") == parent]
+        return sorted(names, key=lambda n: (n != parent, n))
+    if key.isdigit():
+        pre = f"{int(key, 10):03d}-"
+        return sorted(n for n, sw in lst.items() if any(
+            (r[0] or "").lower().startswith(pre) for r in sw["areas"].get("maincpu", (0, []))[1]))
+    raise ValueError(f"'{key}' is neither a set of the list nor an NGH number")
+
+
+def format_crc_plan(lst, key, list_name="neogeo.xml"):
+    """A BricoNeo console script (pasted at once: ';' lines are comments for the console too)."""
+    names = crc_family(lst, key)
+    if not names:
+        raise ValueError(f"no set of {list_name} matches '{key}'")
+    groups = {}                                     # same commands -> one block, every set's CRCs
+    for n in names:
+        plan = crc_plan(lst[n])
+        sig = tuple((tuple(c), r) for (_, _, _, c, r) in plan)
+        groups.setdefault(sig, []).append((n, plan))
+    lines = [f"; CartCRC plan from the official MAME list {list_name}: '{key}' ({len(names)} set(s))",
+             "; Paste the lines into the BricoNeo console (needs WRAM: run TestWRAM first).",
+             "; The last 'CRC32 $' printed for each P file must be one of the values listed for it;",
+             "; none: that P file reads wrong (bad chip, bad contact, or a set not in the list).",
+             "; Protected carts (SMA, PVC, encrypted P) cannot match: the list has the file CRCs."]
+    for g, (sig, members) in enumerate(groups.items(), 1):
+        if len(groups) > 1:
+            lines.append(f"; ===== layout {g} of {len(groups)}: {', '.join(m for m, _ in members)}")
+        nfiles = len(members[0][1])
+        for i in range(nfiles):
+            file, _, size, cmds, remark = members[0][1][i]
+            lines.append(f"; --- P file {i + 1} of {nfiles} ({size // 1024} KiB)")
+            for m, plan in members:
+                f2, crc2 = plan[i][0], plan[i][1]
+                lines.append(f";   {m:<10} {f2:<14} CRC32 ${(crc2 or 'no good dump known').upper()}"
+                             f"   {lst[m]['description']}")
+            if remark:
+                lines.append(f";   not checkable: {remark}")
+            lines += cmds
+    return "\n".join(lines) + "\n"
+
+
+def crc_check(host, lst, key):
+    """Runs the CartCRC plan of 'key' on the console behind host and compares each P file's CRC
+    with the official list: report text (what the user does by hand on a real console)."""
+    names = crc_family(lst, key)
+    if not names:
+        raise ValueError(f"no set of the list matches '{key}'")
+    groups = {}
+    for n in names:
+        plan = crc_plan(lst[n])
+        groups.setdefault(tuple((tuple(c), r) for (_, _, _, c, r) in plan), []).append((n, plan))
+    out, full, unchecked = [], set(), False
+    for sig, members in groups.items():
+        ok_sets = {m for m, _ in members}
+        for i, (cmds, remark) in enumerate(sig):
+            if remark or not cmds:
+                out.append(f"P file {i + 1}: not checkable ({remark or 'no command'})")
+                ok_sets = set()
+                continue
+            crc = None
+            for c in cmds:
+                st, txt, _ = host.run_blocking(c)
+                m = re.search(r"CRC32 \$([0-9A-F]{8})", txt)
+                if st != "eot" or not m:
+                    out.append(f"P file {i + 1}: not checked, '{c}' gave {st}: {txt.strip()[:120]}")
+                    crc = None
+                    break
+                crc = m.group(1).lower()
+            if crc is None:
+                ok_sets, unchecked = set(), True
+                continue
+            hit = [m for m, plan in members if crc and plan[i][1] == crc]
+            ok_sets &= set(hit)
+            out.append(f"P file {i + 1}: CRC32 ${(crc or '--------').upper()} -> " +
+                       (", ".join(f"{m} ({members[[x for x, _ in members].index(m)][1][i][0]})" for m in hit)
+                        if hit else "no set of the list: this P file reads wrong, or the set is unknown"))
+        full |= ok_sets
+    out.append("=> every P file matches: " + ", ".join(sorted(full)) if full else
+               "=> not checked: fix the error above first" if unchecked else
+               "=> no set of the list matches all the P files")
+    return "\n".join(out)
+
+
+def run_crc_plan(host, script):
+    """Runs a CartCRC plan on the emulator: [(command, status, CRC32 printed or None)]."""
+    res = []
+    for line in script.splitlines():
+        if not line.strip() or line.startswith(";"):
+            continue
+        st, txt, _ = host.run_blocking(line)
+        m = re.search(r"CRC32 \$([0-9A-F]{8})", txt)
+        res.append((line, st, m.group(1) if m else None))
+    return res
+
+
+def load_cartridge(path, softlist=None):
+    """A game ROM set (folder or MAME zip) -> CartImage. With the official MAME list
+    (hash/neogeo.xml) the set is identified by its CRCs, loaded with the list's layout and
+    every chip checked; without it, P1/P2 are found by name and the byte order by the
+    NEO-GEO header (CRCs listed, not checked)."""
+    from pathlib import Path
+    files = read_rom_set(path)
+    crcs = {n: _crc(d) for n, d in files.items()}
+    by_crc = {crcs[n]: d for n, d in files.items()}
+    notes, chips = [], []
+    if softlist:
+        lst = parse_softlist(softlist) if not isinstance(softlist, dict) else softlist
+        best, score = None, 0
+        for sname, sw in lst.items():
+            want = {c for _, (_, roms) in sw["areas"].items() for (_, _, _, c, _) in roms if c}
+            s = len(want & set(by_crc))
+            if s > score or (s == score and s and sname == Path(path).stem.lower()):
+                best, score = sname, s
+        if best is None:
+            notes.append(f"No software of {Path(str(softlist)).name if not isinstance(softlist, dict) else 'the list'} "
+                         "matches these files' CRC32: unknown or bad dump. Layout guessed from the header.")
+        else:
+            sw = lst[best]
+            seen = set()
+            for area, (size, roms) in sw["areas"].items():
+                for name, off, sz, crc, lf in roms:
+                    if not name:
+                        continue
+                    got = by_crc.get(crc) if crc else None
+                    fname = next((n for n in files if crcs[n] == crc), None) if got is not None else None
+                    if got is None and name.lower() in files:
+                        fname = name.lower()
+                    if fname:
+                        seen.add(fname)
+                    st = ("OK" if fname and crcs[fname] == crc else
+                          "MISSING" if not fname else "BAD CRC (dump differs from the official list)")
+                    if not crc:
+                        st = "no CRC in the list (no good dump known)" if fname else "MISSING"
+                    chips.append({"chip": CHIP_AREAS.get(area, area), "file": fname or name,
+                                  "size": len(files[fname]) if fname else None,
+                                  "crc": crcs.get(fname), "expected": crc, "status": st})
+            for n in files:
+                if n not in seen:
+                    chips.append({"chip": _chip_of(n), "file": n, "size": len(files[n]), "crc": crcs[n],
+                                  "expected": None, "status": "not in the list for this game"})
+            if "maincpu" not in sw["areas"]:
+                raise ValueError(f"{best}: the list has no maincpu (P ROM) area")
+            size, roms = sw["areas"]["maincpu"]
+            maincpu = _build_area(size, roms, files, by_crc)
+            if maincpu is None:
+                raise ValueError(f"{best}: P ROM file missing, cannot insert the cartridge")
+            bad = [c for c in chips if c["status"] != "OK"]
+            notes.append(f"Identified as '{best}' ({sw['description']}) by {score} CRC32 from the official list"
+                         + (f"; {len(bad)} chip(s) not OK" if bad else "; every chip OK"))
+            if any(c["status"] == "MISSING" for c in chips):
+                notes.append("MISSING: not in this set. A MAME split clone set keeps the chips it shares in "
+                             "its parent's zip: merge them, or check the parent too.")
+            notes.append(format_crc_plan(lst, best, "neogeo.xml" if isinstance(softlist, dict)
+                                         else Path(str(softlist)).name).rstrip("\n"))
+            return CartImage("game", _p_window(maincpu), f"{best} - {sw['description']}", chips, notes)
+    # no list (or no match): P1 / P2 by name, byte order and layout by the header
+    ps = sorted((n for n in files if _chip_of(n) == "P"),
+                key=lambda n: int(re.search(r"p(\d)", n).group(1)) if re.search(r"p(\d)", n) else 9)
+    if not ps:
+        raise ValueError("no P ROM file (name with p1 / p2) in the set")
+    p1 = files[ps[0]]
+    swap = None
+    for sw_ in (True, False):
+        d = _word_swap(p1) if sw_ else p1
+        if d[0x100:0x107] == b"NEO-GEO":
+            swap, layout = sw_, "flat"
+        elif len(d) > 0x100107 and d[0x100100:0x100107] == b"NEO-GEO":
+            swap, layout = sw_, "halves"
+        if swap is not None:
+            break
+    if swap is None:
+        raise ValueError(f"{ps[0]}: no NEO-GEO header in either byte order (encrypted or not a P1)")
+    conv = (lambda d: _word_swap(d)) if swap else (lambda d: d)
+    p = conv(p1)
+    if layout == "halves":              # MAME ROM_CONTINUE: second MB at $000000, first at $100000
+        p = p[0x100000:0x200000] + p[:0x100000] + p[0x200000:]
+    maincpu = p                         # P1 (then P2 bank 0.. when the P1 file is over 1 MB)
+    for n in ps[1:]:
+        if len(maincpu) < 0x100000:
+            maincpu = (maincpu * (0x100000 // len(maincpu) + 1))[:0x100000]
+        maincpu += conv(files[n])
+    for n in files:
+        chips.append({"chip": _chip_of(n), "file": n, "size": len(files[n]), "crc": crcs[n],
+                      "expected": None, "status": "not checked (no official list)"})
+    notes.append(f"P ROM {'byte-swapped files (MAME order)' if swap else 'files in 68000 order'}, "
+                 f"layout from the NEO-GEO header{' (P1 halves swapped, ROM_CONTINUE)' if layout == 'halves' else ''}. "
+                 "Give the MAME list hash/neogeo.xml to check every chip's CRC32.")
+    return CartImage("game", _p_window(maincpu), Path(path).stem, chips, notes)
+
+
 # Simulated faults
 # ---------------------------------------------------------------------------
-FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4, "bios": 5}
+FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4, "bios": 5, "cart": 6}
 REGION_NAMES = {0: "WRAM", 1: "Palette RAM", 2: "VRAM lower (slow)", 3: "VRAM upper (fast)",
-                4: "LSPC line counter", 5: "BIOS socket (68000 -> BricoNeo)"}
-FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2, "float": 3}
+                4: "LSPC line counter", 5: "BIOS socket (68000 -> BricoNeo)", 6: "Cartridge slot P bus"}
+FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2, "float": 3, "strobe": 2}
+STROBES = ["portwel", "portweu", "romoel", "romoeu"]
 # the BIOS socket has no data faults: a bad D line stops the boot, nothing to test
-DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8, 5: -1}
-ADDR_RANGE = {0: (1, 15), 1: (1, 13), 2: (0, 14), 3: (0, 10), 5: (1, 16)}
+DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8, 5: -1, 6: 15}
+ADDR_RANGE = {0: (1, 15), 1: (1, 13), 2: (0, 14), 3: (0, 10), 5: (1, 16), 6: (1, 19)}
 
 FAULT_HELP = ("Fault syntax: REGION:data:BIT:0|1 (data bit stuck), REGION:addr:LINE:0|1 (address line stuck),\n"
               "wram:lane:lower|upper (WRAM chip dead), bios:float:LINE (BIOS socket line unstable).\n"
-              "REGION = wram, pal, vramlo, vramhi, line, bios. Bits: data 0-15 (line counter 0-8);\n"
+              "REGION = wram, pal, vramlo, vramhi, line, bios, cart. Bits: data 0-15 (line counter 0-8);\n"
               "address WRAM A1-A15, pal A1-A12 + 13 = bank select, vramlo 0-14, vramhi 0-10,\n"
-              "bios A1-A16 (socket, 68000 -> BricoNeo; address faults only).\n"
+              "bios A1-A16 (socket, 68000 -> BricoNeo; address faults only), cart A1-A19 (slot).\n"
+              "Cartridge slot: cart:data:BIT:0|1, cart:addr:LINE:0|1, cart:float:BIT (D line unstable),\n"
+              "cart:strobe:portwel|portweu|romoel|romoeu (strobe dead). Needs --cart test or diag.\n"
               "Example: --fault wram:data:5:1 --fault pal:addr:13:0 --fault bios:addr:15:1")
 
 
@@ -204,8 +669,16 @@ def parse_fault(spec):
     if len(parts) < 3 or parts[0] not in FAULT_REGIONS or parts[1] not in FAULT_KINDS:
         raise ValueError(f"bad fault '{spec}'. " + FAULT_HELP.splitlines()[0])
     region, kind = FAULT_REGIONS[parts[0]], FAULT_KINDS[parts[1]]
+    if kind == 2 and region == 6:
+        if parts[1] != "strobe" or len(parts) != 3 or parts[2] not in STROBES:
+            raise ValueError("cartridge strobe: cart:strobe:portwel|portweu|romoel|romoeu")
+        return region, kind, 0, STROBES.index(parts[2])
+    if kind == 3 and region == 6:
+        if len(parts) != 3 or not parts[2].isdigit() or not 0 <= int(parts[2]) <= 15:
+            raise ValueError("unstable data line: cart:float:BIT, BIT 0-15")
+        return region, kind, int(parts[2]), 0
     if kind == 2:
-        if region != 0 or parts[2] not in ("lower", "upper"):
+        if region != 0 or parts[1] != "lane" or parts[2] not in ("lower", "upper"):
             raise ValueError("byte lane faults: wram:lane:lower or wram:lane:upper")
         return region, kind, 0, 1 if parts[2] == "upper" else 0
     if kind == 3:
@@ -231,6 +704,10 @@ def parse_fault(spec):
 def describe_fault(f):
     region, kind, bit, value = f
     name = REGION_NAMES[region]
+    if kind == 2 and region == 6:
+        return f"{name}: /{STROBES[value].upper()} dead"
+    if kind == 3 and region == 6:
+        return f"{name}: data line D{bit} unstable"
     if kind == 2:
         return f"{name}: {'upper (D8-D15)' if value else 'lower (D0-D7)'} chip dead"
     if kind == 0:
@@ -245,6 +722,8 @@ def describe_fault(f):
 def fault_spec(f):
     region, kind, bit, value = f
     r = {v: k for k, v in FAULT_REGIONS.items()}[region]
+    if kind == 2 and region == 6:
+        return f"{r}:strobe:{STROBES[value]}"
     if kind == 2:
         return f"{r}:lane:{'upper' if value else 'lower'}"
     if kind == 3:

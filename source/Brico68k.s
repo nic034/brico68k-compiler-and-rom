@@ -88,28 +88,30 @@ BRICO_COMMAND_PARAM_3:
 
 EXTENSIONS_TABLE:
 	; Available extensions list. Ends with address $ffffffff
-	DECLARE_EXTENSION EXT_ECHO, 			BRICO_EXT_OUTPUT_TYPE_WORD,		"Echo",				"Echo test. Place value to be returned in P1 (no WRAM used)"
-	DECLARE_EXTENSION EXT_READ, 			BRICO_EXT_OUTPUT_TYPE_WORD,		"Read",				"Read word at address P1. Odd address: reads the byte (e.g. $320001). (no WRAM used)"
-	DECLARE_EXTENSION EXT_WRITE, 			BRICO_EXT_OUTPUT_TYPE_VOID,		"Write",			"Write word P1 at address P2. Odd address: writes the low byte of P1. (no WRAM used)"
-	DECLARE_EXTENSION EXT_WRITE_B, 			BRICO_EXT_OUTPUT_TYPE_VOID,		"WriteB",			"Write the low byte of P1 at address P2, even or odd (no WRAM used)"
-	DECLARE_EXTENSION EXT_MEMDUMP, 			BRICO_EXT_OUTPUT_TYPE_DUMP,		"Dump",				"Memory dump. Start address in P1 (forced even), word count in P2, at most 2045 (BricoNeo buffer: 2048 words). (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_INPUTS,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestInp",			"Inputs tests, NEO-F0 / NEO-C1 (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_AUDIO,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestAudio",		"Audio test (UniBIOS-like): Z80 handshake, then left, right and center beeps, ~1 s each; a new command stops them. Uses WRAM (stack)."
-	DECLARE_EXTENSION EXT_EYE_SND,			BRICO_EXT_OUTPUT_TYPE_VOID,		"PlayEyeSnd",		"Plays the eyecatcher music (Z80 sound command $02: SM1 driver on MVS, cartridge M1 on AES)"
-	DECLARE_EXTENSION EXT_TEST_WRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestWRAM",			"Work RAM test: data bus walking 1/0, 0000/FFFF/AAAA/5555, increment (address lines). On error: address, expected, read, bad bits, byte (D0-D7/D8-D15). (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_BRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBRAM",			"MVS Backup RAM test, same tests as TestWRAM. DESTRUCTIVE: erases bookkeeping/settings. N/A on AES (no backup RAM). (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_PRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestPRAM",			"Palette RAM test on BOTH banks (same tests as TestWRAM) + bank 0/1 independence (bank select line). (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_VRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestVRAM",		"All VRAM, slow and fast: data bus walking 1/0, each address line (A0-A14 / A0-A10), March C- $5555/$AAAA on every word; names the bad bits and the chip (upper/lower byte). $8600-$86FF (sprite lists) skipped. (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_LSPC,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestLSPC",			"LSPC2-A2 chip test: VRAMMOD write/readback, VRAMADD+VRAMRW round-trip, VRAM auto-inc. (no WRAM used)"
-	DECLARE_EXTENSION EXT_COLOR,			BRICO_EXT_OUTPUT_TYPE_VOID,		"Color",			"Fill the screen using only palette RAM with the given color value, in NeoGeo color format. Red is $CF00, Green is $20F0, Blue is $900F, White is $7FFF, Black is $8000. (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_STATUSA,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestStatusA",		"STATUS_A breakdown, AES/MVS-aware: coin 1/2, service button, RTC bits on MVS; N/A messages on AES (bit layout per MAME neogeo.cpp). (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_Z80,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestZ80",			"Z80 handshake without WRAM: 03 reset, 01 request, needs 16 stable fresh 01 replies; flags a latch echo. STOPS SOUND. Needs a standard SM1/M1 driver. A timeout does not prove the Z80 is dead. (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_DAC,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestDAC",			"RGB DAC test pattern: 16 bands, one colour bit each (R4..R0, G4..G0, B4..B0, white), shown until the next command. P1=1: dark bit set. P1=$10+n: full screen band n (n=0..15), for scope/multimeter. (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_TIMING,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestTiming",		"Video timing: LSPC line counter alive, +1 steps (stuck bit), $F8-$1FF range, lines per frame, NTSC/PAL bit, auto-animation counter, CPU cycles per frame. (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_WATCHDOG,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestWatchdog",		"Watchdog: 1st run stops kicking it (expect a reset in ~0.13 s on MVS), run again to read the result and time. Uses WRAM $10FFE0. Not emulated by MAME on AES."
-	DECLARE_EXTENSION EXT_CHIP_CHECK,		BRICO_EXT_OUTPUT_TYPE_STRING,	"ChipCheck",		"Quick state of the board, one line per part (< 1 s): WRAM, palette RAM, VRAM slow/fast, LSPC2 registers, NEO-C1 ports, VBLANK/timer IRQ, Z80, NEO-D0 clocks (68KCLK vs the BricoNeo 1 ms, 24 MHz, 6 MHz). IRQs use WRAM (stack)."
-	DECLARE_EXTENSION EXT_TEST_SYSTYPE,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestSystype",		"SYSTYPE breakdown, AES/MVS-aware: TEST button, JAMMA sense on MVS; unmapped/open-bus on AES (bit layout per MAME neogeo.cpp). (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_BUS,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBus",			"BIOS socket, 68000 -> BricoNeo, as NeoDiag: A15/A16 from the mirror bytes, A1-A14/D0-D15 by CRC32. Text + 16 screen bands (A1 at the top) until the next command. Also run at boot. (no WRAM used)"
+	DECLARE_EXTENSION EXT_ECHO, 			BRICO_EXT_OUTPUT_TYPE_WORD,		"Echo",				"Returns P1. No WRAM."
+	DECLARE_EXTENSION EXT_READ, 			BRICO_EXT_OUTPUT_TYPE_WORD,		"Read",				"Word at address P1 (odd address: the byte). No WRAM."
+	DECLARE_EXTENSION EXT_WRITE, 			BRICO_EXT_OUTPUT_TYPE_VOID,		"Write",			"Writes word P1 at address P2 (odd address: low byte). No WRAM."
+	DECLARE_EXTENSION EXT_WRITE_B, 			BRICO_EXT_OUTPUT_TYPE_VOID,		"WriteB",			"Writes the low byte of P1 at address P2. No WRAM."
+	DECLARE_EXTENSION EXT_MEMDUMP, 			BRICO_EXT_OUTPUT_TYPE_DUMP,		"Dump",				"Words from address P1 (even), count P2, at most 2045 (BricoNeo buffer). No WRAM."
+	DECLARE_EXTENSION EXT_TEST_INPUTS,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestInp",			"Controllers, memory card detect, AES/MVS (NEO-F0, NEO-C1). No WRAM."
+	DECLARE_EXTENSION EXT_TEST_AUDIO,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestAudio",		"Z80 handshake, then left/right/centre beeps ~1 s each; a new command stops them. Needs WRAM (stack)."
+	DECLARE_EXTENSION EXT_EYE_SND,			BRICO_EXT_OUTPUT_TYPE_VOID,		"PlayEyeSnd",		"Eyecatcher music: Z80 command $02 (SM1 on MVS, cartridge M1 on AES). No WRAM."
+	DECLARE_EXTENSION EXT_TEST_WRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestWRAM",			"Work RAM: data walking 1/0, byte writes, each address line, March C-. Names bad bits and chip. No WRAM."
+	DECLARE_EXTENSION EXT_TEST_BRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBRAM",			"MVS backup RAM, as TestWRAM. ERASES settings. N/A on AES. No WRAM."
+	DECLARE_EXTENSION EXT_TEST_PRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestPRAM",			"Palette RAM, both banks, as TestWRAM (no byte test) + bank select. No WRAM."
+	DECLARE_EXTENSION EXT_TEST_VRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestVRAM",		"Slow and fast VRAM: data walking 1/0, each address line, March C-; names bits and chip. $8600-$86FF skipped. No WRAM."
+	DECLARE_EXTENSION EXT_TEST_LSPC,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestLSPC",			"LSPC2-A2 registers: VRAMMOD read-back, VRAM address/data round trip, auto-increment. No WRAM."
+	DECLARE_EXTENSION EXT_COLOR,			BRICO_EXT_OUTPUT_TYPE_VOID,		"Color",			"Whole screen in colour P1 (palette RAM only), e.g. red $CF00, green $20F0, blue $900F, white $7FFF. No WRAM."
+	DECLARE_EXTENSION EXT_TEST_STATUSA,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestStatusA",		"STATUS_A: coins, service, RTC (MVS). No WRAM."
+	DECLARE_EXTENSION EXT_TEST_Z80,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestZ80",			"Z80 handshake 03/01/03, 16 stable replies, latch echo flagged. Stops sound. Needs the SM1/M1 driver. No WRAM."
+	DECLARE_EXTENSION EXT_TEST_DAC,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestDAC",			"RGB DAC: 16 bands, one colour bit each, until the next command. P1=1: dark bit. P1=$10+n: band n full screen. No WRAM."
+	DECLARE_EXTENSION EXT_TEST_TIMING,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestTiming",		"LSPC line counter (steps, range, lines/frame, NTSC/PAL), auto-animation, CPU cycles per frame. No WRAM."
+	DECLARE_EXTENSION EXT_TEST_WATCHDOG,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestWatchdog",		"Run 1 stops kicking the watchdog (reset ~0.13 s), run 2 reports the reset and delay. Uses WRAM $10FFE0."
+	DECLARE_EXTENSION EXT_CHIP_CHECK,		BRICO_EXT_OUTPUT_TYPE_STRING,	"ChipCheck",		"One line per part, < 1 s: WRAM, palette, VRAM, LSPC2, NEO-C1 ports, IRQs, Z80, NEO-D0 clock ratios. IRQs need WRAM."
+	DECLARE_EXTENSION EXT_TEST_SYSTYPE,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestSystype",		"SYSTYPE: TEST button, JAMMA sense (MVS). No WRAM."
+	DECLARE_EXTENSION EXT_TEST_BUS,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBus",			"BIOS socket 68000 -> BricoNeo: A15/A16 (NeoDiag mirrors), A1-A14/D0-D15 (CRC32); 16 screen bands. Run at boot. No WRAM."
+	DECLARE_EXTENSION EXT_CART_TEST,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartTest",			"P bus D0-D15. Game cart, read only: P1 security code names stuck/open lines, P2 activity (P1=1 forces it). Diag PROG board: write/read D0-D15, lanes, A1-A19, /ROMOE. No WRAM."
+	DECLARE_EXTENSION EXT_CART_CRC,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartCRC",			"P ROM CRC32 in MAME file order. P1=address (+bank<<24), P2=bytes (<=$40000), P3=CRC so far, -1 continue. Uses WRAM."
 	; Version: written by hand (not DECLARE_EXTENSION) so that the description
 	; takes the fork version from FORK_VERSION, its only definition
 	dc.l EXT_VERSION
@@ -118,7 +120,7 @@ EXTENSIONS_TABLE:
 	align 1
 	dc.b "Fork version "
 	FORK_VERSION
-	dc.b ": Nic034 fork of Aurelien34/Brico68k 1.35 (the header keeps 1.35). Prints it with its source. (no WRAM used)",0
+	dc.b ": Nic034 fork of Aurelien34/Brico68k 1.35 (header: 1.35). No WRAM.",0
 	align 1
 	dc.l $ffffffff ; No more extensions
 

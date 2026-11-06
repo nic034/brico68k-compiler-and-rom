@@ -3,36 +3,28 @@
     global EXT_TEST_WRAM
     global EXT_TEST_BRAM
     global EXT_TEST_PRAM
+    global RAM_SUITE
+    global RAM_FAILED
 
 	section	text
 
 ; =============================================================================
 ; Work RAM / Backup RAM / Palette RAM tests. No WRAM used, no stack.
 ;
-; Per region (and per palette bank for PRAM):
-;   1. Data bus walking 1 / walking 0 on the first word. After each write,
-;      the complement is written to the NEXT word before reading back, so a
-;      floating data bus (dead chip, open trace) can't fake a pass by
-;      keeping the last written value on the bus.
-;   2. Fill + verify with $0000, $FFFF, $AAAA, $5555 (stuck bits, adjacent
-;      bit shorts inside a word).
-;   3. Increment (address) test: each word holds its own address/2 -
-;      detects address lines stuck/shorted/open (aliasing).
-;   PRAM only: both palette banks are tested (the previous version only
-;   tested whichever bank happened to be selected = half of the palette
-;   RAM, and never the bank select line), then a bank independence test:
-;   bank 0 = increment, bank 1 = its complement, both verified.
+; One test suite (RAM_SUITE, described below) per region, and per palette
+; bank for PRAM: data bus walking 1/0, byte writes, named address lines,
+; March C-. PRAM then checks bank 0 / bank 1 independence (the bank select
+; line). CartTest reuses RAM_SUITE on the diagnostic PROG board SRAM
+; (region type 3, cartridge P bus at $200000).
 ;
-; On the first error the test stops and reports the address, the expected
-; and read words, the bad bits (XOR) and which byte they are in. Each of
-; these RAMs is two 8-bit chips (upper byte D8-D15, lower byte D0-D7): the
-; byte tells which chip / side to look at.
+; On the first error the test stops and reports the step, the address, the
+; expected and read words, the bad bits (XOR) and which byte they are in.
+; WRAM, BRAM and PRAM are each two 8-bit chips (upper byte D8-D15, lower
+; byte D0-D7): the byte tells which chip / side to look at. The PROG board
+; is one 16-bit SRAM: the byte names the slot data lines and write strobe.
 ;
-; The fill/verify loops use long accesses unrolled x8. A long access is
-; exactly two consecutive word bus cycles (same addresses, same data):
-; identical test from the RAM's point of view, half the loop overhead. The
-; BricoNeo host gives up after 3 s (Brico16Bits CommandExtension.cpp), so
-; the extra coverage above had to be paid for with faster loops.
+; The BricoNeo host gives up after 3 s (Brico16Bits CommandExtension.cpp):
+; the March is limited to 64 KiB per region (the whole WRAM).
 ;
 ; SIMULATOR NOTE: tools/bricosim.py runs this code on Unicorn 2.1.4, whose
 ; M68K backend crashes (UC_ERR_EXCEPTION) on NOT.B/.W, NEG.B/.W, NEGX.W,
@@ -43,7 +35,8 @@
 ; index). Zero effect on real hardware.
 ;
 ; Registers:  a5 = region start, a4 = region end (exclusive)
-;             d7.b = 0 WRAM / 1 BRAM / 2 PRAM, bit 8 of d7 = palette bank
+;             d7.b = 0 WRAM / 1 BRAM / 2 PRAM / 3 cartridge P bus (diagnostic
+;             PROG board SRAM, from CartTest), bit 8 of d7 = palette bank
 ;             a3 = return address of RAM_SUITE, a2 = return of the helpers
 ;             Print/PrintA1 clobber a0/a1/d0/a6, printWord d0/d2/d4/a0/a6.
 ; =============================================================================
@@ -159,11 +152,11 @@ START_TEST:
 ; ADDR_ERROR (never returns). Steps (step id in bits 16-23 of d7):
 ;   1 data bus walking 1 / walking 0 on the first word (complement written to
 ;     the next word before each read: a floating bus cannot fake a pass);
-;   2 byte writes, WRAM/BRAM only: each byte written alone must change only
+;   2 byte writes, WRAM/BRAM/cartridge only: each byte written alone must change only
 ;     its own chip (NEO-C1 WWU/WWL, 68000 UDS/LDS). Not on palette RAM: a
 ;     byte write there sets both bytes (neogeodev wiki, "Palettes");
-;   3 address lines A1-A15 (palette: A1-A12 per bank), each named, stuck at
-;     0 or at 1;
+;   3 address lines A1-A15 (palette: A1-A12 per bank, cartridge: A1-A19),
+;     each named, stuck at 0 or at 1;
 ;   4 March C- on every word, background $5555 / $AAAA (each bit sees 0 and
 ;     1, neighbouring data lines always opposite, coupling and address
 ;     decoder faults by the march order):
@@ -235,8 +228,12 @@ RAM_SUITE:
 	Print "> Address lines Test "
 	moveq #15,d3				; highest line: A15 (64 KiB)
 	cmp.b #2,d7
-	bne.s .hiLine
+	bne.s .notPal
 	moveq #12,d3				; palette bank: 8 KiB, A12
+.notPal:
+	cmp.b #3,d7
+	bne.s .hiLine
+	moveq #19,d3				; cartridge P bus: 1 MiB, A19
 .hiLine:
 	moveq #0,d2					; d2 = bad lines (bit k = Ak)
 	moveq #0,d6					; d6 = bad bits seen (which chip)
@@ -278,7 +275,7 @@ RAM_SUITE:
 	addq.w #1,d4
 	cmp.w d3,d4
 	bls.s .al3
-	tst.w d2
+	tst.l d2					; .l: cartridge lines A16-A19 are in the high word
 	bne ADDR_ERROR
 	move.l #RAMT_TXT_SUCCESS,a1
 	PrintA1
@@ -506,7 +503,17 @@ RAM_ERROR:
 	cmp.w #16,d4
 	bne .bits
 	PrintLn ""
+	cmp.w #$FFFF,d6				; walking test, every bit wrong: what was written
+	bne.s .notA1				; at +2 answered
+	move.l d7,d0
+	swap d0
+	cmp.b #1,d0					; step 1 only (a March element reads its own word)
+	bne.s .notA1
+	PrintLn "  All bits : address line A1? (the word at +2 answered)"
+.notA1:
 CHIP_REPORT:					; d6.w = bad bits (also reached from ADDR_ERROR)
+	cmp.b #3,d7
+	beq CART_REPORT
 	Print "  Chip     : "
 	move.w d6,d0
 	and.w #$00FF,d0
@@ -550,6 +557,7 @@ CHIP_REPORT:					; d6.w = bad bits (also reached from ADDR_ERROR)
 .bank1:
 	PrintLn "  Palette bank : 1"
 .final:
+RAM_FAILED:
 	move.l #RAMT_TXT_FINAL,a1
 	PrintA1
 	move.l #RAMT_TXT_FAILURE,a1
@@ -574,17 +582,43 @@ ADDR_ERROR:
 	JsrA6 printDec				; keeps d4, d6, a4
 .n:
 	addq.w #1,d4
-	cmp.w #16,d4
+	cmp.w #20,d4
 	bne .l
 	PrintLn ""
+	cmp.b #3,d7
+	bne.s .anotCart
+	PrintLn "  Cartridge slot address line: slot contact, cartridge edge or console trace."
+	jmp RAM_FAILED				; one 16-bit SRAM: no byte to name
+.anotCart:
 	cmp.b #2,d7
 	beq .apal
-	PrintLn "  Shared by both chips: 68000 address bus or both chips' pins; seen by one chip only: that chip's pin."
+	PrintLn "  Both chips: 68000 address bus or both chips' pins; one chip only: that chip's pin."
 	bra .aend
 .apal:
-	PrintLn "  Shared by both chips: NEO-B1 palette address switch or both chips' pins; one chip only: that chip's pin."
+	PrintLn "  Both chips: NEO-B1 palette address switch or both chips' pins; one chip: that chip's pin."
 .aend:
 	jmp CHIP_REPORT
+
+; Cartridge P bus (one 16-bit SRAM on the diagnostic PROG board): name the
+; byte and the slot signals instead of a chip.
+CART_REPORT:
+	Print "  Byte     : "
+	move.w d6,d0
+	and.w #$00FF,d0
+	beq.s .cu
+	move.w d6,d0
+	and.w #$FF00,d0
+	beq.s .cl
+	PrintLn "both (D0-D15)"
+	bra.s .ch
+.cu:
+	PrintLn "upper (D8-D15, write strobe PORTWEU)"
+	bra.s .ch
+.cl:
+	PrintLn "lower (D0-D7, write strobe PORTWEL)"
+.ch:
+	PrintLn "  Hint     : slot contact, cart edge or console trace; whole byte: strobe"
+	jmp RAM_FAILED
 
 RAM_ALL_OK:
 	move.l #RAMT_TXT_FINAL,a1

@@ -11,11 +11,11 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.4 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.11: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.12: tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
 | `rom/ROM.BIO` | Ready-to-use ROM, 128 KB: 32 KB of code + CRC32 + 3 mirrors, exactly what the BricoNeo builds itself for header flag `$0004` (SHA-256 in `rom/ROM.BIO.sha256`) |
 | `brico16bits/` | Optional Brico16Bits patch (EXCPT: 68000 exception reports). Syntax-checked only, not built for the Pico, not run |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
-| `tools/` | MAME test bench and its synthetic test cartridge |
+| `tools/` | MAME test bench and its synthetic test cartridge (game header + security code) |
 | `emulator/` | Emulator core source (Neo Geo model + host) and its build script |
 | `bench/` | Session to paste into the real BricoNeo console, and the expected healthy output |
 | `CHANGELOG.md` | What changed, release by release, with checksums and checks |
@@ -85,10 +85,30 @@ MAME's driver:
   for palette writes and the 68000 puts the byte on both halves of the bus; neogeodev wiki,
   "Palettes"). MAME writes one byte only. The ROM tests use word accesses; only `WriteB` to the
   palette shows the difference.
-- **Options**: the watchdog and the Z80 program.
+- **Options**: the watchdog, the Z80 program and the cartridge.
+- **Cartridge** (Cartridge tab, one choice at a time; `--cart` in text mode). Changing it powers the
+  console off and on, as you would with a real cartridge:
+  - **No cartridge**: P1 and P2 read `$FFFF`.
+  - **Built-in test cartridge**: a generated 3 MB P ROM (NEO-GEO header, NGH `0999`, the
+    security code at `$186`, two P2 banks), the same bytes as the MAME bench cartridge.
+  - **Game cartridge**: a ROM set, as a folder or a MAME zip. P1 and P2 go on the 68000 bus.
+    The P2 bank latch follows the wiki ("Bankswitching"): a word or odd-byte write anywhere in
+    `$200000-$2FFFFF` (/PORTWEL) latches the bank, and the slot reset brings back bank 0. MAME
+    decodes only `$2FFFF0-$2FFFFF`; the ROM writes there, so both agree. S, C, V and M1 are
+    loaded, and their size and CRC32 are listed. Give the official MAME list
+    (`hash/neogeo.xml`, **Official MAME list** in the Cartridge tab or `--cart-list`) and the set is
+    identified by its CRC32s, loaded with the list's layout (word swap, `ROM_CONTINUE` halves),
+    and every chip is marked OK, BAD CRC, MISSING or "not in the list". The CartCRC plan for its
+    P files is shown too (see below). Without the list, P1/P2 are found by name, and the byte
+    order and layout by the NEO-GEO header.
+  - **Diagnostic PROG board** (jwestfall69 `neogeo-diag-aes-prog`): one 1 MiB 16-bit SRAM read
+    in both P windows and written through P2, with the board's byte-lane decoding from its
+    KiCad netlist (UB, LB, OE, WE from /ROMOEU-L, /PORTOEU-L, /PORTWEU-L).
 - **Not emulated**: the YM2610 (ports `$04`-`$07` read 0) and sound, Z80 ROM banking, sprites,
-  the fix layer, a cartridge and a memory card. The screen shows the backdrop colour of each
-  line, which is enough for TestDAC and Color.
+  the fix layer, protected cartridges (SMA, PVC, CMC, encrypted P: their extra registers read
+  as P ROM) and a memory card. S, C, V and M1 are checked, not used: the cartridge's M1 does
+  not replace the built-in test M1. The screen shows the backdrop colour of each line, which is
+  enough for TestDAC and Color.
 - **Interrupts** (1.9): VBLANK (level 1, line `$F0` + 58 mclk), LSPC timer (level 2, 6 MHz
   pixel clock, `REG_LSPCMODE` bits 4-7, `REG_TIMERHIGH/LOW`, reloads as in MAME) and level 3
   pending from power-on, acknowledged through `REG_IRQACK`. Taken from MAME `neogeo.cpp`.
@@ -102,12 +122,13 @@ MAME's driver:
   **Run script...** (or `--script FILE` in text mode) plays a whole file, such as
   `bench/real_aes_session.txt`.
 
-Checked against MAME, 34 test commands each time (`emulator/compare_mame.py`, an address
-error report included), with word-for-word identical output:
+Checked against MAME, 41 test commands each time (`emulator/compare_mame.py`, an address
+error report, CartTest and CartCRC included), with word-for-word identical output:
 
-- `aes` without a cartridge, against the Z80 without a program: 34 out of 34;
+- `aes` without a cartridge, against the Z80 without a program: 41 out of 41;
 - `aes` with the bench test cartridge, whose real MAME Z80 runs the same M1, against the
-  built-in test M1: 34 out of 34. This covers TestZ80, TestAudio and PlayEyeSnd.
+  built-in test cartridge and test M1: 41 out of 41. This covers TestZ80, TestAudio,
+  PlayEyeSnd, CartTest and CartCRC (P1, and P2 bank 1 through the bank latch).
 
 Nothing to install with pip: the emulator uses only the Python standard library, and its core is
 embedded. The window needs Tkinter. It comes with Python on Windows (python.org installer); on
@@ -116,7 +137,7 @@ missing.
 
 The window (light theme) is a diagnostic dashboard:
 
-- **Sidebar**: the tests grouped by Memory, Video, Sound, Inputs and system, and Tools, each with a
+- **Sidebar**: the tests grouped by Memory, Video, Sound, Inputs and system, Cartridge and Tools, each with a
   result badge, plus a live thumbnail of the screen (click it to enlarge).
 - **Run all tests** chains every test in a sensible order: memory, video, Z80 and audio (with a
   4 s wait for the beeps), inputs, TestWatchdog in two passes (only when the watchdog option is
@@ -126,9 +147,10 @@ The window (light theme) is a diagnostic dashboard:
   raw output and its emulated duration, with Run again and Copy.
 - **Console** tab: the Brico16Bits-like terminal. Commands typed there also update the badges.
 - **Screen** tab: the screen, scaled to the window and keeping the 320:224 ratio.
+- **Cartridge** tab: what is in the slot (see above), with the chip list and the CartCRC plan.
 - **Faults** and **Settings** tabs: see below; Settings also holds the ROM path, the Z80 program,
   the watchdog and the speed.
-- A status bar with lamps (68000, host, Z80, faults), a busy indicator that counts the emulated
+- A status bar with lamps (68000, host, Z80, cartridge, faults), a busy indicator that counts the emulated
   time against the 3 s host limit, and the frame rate.
 
 Badges are read from the text the ROM prints, the way a technician would read it:
@@ -162,6 +184,10 @@ in the ways real boards fail, then see how each test reports it:
 - **BIOS socket address line** A1-A16 between the 68000 and the BricoNeo, stuck at 0 or 1
   (`bios:addr:15:1`) or unstable (`bios:float:15`, a random level on each access). The BricoNeo
   sees the faulty address too (command block, port, EOT). A1-A14 stop the boot, as on a board.
+- **Cartridge slot** (needs a cartridge or the PROG board): data line D0-D15 stuck
+  (`cart:data:3:0`) or unstable (`cart:float:7`), address line A1-A19 stuck (`cart:addr:19:0`),
+  or a strobe dead (`cart:strobe:portwel`, `portweu`, `romoel`, `romoeu`). The same pins serve
+  P1, P2 and the PROG board, reads and writes.
 
 The tab also has presets for typical AES faults. Faults stay active across power cycles, like
 a real hardware fault; a red lamp and the tab title show how many are active. Example:
@@ -172,8 +198,12 @@ python Brico68k_Emulator.py --fault help
 ```
 
 Checked against the MAME bench with the same fault injected (`emulator/compare_mame_faults.py`):
-22 out of 23 outputs are identical, ChipCheck included. That covers WRAM data bits, a dead chip and address lines,
-palette data and address lines, the line counter, and VRAM data. MAME's probes cannot model the
+27 out of 28 outputs are identical without a cartridge, 24 out of 25 with the test cartridge,
+ChipCheck included. That covers WRAM data bits, a dead chip and address lines, palette data and
+address lines, the line counter, VRAM data, cartridge slot data lines (CartTest on the test
+cartridge), and the PROG board: MAME has no such board, so the bench's shadow RAM over
+`$000080-$2FFFFF` with A21 masked off plays it (one RAM seen at `$0xxxxx` and `$2xxxxx`, written
+by byte lanes), healthy and with slot A5 or A19 stuck at 0. MAME's probes cannot model the
 palette bank select, VRAM address lines or the on-screen effect, so those were checked by hand:
 TestPRAM reports bank independence, TestVRAM names the zone and the line, and the R4
 band turns black. The one difference: the bench's palette address fault shares one store
@@ -187,7 +217,7 @@ build is reproducible: the same sources give the same core checksums.
 It fetches Musashi and the Z80 core at pinned commits.
 The build is reproducible: it gives the same binaries.
 
-## ROM contents: 23 extensions
+## ROM contents: 25 extensions
 
 Commands are typed on the Brico16Bits console. "No WRAM" means the test never relies on
 work RAM (no stack), so it still runs on a board with dead WRAM.
@@ -195,7 +225,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | Command | No WRAM | What it does |
 |---|:-:|---|
 | **ChipCheck** | partly | Quick state of the board, one line per part, < 1 s (see below) |
-| **Version** | yes | The only place with the fork version: says it is the Nic034 fork, `1.35-nic034-01`, the upstream base and the source. Also in the `?` list. |
+| **Version** | yes | The only place with the fork version: says it is the Nic034 fork, `1.35-nic034-02`, the upstream base and the source. Also in the `?` list. |
 | **TestBus** | yes | BIOS socket, 68000 -> BricoNeo, as NeoDiag does it: A15/A16 from the mirror bytes, A1-A14/D0-D15 by CRC32; text and 16 screen bands (see below). Also run at boot. |
 | Echo, Read, Write, WriteB, Dump | yes | Link check and raw memory access. Odd addresses are handled. Dump: at most 2045 words (BricoNeo buffer: 2048 words, address included). |
 | TestInp | yes | Controllers, memory card detect, AES/MVS mode |
@@ -210,8 +240,82 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | **TestDAC** | yes | RGB DAC pattern: 16 bands, one colour bit each. `P1=1` adds the dark bit; `P1=$10+n` fills the screen with band n for a scope or multimeter. |
 | **TestTiming** | yes | LSPC line counter (+1 steps, range, lines per frame, stuck bits named), CPU cycles per frame, auto-animation counter |
 | **TestWatchdog** | no | First run starves the watchdog; the second run reports the reset and its delay |
+| **CartTest** | yes | Cartridge P bus D0-D15. Game cartridge, read only: P1 by the security code (names stuck / open lines), P2 activity. Diagnostic PROG board: write/read test of D0-D15, both byte lanes, A1-A19 and /ROMOE (see below) |
+| **CartCRC** | yes (CRC tables and state) | CRC32 of P ROM in the byte order of the MAME files, 256 KB per command, continued with `P3 = -1`, to compare with the official MAME list (see below) |
 
 Bold entries are new in this repository.
+
+The code now fills the 32 KB below `$7FFA` (14 bytes free): a new extension needs room made
+elsewhere first (shorter texts, shared code).
+
+### CartTest and CartCRC: the cartridge P bus
+
+**CartTest, game cartridge** (read only):
+
+- Header (`$100` "NEO-GEO", NGH at `$108`, P ROM size at `$10A`, wiki "68k program header") is
+  printed as read: a bad data line changes it too.
+- P1 (`$000000-$0FFFFF`, /ROMOE): every cartridge holds the same 61-word security code, at the
+  address in the long at `$182` (wiki "Security code"). The words were checked against the
+  system ROM's own copy (`neo-epo.bin` `$C12C7C`, `sp-s2.sp1` `$C146A2`): the wiki listing has a
+  typo at word 25 (`$0606` for `$6606`). Every data bit is 1 in some words and 0 in others, so
+  each line is judged both ways: reads 0 where 1 is expected (stuck at 0 or open), reads 1
+  where 0 is expected (stuck at 1 or open), wrong in some words only (bad contact, short).
+  A bad line also corrupts the pointer, so the code is looked for at the pointer and at the
+  pointer with any one or two bits A1-A19 flipped (210 places, the pointer as read first).
+- P1 without the code: its activity is sampled like P2, which names lines that never toggle.
+- P2 (`$200000-$2FFFFF`, /PORTOE): the content depends on the game, so only activity is
+  checked, one word every 16 bytes up to the header size (all of it with `CartTest 1`), never
+  `$2FE000-$2FFFFF` (NEO-SMA registers there: random number generators that step on reads).
+- Verdict: the same lines on P1 and P2 point to the edge, the slot or the console (another
+  cartridge with the same lines = console side); P1 only or P2 only point to that chip.
+- Nothing is written while the header reads. Without a header, the PROG board probe writes
+  bytes at `$200000` and `$255554`: upper byte first (even address: /PORTWEU only; a game
+  cartridge's bank latch takes /PORTWEL), then, only if nothing followed, the lower byte with
+  D0-D2 = 0, so a bank latch can only take bank 0, the bank it has after reset.
+- Limits: an address line fault on a game cartridge shows as "P1 answers but reads wrong", not
+  named (the PROG board names it). Protected cartridges answer the same way as long as their P1
+  is not encrypted.
+
+**CartTest, diagnostic PROG board** (jwestfall69 `neogeo-diag-aes-prog`, destroys its content):
+its SRAM answers in both windows, so the test can write. The probe tolerates bad lines and a
+dead strobe (any bit that follows both writes is enough), then:
+
+1. the RAM suite of TestWRAM on `$200000`: data lines walking 1/0, each byte written alone
+   (/PORTWEU, /PORTWEL), each address line A1-A19 named, March C- on 64 KB;
+2. 32 words written through P2 and read back through P1 (`$000200`): /ROMOEU, /ROMOEL.
+
+Every case was run in the emulator (each data line, A1-A19 at 0 and 1, each strobe) and the
+healthy board, A5 and A19 in MAME too. The PROG board itself has not been run with this ROM.
+
+**CartCRC**: the CRC32 of P ROM as the MAME files hold it (`load16_word_swap`: low byte of
+each word first), to compare with the official MAME list. The ROM cannot hold the list (32 KB),
+so the comparison is yours, or the emulator's:
+
+- `CartCRC P1 P2 P3`: P1 = start address (P1 window, or P2 with the bank in bits 24-26, written
+  at `$2FFFF0` before and bank 0 after), P2 = bytes (at most `$40000`: 256 KB take 1.4 s of the
+  3 s the BricoNeo allows), P3 = the CRC so far: 0 starts a CRC, `$FFFFFFFF` (-1) continues the
+  previous command (P1 must be where it stopped), `$FFFFFFFE` (-2) continues it at another address
+  or bank. The CRC (and its complement, as a check) stay in WRAM between commands, so a plan is
+  a fixed list of lines.
+- **`--crc-plan GAME --cart-list hash/neogeo.xml`**: the emulator writes the plan from the
+  official MAME list, a script to paste into the BricoNeo console (`;` lines are comments there
+  too). GAME is a set name (its clones are included, each with its own CRC32) or an NGH number
+  (`242`: every set whose P files are `242-...`). For each P file: the CRC32 of every listed
+  set, then the commands; the last `CRC32 $` printed must be one of those values. No cartridge
+  needed to write the plan. With `--cart` (a game set or the test cartridge) the emulator also
+  runs the plan and compares, which is what the Cartridge tab's plan shows.
+- A P file CartCRC cannot check is marked "not checkable" and gets no command: loaded other than
+  `load16_word_swap` in the list, sizes not a multiple of 4, `ignore`/`fill` parts, beyond bank 7.
+  Protected cartridges (SMA, PVC, encrypted P ROM) give the CRC of the file as the list holds it
+  only if the P is not scrambled; otherwise it will not match, and the list is not wrong.
+- A start address that crosses a window (P1 `$0FFFFF` to P2) or runs past `$2FE000` reads other
+  things: the plan never does, typed commands are your responsibility.
+- `$000000-$00007F` is the system ROM's vector table at run time: the cartridge's is selected
+  while reading (`REG_SWPROM`, interrupts masked), and the system ROM's again after.
+- 4 KB of WRAM hold the tables (slicing by 4) plus 16 bytes of state; each entry is written, read
+  back, and all are checked again, so a WRAM fault gives an error, never a wrong CRC.
+- Checked: the chained CRCs equal zlib's for the test cartridge's P1 and its 2 MB P2 (two
+  banks), for synthetic sets in both layouts, and MAME gives the same values.
 
 ### RAM and VRAM tests: what each step finds
 
@@ -345,7 +449,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `5859d6b` (2026-10-22, "Fixed remote keyboard detection"). Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-01** (Version command only); the header announces **1.35**, the upstream base; 23 extensions, flags `$0007`, SHA-256 `7f88cd8d6ac9916a30caf1c635ceb52559ecdf91e6cfb4bca39369bff54be5b8` |
+| This ROM | fork version **1.35-nic034-02** (Version command only); the header announces **1.35**, the upstream base; 25 extensions, flags `$0007`, SHA-256 `2f39023ed427e36035236b03480a176a152720d0120a56d10a82e07f0e2d1c55` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
@@ -369,7 +473,7 @@ Brico16Bits recognises the byte order.
 3. Drop `rom/ROM.BIO` at the root of the `BricoNeo` USB drive. The root loads it in RAM only
    and resets the console: your bank 0 is untouched, and the next power cycle brings it back.
    (Put it in a bank folder to keep it.)
-4. Type `?`: the Extensions section must list the 23 commands; `Version` says which build runs. All screen bands green after
+4. Type `?`: the Extensions section must list the 25 commands; `Version` says which build runs. All screen bands green after
    `TestBus` = the BIOS socket path is fine.
 5. Paste the whole of `bench/real_aes_session.txt` into the terminal. The `;` lines are comments
    and `Delay` waits, both built into the BricoNeo console.
@@ -394,7 +498,7 @@ Brico16Bits recognises the byte order.
 in Lua. It needs your own BIOS dumps: `000-lo.lo`, plus `sm1.sm1` and `sfix.sfix` for MVS.
 
 ```
-python3 tools/make_test_cart.py /tmp/testcart          # synthetic cartridge (tiny Z80 M1), nothing copyrighted
+python3 tools/make_test_cart.py /tmp/testcart          # synthetic cartridge (header, security code, tiny Z80 M1), nothing copyrighted
 BRICO_SOUND_ROM=000-lo.lo python3 tools/mame_bench.py rom/ROM.BIO
 BRICO_SOUND_ROM=000-lo.lo BRICO_CART=/tmp/testcart python3 tools/mame_bench.py rom/ROM.BIO TestZ80 TestAudio
 BRICO_SOUND_ROM=000-lo.lo BRICO_DRIVER=neogeo BRICO_MVS_DIR=dumps/ python3 tools/mame_bench.py rom/ROM.BIO TestWatchdog Echo:1 TestWatchdog
@@ -419,6 +523,10 @@ each well under the 3 s host limit.
 ### Known limits (read before trusting a result)
 
 - **Nothing here has been validated on real hardware yet.** MAME is the reference used.
+- **CartTest / CartCRC**: MAME has no PROG board (the bench plays it with a shadow RAM) and no
+  slot address faults on a ROM. The test cartridge's softlist entry needs `<feature name="slot"
+  value="rom"/>`: without it MAME 0.264 maps `$000100-$000103` to a protection handler that reads
+  `$FFFF`.
 - **TestWatchdog**: MAME emulates the watchdog on MVS only, although the AES has the same
   NEO-B1 watchdog (Brico16Bits' own `Reset` command relies on it). On AES in MAME the test
   reports "no reset"; on a real AES it must pass. Commands sent during the 1.5 s starve window

@@ -5,7 +5,8 @@ MAME only loads Neo Geo cartridges through a software list, so this writes:
   <out>/hash/neogeo.xml           one software entry, "brtest"
   <out>/roms/neogeo/brtest/*      the ROM files (MAME naming and byte order)
 Content (all generated, nothing copyrighted):
-  P ROM 3 MB: P1 1 MB + P2 2 MB (2 banks), pseudo-random words, fixed seed.
+  P ROM 3 MB: P1 1 MB + P2 2 MB (2 banks), pseudo-random words, fixed seed,
+              game header and security code (CartTest, CartCRC).
   S1 128 KB : fix tiles, tile $20 blank, other tiles striped.
   M1 64 KB  : tiny Z80 service: $03 = reset (reply $00), $01 = reply $01.
                No YM2610 code: lets TestZ80 / the TestAudio handshake run on AES.
@@ -28,10 +29,32 @@ Z80_BOOT = bytes.fromhex("f331ffffafd30cd308fbc30a00")
 Z80_NMI = bytes.fromhex("db00fe03ca0000fe01c276003e01d30ced45")
 
 
+# Security code: 61 words (neogeodev wiki "Security code"; word 25 is $6606 as in
+# the system ROM, the wiki listing says $0606). Same as the emulator (emu_host.py).
+SECURITY_CODE = [
+    0x7600, 0x4A6D, 0x0A14, 0x6600, 0x003C, 0x206D, 0x0A04, 0x3E2D, 0x0A08, 0x13C0,
+    0x0030, 0x0001, 0x3210, 0x0C01, 0x00FF, 0x671A, 0x3028, 0x0002, 0xB02D, 0x0ACE,
+    0x6610, 0x3028, 0x0004, 0xB02D, 0x0ACF, 0x6606, 0xB22D, 0x0AD0, 0x6708, 0x5088,
+    0x51CF, 0xFFD4, 0x3607, 0x4E75, 0x206D, 0x0A04, 0x3E2D, 0x0A08, 0x3210, 0xE049,
+    0x0C01, 0x00FF, 0x671A, 0x3010, 0xB02D, 0x0ACE, 0x6612, 0x3028, 0x0002, 0xE048,
+    0xB02D, 0x0ACF, 0x6606, 0xB22D, 0x0AD0, 0x6708, 0x5888, 0x51CF, 0xFFD8, 0x3607,
+    0x4E75]
+SEC_AT = 0x186
+
+
 def p_rom():
-    """3 MB of P ROM in 68000 (big-endian) order."""
+    """3 MB of P ROM in 68000 (big-endian) order: pseudo-random words (fixed seed) and a
+    game header: "NEO-GEO", NGH $0999, P ROM size $300000, security code pointer
+    $182 -> $186 (wiki "68k program header"). CartTest / CartCRC read it."""
     rnd = random.Random(0xB1C068)
-    return bytes(rnd.getrandbits(8) for _ in range(3 * 0x100000))
+    p = bytearray(rnd.getrandbits(8) for _ in range(3 * 0x100000))
+    p[0x100:0x108] = b"NEO-GEO\x00"
+    p[0x108:0x10A] = (0x0999).to_bytes(2, "big")
+    p[0x10A:0x10E] = (0x300000).to_bytes(4, "big")
+    p[0x182:0x186] = SEC_AT.to_bytes(4, "big")
+    for i, w in enumerate(SECURITY_CODE):
+        p[SEC_AT + 2 * i:SEC_AT + 2 * i + 2] = w.to_bytes(2, "big")
+    return bytes(p)
 
 
 def word_swap(data):
@@ -85,6 +108,8 @@ def build(out):
            f'\t<software name="{NAME}">\n\t\t<description>Brico68k bench test cartridge</description>\n'
            '\t\t<year>2026</year>\n\t\t<publisher>Brico68k bench</publisher>\n'
            '\t\t<part name="cart" interface="neo_cart">\n'
+           # without it MAME 0.264 maps $000100-$000103 to a protection handler (reads $FFFF)
+           '\t\t\t<feature name="slot" value="rom" />\n'
            '\t\t\t<dataarea name="maincpu" width="16" endianness="big" size="0x300000">\n'
            + rom_xml("brt-p1.p1", files["brt-p1.p1"], 0, sw) + rom_xml("brt-p2.p2", files["brt-p2.p2"], 0x100000, sw) +
            '\t\t\t</dataarea>\n\t\t\t<dataarea name="fixed" size="0x040000">\n'

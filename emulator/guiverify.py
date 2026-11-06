@@ -89,8 +89,8 @@ pump(1.5)
 ext_rows = [i for g in tree.get_children() for i in tree.get_children(g)]
 groups = [tree.item(g, "text") for g in tree.get_children()]
 check("auto power on", st["core"] is not None and st["running"])
-check("23 extensions in the sidebar", len(ext_rows) == 23, str(len(ext_rows)))
-check("grouped by category", groups == ["Overview", "Memory", "Video", "Sound", "Inputs and system", "Tools"], str(groups))
+check("25 extensions in the sidebar", len(ext_rows) == 25, str(len(ext_rows)))
+check("grouped by category", groups == ["Overview", "Memory", "Video", "Sound", "Inputs and system", "Cartridge", "Tools"], str(groups))
 check("Tools group collapsed", not tree.item("cat_Tools", "open"))
 check("lamps", "running" in b["lamps"]["cpu"][1].cget("text") and "ready" in b["lamps"]["host"][1].cget("text"))
 check("all badges empty before a run", all(badge(n) == "" for n in ext_rows))
@@ -168,7 +168,7 @@ check("WRAM byte write keeps the other byte", "0x0056" in console()[-40:], conso
 
 # built-ins, errors, history
 b["send"]("Help"); pump(0.2)
-check("Help lists the extensions", "23 extensions in this ROM" in console())
+check("Help lists the extensions", "25 extensions in this ROM" in console())
 b["send"]("Nope"); pump(0.2)
 check("unknown command message", "Unknown command: Nope" in console())
 b["cmd"].set(""); b["history"](-1)
@@ -266,6 +266,49 @@ b["fault_add"]("vramlo:addr:3:0"); pump(0.1)
 check("faults saved in the settings", "vramlo:addr:3:0" in json.loads(cfgp.read_text()).get("faults", []))
 b["fault_clear"](); pump(0.1)
 
+# cartridge: one choice at a time (Settings), changing it power-cycles the console
+import os
+b["speed"].set("fast")
+b["cart"].set("test"); pump(0.3)
+check("test cartridge inserted (lamp)", "Test cartridge" in b["lamps"]["cart"][1].cget("text"), b["lamps"]["cart"][1].cget("text"))
+check("insert = power cycle", "Cartridge changed" in console() and "Power on" in console()[-2000:])
+b["send"]("CartTest"); wait_idle()
+check("test cartridge: CartTest PASS", badge("CartTest") == "PASS", str(badge("CartTest")))
+b["send"]("CartCRC $100 $10 0"); wait_idle()
+check("CartCRC prints the CRC", "CRC32 $" in console()[-200:] and "of $00000010 bytes" in console()[-200:])
+b["send"]("CartCRC $110 $10 $FFFFFFFF"); wait_idle()
+check("CartCRC continues the previous CRC (P3 = -1)", "CRC32 $" in console()[-200:] and "Nothing to continue" not in console()[-200:])
+b["send"]("CartCRC $400 $10 $FFFFFFFF"); wait_idle()
+check("CartCRC refuses a wrong continuation address", "Nothing to continue" in console()[-200:])
+reg, kind, bit, lvl, add_form, ferr = b["fault_form"]
+reg.set("Cartridge slot (P bus)"); pump(0.05); kind.set("Data bit stuck"); pump(0.05)
+bit.set("3"); lvl.set("0"); add_form(); pump(0.1)
+check("slot fault from the form", any("D3 stuck at 0" in describe for describe in [b["fault_list"].get(i) for i in range(b["fault_list"].size())]))
+b["send"]("CartTest"); wait_idle()
+check("slot D3 stuck -> CartTest FAIL naming D3", badge("CartTest") == "FAIL" and "D3  never 1" in console()[-900:], console()[-600:])
+b["fault_clear"](); pump(0.1)
+b["cart"].set("diag"); pump(0.3)
+check("PROG board inserted (lamp)", "PROG board" in b["lamps"]["cart"][1].cget("text"))
+b["send"]("CartTest"); wait_idle()
+check("PROG board: CartTest PASS (write/read test)", badge("CartTest") == "PASS" and "Diagnostic PROG board" in console()[-1500:])
+kind.set("Strobe dead"); pump(0.05); lvl.set("ROMOEU"); add_form(); pump(0.1)
+b["send"]("CartTest"); wait_idle()
+check("PROG board, /ROMOEU dead -> FAIL on the P1 window", badge("CartTest") == "FAIL" and "P1 window (/ROMOE)" in console()[-400:], console()[-400:])
+b["fault_clear"](); pump(0.1)
+fs = os.environ.get("GV_FAKESETS")
+if fs:
+    b["cart_set"].set(str(Path(fs) / "gameb.zip")); b["cart_list"].set(str(Path(fs) / "neogeo.xml"))
+    b["cart"].set("game"); pump(0.5)
+    check("game set + official list: every chip OK", "every chip OK" in b["cart_info"].get(), b["cart_info"].get()[:300])
+    check("game set: CartCRC plan shown", "CartCRC plan" in b["cart_info"].get())
+    b["send"]("CartTest"); wait_idle()
+    check("game set: CartTest PASS", badge("CartTest") == "PASS")
+    b["cart_set"].set(str(Path(fs) / "missing.zip")); b["cart"].set("game"); pump(0.3)
+    check("bad set path: readable error, console kept", "cartridge:" in console()[-300:] and st["core"] is not None, console()[-300:])
+b["cart"].set("none"); pump(0.3)
+check("cartridge removed (lamp)", "No cartridge" in b["lamps"]["cart"][1].cget("text"))
+check("cartridge choice saved", json.loads(cfgp.read_text()).get("cart") == "none")
+
 # screen: thumbnail click opens the Screen tab, big screen scaled
 b["thumb"].event_generate("<Button-1>", x=10, y=10); pump(0.3)
 check("thumbnail opens the Screen tab", nb.select() == str(tabs["screen"]))
@@ -321,9 +364,9 @@ def wait_job(timeout):
 
 ct = b["compare_tree"]
 b["compare_open"](str(OUT / "fake_healthy.log"))
-check("compare: healthy log replayed", wait_job(120) and len(ct.get_children()) == 18, str(len(ct.get_children())))
+check("compare: healthy log replayed", wait_job(120) and len(ct.get_children()) == 19, str(len(ct.get_children())))
 check("compare: healthy log all same", all(ct.item(i, "values")[3] == "same" for i in ct.get_children()))
-check("compare: summary shown", "18 same" in b["compare_info"].get(), b["compare_info"].get())
+check("compare: summary shown", "19 same" in b["compare_info"].get(), b["compare_info"].get())
 b["compare_open"](str(OUT / "fake_wram.log"))
 wait_job(120)
 diffs = [ct.item(i, "values")[0] for i in ct.get_children() if ct.item(i, "values")[3] == "DIFFERENT"]
@@ -349,7 +392,7 @@ b["fault_clear"](); pump(0.1)
 b["speed"].set("real")
 for geo in ("1000x660", "1280x820", "1600x1000"):
     root.geometry(geo); pump(0.6)
-    for tname in ("report", "console", "compare", "screen", "faults", "settings"):
+    for tname in ("report", "console", "compare", "screen", "faults", "cartridge", "settings"):
         nb.select(tabs[tname]); pump(0.25)
         layout_checks(f"{geo} {tname}")
         if tname == "screen":

@@ -22,10 +22,32 @@ CASES = [
   ("line:data:3:1",   {"BRICO_STUCK": "0x3c0006,0x3c0007,0x0400,0xFFFF"},["TestTiming", "ChipCheck"]),
   ("line:data:0:0",   {"BRICO_STUCK": "0x3c0006,0x3c0007,0,0xFF7F"},    ["TestTiming", "ChipCheck"]),
 ]
+# cartridge slot (needs BRICO_CART = the tools/make_test_cart.py folder; the emulator inserts the
+# same test cartridge). MAME's fault covers $000080-$2FFFFF (WRAM too: CartTest does not use it).
+# (A slot address fault is not comparable on a game cartridge: the bench's BRICO_ALIAS is a
+# shadow RAM, so the ROM would read 0 and become writable.)
+CART_CASES = [
+  ("cart:data:3:0",   {"BRICO_STUCK": "0x000080,0x2fffff,0,0xFFF7"},    ["CartTest"]),
+  ("cart:data:12:1",  {"BRICO_STUCK": "0x000080,0x2fffff,0x1000,0xFFFF"},["CartTest"]),
+] if os.environ.get("BRICO_CART") else []
+# Diagnostic PROG board, no cartridge in MAME: BRICO_ALIAS's shadow RAM over $000080-$2FFFFF with
+# A21 masked off is one RAM seen at $0xxxxx and $2xxxxx, written by byte lanes: the board's SRAM
+# (WRAM keeps its own shadow). The emulator inserts the board with a zeroed SRAM, as the shadow.
+DIAG_CASES = [
+  ("diag",              {"BRICO_ALIAS": "0x000080,0x2fffff,0xDFFFFF"},  ["CartTest", "TestWRAM", "CartTest"]),
+  ("diag+cart:addr:5:0", {"BRICO_ALIAS": "0x000080,0x2fffff,0xDFFFDF"}, ["CartTest"]),
+  ("diag+cart:addr:19:0", {"BRICO_ALIAS": "0x000080,0x2fffff,0xD7FFFF"}, ["CartTest"]),
+] if not os.environ.get("BRICO_CART") else []
 VRAM = [("vramlo:data:2:1", "vramhi:data:2:1", {"BRICO_STUCK": "0x3c0002,0x3c0003,0x0004,0xFFFF"},
          ["TestVRAM", "TestLSPC", "ChipCheck"])]
 def emu_run(faults, jobs):
-    c = Core(os.environ.get('CORE', str(HERE / 'build' / 'libneocore_zig.so'))); c.load(rom); c.power_on(); c.lib.neo_set_options(0, 0)
+    c = Core(os.environ.get('CORE', str(HERE / 'build' / 'libneocore_zig.so'))); c.load(rom)
+    if faults and faults[0] == "diag":
+        c.load_cart(CartImage("diag", bytes(0x100000))); faults = faults[1:]
+    else:
+        c.load_cart('test' if os.environ.get('BRICO_CART') else 'none')
+    # with the test cartridge the Z80 runs its M1 (MAME does); without, no program (MAME aes, no cart)
+    c.power_on(); c.lib.neo_set_options(1 if os.environ.get('BRICO_CART') else 0, 0)
     apply_faults(c, [parse_fault(f) for f in faults])
     for _ in range(60): c.lib.neo_run_frame()
     h = Host(c, rom); out = []
@@ -52,8 +74,8 @@ def measured_only(a, b):
     f = lambda v: re.sub(r"~\d+\.\d (MHz|Hz)", r"~x \1", ''.join(chr(x) for x in v if x == 10 or 32 <= x < 127))
     return f(a) == f(b)
 ok = tot = 0
-for spec, env, jobs in CASES + [((a, b), e, j) for a, b, e, j in VRAM]:
-    faults = list(spec) if isinstance(spec, tuple) else [spec]
+for spec, env, jobs in CASES + CART_CASES + DIAG_CASES + [((a, b), e, j) for a, b, e, j in VRAM]:
+    faults = list(spec) if isinstance(spec, tuple) else spec.split("+")
     e = emu_run(faults, jobs); m = mame_run(env, jobs)
     for j, (es, ev), (ms, mv) in zip(jobs, e, m):
         tot += 1; same = es == ms and (ev == mv or measured_only(ev, mv)); ok += same

@@ -19,6 +19,10 @@ PALETTE_BACKDROP equ $401FFE
 ; written with write_a3 (A1-A3 = output, A4 = value), output Q7 drives
 ; set_palette_bank -> $3A000F = Q7<-0 = bank 0, $3A001F = Q7<-1 = bank 1.
 ; Same as the neogeodev wiki "Memory mapped registers" page.
+; Vector table $000000-$00007F (same latch, Q1, wiki "Memory mapped
+; registers"): $3A0003 = system ROM (REG_SWPBIOS), $3A0013 = cartridge.
+REG_SWPBIOS equ $3A0003
+REG_SWPROM  equ $3A0013
 REG_PALBANK0 equ $3A000F
 REG_PALBANK1 equ $3A001F
 
@@ -95,7 +99,7 @@ REG_STATUS_B equ $380000
 	; Brico16Bits shows "Found BricoNeo ROM version 1.35". build.py and the
 	; Compiler check that the header equals the base of this string.
 	macro FORK_VERSION
-		dc.b "1.35-nic034-01"
+		dc.b "1.35-nic034-02"
 	endm
 
 	macro BRICONEO_VERSION
@@ -124,7 +128,7 @@ REG_STATUS_B equ $380000
 
     macro JsrA6
 		lea .\@(pc),a6					; PC-relative: 4 bytes / 8 cycles instead of 6 / 12
-		jmp \1_JsrA6
+		jmp \1_JsrA6(pc)				; PC-relative: the whole ROM is < 32 KiB
 .\@:
 	endm
 
@@ -162,18 +166,18 @@ REG_STATUS_B equ $380000
 	endm
 
 	macro PrintHandleCRLF				; P1 is string constant, P2 is either 0 or 1 depending on LF ending
-		lea .\@StringAddress(pc),a1		; PC-relative (was move.l #abs: 6 bytes / 12 cycles)
-		bra .\@PrintStart				; bra.w (was jmp abs.l)
+		; The string follows the call: printInline prints it and returns
+		; after it (10 bytes of code per Print, was 18). Destroys d0, a0, a6
+		; (a6 was already destroyed by the JsrA6 of the previous version).
+		lea .\@StringAddress(pc),a6
+		jmp printInline_JsrA6(pc)
 	.\@StringAddress:
 		dc.b \1
 		ifc "\2","1"
 		dc.b 10
 		endc
 		dc.b 0
-	align 1
-	.\@PrintStart:
-		PrintA1
-	.\@PrintEnd:
+		align 1
 	endm
 
 	macro PrintA1

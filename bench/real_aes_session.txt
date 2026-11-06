@@ -23,5 +23,7 @@ TestWatchdog
 ; first pass starves the watchdog: wait for the reset, then read the result
 Delay 2000
 TestWatchdog
+; cartridge P bus: security code (P1), activity (P2); read only
+CartTest
 TestDAC
 ; TestDAC leaves 16 colour bands on screen: one band per colour bit, a black band = dead bit

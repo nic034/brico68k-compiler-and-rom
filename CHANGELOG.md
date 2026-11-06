@@ -4,6 +4,53 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-06 - CartTest, CartCRC, cartridges in the emulator (fork 1.35-nic034-02, Emulator 1.12)
+
+ROM SHA-256 `2f39023ed427e36035236b03480a176a152720d0120a56d10a82e07f0e2d1c55` (fork
+**1.35-nic034-02**, header 1.35, 25 extensions), rebuilt from `source/` to the same checksum with
+the Compiler and `build.py`.
+
+ROM:
+- **CartTest**: cartridge P bus D0-D15. On a game cartridge, read only: P1 checked against the
+  61-word security code (each line judged both ways: stuck at 0, stuck at 1, wrong in some words),
+  found even when bad lines corrupt its pointer (pointer with up to two bits flipped); P1 and P2
+  activity; a verdict that tells slot/console from cartridge. On the jwestfall69 diagnostic PROG
+  board (SRAM): the TestWRAM suite on `$200000` (D0-D15, both byte lanes, A1-A19, March C-) and
+  a P1 (/ROMOE) read-back. The board probe tolerates bad lines and a dead strobe, and on a game
+  cartridge can at most latch bank 0 (D0-D2 = 0).
+- **CartCRC**: CRC32 of P ROM in the byte order of the MAME files, 256 KB per command, continued
+  with `P3 = -1` / `-2` (CRC kept in WRAM, with its complement), the P2 bank in P1 bits 24-26,
+  and the cartridge's vector table selected while reading `$000000-$00007F`. Tables in 4 KB of
+  WRAM, verified. Emulator `--crc-plan GAME --cart-list hash/neogeo.xml`: the console script
+  (set name, clones, or NGH number), and with `--cart` the plan is run and compared.
+- RAM suite: region type 3 (cartridge P bus); the address-line flags are tested as a long (a
+  `tst.w` would have missed A16-A19: found when MAME and the emulator both passed a stuck A19);
+  "All bits: address line A1?" when every bit of a walking-test word is wrong.
+- `Print`: the string follows the call (one shared print routine, 10 bytes per Print instead of
+  18), `jmp` to the helpers is PC-relative. That freed the room for the two extensions; the code
+  is now 14 bytes under `$7FFA`. `moveq #0,d0` on return, which exposed and fixed a ChipCheck
+  display bug (pixel ratio fraction lost its leading zero).
+- Every extension description rewritten, shorter and accurate (TestWRAM and ChipCheck said
+  things the code no longer does).
+
+Emulator 1.12:
+- Cartridge choice in Settings (one at a time, changing it power-cycles) and `--cart`: none,
+  built-in test cartridge, a game ROM set (folder or MAME zip) or the PROG board. P1/P2 on the
+  68000 bus with the P2 bank latch of the wiki; S, C, V, M1 loaded with size and CRC32; with the
+  official MAME list (`--cart-list`, `hash/neogeo.xml`) the set is identified, loaded with the
+  list's layout, every chip checked, and the CartCRC plan of each P file shown.
+- Slot faults: `cart:data`, `cart:float`, `cart:addr` (A1-A19), `cart:strobe` (PORTWEL, PORTWEU,
+  ROMOEL, ROMOEU), in the Faults tab too. Lamp for the cartridge.
+- The unstable-line form no longer shows level 1 instead of "random".
+
+Bench: the test cartridge has a game header and the security code, and declares
+`<feature name="slot" value="rom"/>` (without it MAME 0.264 reads `$FFFF` at `$000100-$000103`).
+`compare_mame.py` runs 46 commands (CartTest, CartCRC with its continuation added); `compare_mame_faults.py` adds slot
+data faults and the PROG board (the bench's shadow RAM plays it). `real_aes_session.txt` runs
+CartTest.
+
+Checks: 46/46 identical to MAME with the test cartridge and 46/46 without; faults 24/25 and 27/28 (known palette artifact); TestBus screen 7/7; GUI 191/191; Compiler, build.py and CMake give the same ROM.
+
 ## 2026-11-06 - The ROM is named ROM.BIO, Compiler 1.4
 
 ROM SHA-256 `7f88cd8d6ac9916a30caf1c635ceb52559ecdf91e6cfb4bca39369bff54be5b8` (unchanged content,

@@ -5,6 +5,7 @@
     global printWord_JsrA6
     global getButtonStateStr_JsrA6
     global printDec_JsrA6
+    global printInline_JsrA6
 
 	section	text
 
@@ -15,6 +16,21 @@ port_write_d0_JsrA6:
 print_a1_JsrA6:			; string address in a1
     InlinePrintA1
     RtsA6
+
+printInline_JsrA6:		; a6 = 0-terminated string, the code goes on after it (even)
+.loop:
+    moveq #0,d0
+    move.b (a6)+,d0
+    beq.s .end
+    InlinePortWriteD0
+    bra.s .loop
+.end:
+    move.l a6,d0
+    addq.l #1,d0
+    bclr #0,d0				; next even address
+    movea.l d0,a6
+    moveq #0,d0				; d0 = 0 after a Print, as with InlinePrintA1 (callers rely on it)
+    jmp (a6)
 
 printWord_JsrA6: 
 ;input : d0 = 16-bit word - 0x8642 for example

@@ -502,12 +502,12 @@ EXT_CHIP_CHECK:
 	JsrA6 printDec
 	Print "."
 	swap d4
+	cmp.w #10,d4
+	bhs .px2
+	Print "0"					; destroys d0: the value stays in d4
+.px2:
 	moveq #0,d0
 	move.w d4,d0
-	cmp.w #10,d0
-	bhs .px2
-	Print "0"
-.px2:
 	JsrA6 printDec
 	PrintLn " CPU cycles per pixel (2.00)"
 .pxEnd:
@@ -806,7 +806,7 @@ memReport_JsrA6:
 	bne .hSlow
 	tst.w d0
 	beq .hpAddr
-	PrintLn "                 -> palette RAM chip of those bits, NEO-G0 (palette data buffer, write enable). Next: TestPRAM, TestDAC"
+	PrintLn "                 -> palette RAM chip of those bits, NEO-G0 (data buffer, write enable). Next: TestPRAM, TestDAC"
 	jmp (a5)
 .hpAddr:
 	PrintLn "                 -> palette RAM address (NEO-B1 address switch), bank: system latch. Next: TestPRAM"

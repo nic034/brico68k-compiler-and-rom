@@ -19,7 +19,17 @@
  *   $F800-$FFFF. The 68000 RESET instruction does not reset the Z80 (MAME).
  * NOT emulated: YM2610 (ports $04-$07 read 0), Z80 ROM banking, sprites and fix layer
  *   (only the backdrop colour is rendered, one colour per line), interrupts
- *   (Brico68k keeps them masked), cartridge, memory card.
+ *   (Brico68k keeps them masked), memory card, cartridge chips other than P.
+ * Cartridge P bus (neo_cart_load): none (reads $FFFF), a game P ROM in the
+ *   MAME "maincpu" layout (P1 = first MB at $000000, then 1 MB P2 banks at
+ *   $200000), or the jwestfall69 diagnostic PROG board (one 1 MiB 16-bit SRAM
+ *   in both windows, written through P2, byte lanes as its 74LS08/74LS11
+ *   decoding: UB/LB, OE, WE). Game P2 bank: neogeodev wiki "Bankswitching":
+ *   a word or odd byte write anywhere in $200000-$2FFFFF (/PORTWEL) latches
+ *   the bank from the data (D0-D2 here, modulo the bank count; the wiki's
+ *   2-bit latch is the same for up to 4 banks), reset to bank 0 by the slot
+ *   reset. MAME only decodes $2FFFF0-$2FFFFF for it. Protected boards (SMA,
+ *   PVC, CMC...) are not modelled: their extra registers read as P2 ROM.
  * Brico16Bits host (Commands/CommandExtension.cpp): writes the command and
  * P1-P3 into the ROM image, clears them 1 ms later, collects the words sent
  * through the $C1FF02 port (value = address of the next read in the
@@ -102,20 +112,29 @@ static uint64_t h_done_cycles;
 /* ---- simulated faults (repair training / diagnostic checks) ----------------
  * region: 0 WRAM, 1 palette RAM, 2 VRAM lower (slow, $0000-$7FFF),
  *         3 VRAM upper (fast, $8000-$87FF), 4 LSPC line counter,
- *         5 BIOS socket address lines A1-A16 (68000 -> BricoNeo)
+ *         5 BIOS socket address lines A1-A16 (68000 -> BricoNeo),
+ *         6 cartridge slot P bus (D0-D15, A1-A19, strobes)
  * kind:   0 data bit stuck at `value` (what the CPU - and for the palette
  *           the DAC - reads; the cell cannot hold the other level)
  *         1 address line stuck at `value` (accesses fold onto the other half)
  *         2 WRAM byte lane dead (value 0 = lower chip D0-D7, 1 = upper D8-D15):
  *           writes lost, reads $FF (floating bus pulled up)
  *         3 BIOS socket line unstable (cut and floating, bad contact): a random
- *           level on each access
+ *           level on each access; slot: data line D0-D15 unstable
+ *         2 slot: strobe dead (value 0 /PORTWEL, 1 /PORTWEU, 2 /ROMOEL, 3 /ROMOEU)
  * Address lines: WRAM A1-A15, palette A1-A12 + 13 = bank select (latch Q7),
  * VRAM lower 0-14, VRAM upper 0-10 (VRAM word address). Faults survive
  * power cycles, as a real hardware fault does. */
 #define MAX_FAULTS 16
 static struct { int region, kind, bit, value; } faults[MAX_FAULTS];
 static int nfaults;
+
+/* cartridge */
+static int      cart_mode;                   /* 0 none, 1 game P ROM, 2 diagnostic PROG board */
+#define CART_MAX 0x1000000
+static uint8_t  cart[CART_MAX];              /* big-endian: P1 MB then the P2 banks (ROM), or the SRAM */
+static uint32_t cart_size, cart_banks, cart_bank;
+static uint32_t cart_writes, cart_latch_writes;
 
 static unsigned fault_data(int region, unsigned w)
 {
@@ -152,6 +171,55 @@ static unsigned socket_addr(unsigned o)
 	return o & 0x1FFFE;
 }
 static unsigned bios_word(unsigned o) { return (bios[o] << 8) | bios[o + 1]; }
+
+static int slot_strobe_dead(int s)
+{
+	for (int i = 0; i < nfaults; i++)
+		if (faults[i].region == 6 && faults[i].kind == 2 && faults[i].value == s) return 1;
+	return 0;
+}
+
+/* slot data lines (the same pins for P1, P2, reads and writes) */
+static unsigned slot_data(unsigned w)
+{
+	for (int i = 0; i < nfaults; i++)
+		if (faults[i].region == 6 && faults[i].kind == 3) {
+			float_rng ^= float_rng << 13; float_rng ^= float_rng >> 17; float_rng ^= float_rng << 5;
+			w = (float_rng & 1) ? (w | (1u << faults[i].bit)) : (w & ~(1u << faults[i].bit));
+		}
+	return fault_data(6, w) & 0xFFFF;
+}
+
+static unsigned cart_read(unsigned a)
+{
+	if (!cart_mode) return 0xFFFF;
+	int p2 = a >= 0x200000;
+	unsigned o = fault_addr(6, a & 0xFFFFE, 0) & 0xFFFFE;          /* slot A1-A19 */
+	unsigned w;
+	if (cart_mode == 1) {
+		if (p2 && !cart_banks) return slot_data(0xFFFF);           /* no P2 chip */
+		o += p2 ? 0x100000 + cart_bank * 0x100000 : 0;
+		w = (cart[o] << 8) | cart[o + 1];
+	} else
+		w = (cart[o] << 8) | cart[o + 1];
+	if (!p2 && slot_strobe_dead(2)) w |= 0x00FF;                   /* lane not driven: floats high */
+	if (!p2 && slot_strobe_dead(3)) w |= 0xFF00;
+	return slot_data(w);
+}
+
+static void cart_write(unsigned a, unsigned d, unsigned mask)     /* a in $200000-$2FFFFF */
+{
+	cart_writes++;
+	if (mask & 0x00FF) {                                           /* /PORTWEL: a game cart latches its bank */
+		cart_latch_writes++;
+		if (cart_mode == 1 && cart_banks) cart_bank = (slot_data(d) & 7) % cart_banks;
+	}
+	if (cart_mode != 2) return;
+	unsigned o = fault_addr(6, a & 0xFFFFE, 0) & 0xFFFFE;
+	d = slot_data(d);
+	if ((mask & 0xFF00) && !slot_strobe_dead(1)) cart[o] = (uint8_t)(d >> 8);
+	if ((mask & 0x00FF) && !slot_strobe_dead(0)) cart[o + 1] = (uint8_t)d;
+}
 
 static int lane_dead(int lane)
 {
@@ -305,12 +373,12 @@ static unsigned read16(unsigned a, int lsb_only)
 {
 	a &= 0xFFFFFE;
 	if (a < 0x000080) {                                     /* vectors: BIOS socket unless swapped */
-		if (latch[1]) return 0xFFFF;
+		if (latch[1]) return cart_read(a);
 		unsigned o = socket_addr(a);
 		host_port_read(a, o);
 		return bios_word(o);
 	}
-	if (a < 0x100000) return 0xFFFF;                        /* no cartridge */
+	if (a < 0x100000) return cart_read(a);                  /* P1 */
 	if (a < 0x200000) {
 		unsigned o = wram_index(a);
 		unsigned w = (wram[o] << 8) | wram[o + 1];
@@ -318,7 +386,7 @@ static unsigned read16(unsigned a, int lsb_only)
 		if (lane_dead(0)) w |= 0x00FF;
 		return fault_data(0, w);
 	}
-	if (a < 0x300000) return 0xFFFF;                        /* no cartridge (P2) */
+	if (a < 0x300000) return cart_read(a);                  /* P2 */
 	if (a < 0x320000) return 0xFF00;                        /* P1: nothing pressed */
 	if (a < 0x340000) { z80_sync(); return (unsigned)z80_reply << 8; }
 	if (a < 0x360000) return 0xFF00;                        /* P2 */
@@ -353,6 +421,7 @@ static void write16(unsigned a, unsigned d, unsigned mask)  /* mask: 0xFF00 / 0x
 		if ((mask & 0x00FF) && !lane_dead(0)) wram[o + 1] = (uint8_t)d;
 		return;
 	}
+	if (a >= 0x200000 && a < 0x300000) { cart_write(a, d, mask); return; }
 	if (a >= 0x300000 && a < 0x320000) { if (mask & 0x00FF) wdog_kick = now(); return; }
 	if (a >= 0x320000 && a < 0x340000) { if (mask & 0xFF00) z80_command((uint8_t)(d >> 8)); return; }
 	if (a >= 0x3A0000 && a < 0x3C0000) {
@@ -424,6 +493,7 @@ static uint64_t frame_event(uint64_t t, uint64_t at)    /* next time >= t at off
 static void reset_peripherals(void)
 {
 	memset(latch, 0, sizeof latch);
+	cart_bank = 0;                          /* slot RESET clears the cartridge bank latch */
 	z80_reset();
 	z80_time = now() / 3;                   /* the Z80 restarts now */
 }
@@ -597,18 +667,40 @@ EXPORT uint32_t neo_z80_commands(void) { return z80_commands; }
 EXPORT uint32_t neo_z80_pc(void) { return zc.pc; }
 EXPORT uint16_t neo_peek16(uint32_t a) { return (uint16_t)read16(a, 0); }
 
+/* mode 0 none, 1 game P ROM (data = P ROM in 68000 order, P1 then P2), 2 diagnostic PROG board
+ * (data = initial SRAM content, may be NULL). Kept across power cycles (a cartridge, not RAM). */
+EXPORT int neo_cart_load(int mode, const uint8_t *data, int len)
+{
+	if (mode < 0 || mode > 2 || len < 0 || len > CART_MAX) return -1;
+	if (mode == 1 && (len < 0x100000 || (len & 0xFFFFF))) return -1;    /* P1 MB + whole P2 banks */
+	if (mode == 2 && len > 0x100000) return -1;
+	cart_mode = mode;
+	memset(cart, 0xFF, sizeof cart);
+	cart_size = (uint32_t)len;
+	if (data && len) memcpy(cart, data, (size_t)len);
+	cart_banks = mode == 1 ? (cart_size - 0x100000) / 0x100000 : 0;
+	cart_bank = 0;
+	cart_writes = cart_latch_writes = 0;
+	return 0;
+}
+EXPORT int neo_cart_bank(void) { return (int)cart_bank; }
+EXPORT uint32_t neo_cart_writes(void) { return cart_writes; }
+EXPORT uint32_t neo_cart_latch_writes(void) { return cart_latch_writes; }
+
 EXPORT void neo_fault_clear(void) { nfaults = 0; }
 EXPORT int neo_fault_count(void) { return nfaults; }
 EXPORT int neo_fault_add(int region, int kind, int bit, int value)
 {
-	static const int data_bits[6] = { 15, 15, 15, 15, 8, -1 };
-	static const int addr_lo[6] = { 1, 1, 0, 0, -1, 1 }, addr_hi[6] = { 15, 13, 14, 10, -1, 16 };
-	if (nfaults >= MAX_FAULTS || region < 0 || region > 5 || value < 0 || value > 1) return -1;
+	static const int data_bits[7] = { 15, 15, 15, 15, 8, -1, 15 };
+	static const int addr_lo[7] = { 1, 1, 0, 0, -1, 1, 1 }, addr_hi[7] = { 15, 13, 14, 10, -1, 16, 19 };
+	if (kind < 0 || kind > 3 || nfaults >= MAX_FAULTS || region < 0 || region > 6) return -1;
+	if (value < 0 || value > ((region == 6 && kind == 2) ? 3 : 1)) return -1;
 	if (kind == 0 && (bit < 0 || bit > data_bits[region])) return -1;
-	if ((kind == 1 || kind == 3) && (addr_lo[region] < 0 || bit < addr_lo[region] || bit > addr_hi[region])) return -1;
-	if (kind == 2 && region != 0) return -1;
-	if (kind == 3 && region != 5) return -1;
-	if (kind < 0 || kind > 3) return -1;
+	if (kind == 1 && (addr_lo[region] < 0 || bit < addr_lo[region] || bit > addr_hi[region])) return -1;
+	if (kind == 2 && region != 0 && region != 6) return -1;
+	if (kind == 3 && region == 5 && (bit < 1 || bit > 16)) return -1;
+	if (kind == 3 && region == 6 && (bit < 0 || bit > 15)) return -1;
+	if (kind == 3 && region != 5 && region != 6) return -1;
 	faults[nfaults].region = region; faults[nfaults].kind = kind;
 	faults[nfaults].bit = bit; faults[nfaults].value = value;
 	nfaults++;
