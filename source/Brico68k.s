@@ -111,7 +111,6 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_TEST_SYSTYPE,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestSystype",		"SYSTYPE: TEST button, JAMMA sense (MVS). No WRAM."
 	DECLARE_EXTENSION EXT_TEST_BUS,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBus",			"BIOS socket 68000 -> BricoNeo: A15/A16 (NeoDiag mirrors), A1-A14/D0-D15 (CRC32); 16 bands. Run at boot. No WRAM."
 	DECLARE_EXTENSION EXT_CART_TEST,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartTest",			"P bus. Game cart (read only): P1 security code names stuck/open lines, P2 activity (P1=1 forces it). Diag PROG board: /ROMOE, /PORTOE, D0-D15, lanes, A1-A19. No WRAM."
-	DECLARE_EXTENSION EXT_CART_CRC,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartCRC",			"P ROM CRC32, MAME file order. P1=address (+bank<<24), P2=bytes (<=$40000), P3=CRC so far, -1 continue. Uses WRAM."
 	; Version: written by hand (not DECLARE_EXTENSION) so that the description
 	; takes the fork version from FORK_VERSION, its only definition
 	dc.l EXT_VERSION

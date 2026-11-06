@@ -41,8 +41,6 @@ Text mode: python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234" [--rom ROM]
            python Brico68k_Emulator.py --diagnose putty.log    (which modelled fault explains it)
            python Brico68k_Emulator.py --check [--rom ROM]
            python Brico68k_Emulator.py --cart kof98.zip --cart-list neogeo.xml --run CartTest
-           python Brico68k_Emulator.py --crc-plan kof98 --cart-list neogeo.xml > kof98_crc.txt
-               (P1/P2 CRC32 plan for CartCRC on a real console; NGH number accepted, e.g. 0242)
 Python 3.8+, standard library only: nothing to install with pip. The window
 needs Tkinter, which comes with Python on Windows (python.org installer) and is
 the python3-tk package on Linux distributions that split it out.
@@ -61,7 +59,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.13"
+APP_VERSION = "1.14"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -454,9 +452,6 @@ def main_cli(argv):
                          "board) or a game ROM set (folder or MAME .zip)")
     ap.add_argument("--cart-list", metavar="XML", help="official MAME list (hash/neogeo.xml): identifies the "
                     "ROM set by CRC32, loads it with the list's layout and checks every chip")
-    ap.add_argument("--crc-plan", metavar="GAME", help="CartCRC plan from --cart-list for a set name (its "
-                    "clones too) or an NGH number: a script to paste into the BricoNeo console; with --cart, "
-                    "also run on the emulator and checked")
     ap.add_argument("rom_pos", nargs="?")
     a = ap.parse_args(argv)
     if "help" in [f.lower() for f in a.fault]:
@@ -467,20 +462,6 @@ def main_cli(argv):
     except ValueError as e:
         print(f"ERROR: {e}")
         return 2
-    crc_lst = crc_script = None
-    if a.crc_plan:
-        if not a.cart_list:
-            print("ERROR: --crc-plan needs the official MAME list: --cart-list hash/neogeo.xml")
-            return 2
-        try:
-            crc_lst = parse_softlist(a.cart_list)
-            crc_script = format_crc_plan(crc_lst, a.crc_plan, Path(a.cart_list).name)
-        except (OSError, ValueError, SyntaxError) as e:        # ET.ParseError is a SyntaxError
-            print(f"ERROR: CRC plan: {e}")
-            return 2
-        if a.cart == "none":
-            print(crc_script, end="")                            # for a real console: no ROM needed
-            return 0
     rom_path = a.rom or a.rom_pos or default_rom()
     missing = startup_check(rom_path)
     for w, d in missing:
@@ -527,11 +508,6 @@ def main_cli(argv):
     for _ in range(60):
         core.lib.neo_run_frame()
     host = Host(core, rom)
-    if crc_script:
-        print(crc_script, end="")
-        print("; --- run on the emulator, cartridge above:")
-        print(crc_check(host, crc_lst, a.crc_plan))
-        return 0
     if a.compare:
         try:
             raw = Path(a.compare).read_bytes()
@@ -588,7 +564,7 @@ CATEGORIES = [
     ("Sound", ["TestZ80", "TestAudio", "PlayEyeSnd"]),
     ("Inputs and system", ["TestInp", "TestStatusA", "TestSystype", "TestWatchdog"]),
     ("Cartridge", ["CartTest"]),
-    ("Tools", ["Version", "Echo", "Read", "Write", "WriteB", "Dump", "Color", "CartCRC"]),
+    ("Tools", ["Version", "Echo", "Read", "Write", "WriteB", "Dump", "Color"]),
 ]
 TOOLS = set(CATEGORIES[-1][1])
 CHK_PROGRESS, CHK_PROG_MAGIC = 0x10FFF0, 0x10FFF2   # ChipCheck progress word and its magic ($C4EC)
@@ -978,7 +954,7 @@ def main_gui(rom_arg=None):
     ttk.Button(cartf, text="neogeo.xml...", command=lambda: pick_cart_list()).grid(row=7, column=2, columnspan=2, sticky="we", padx=(6, 0), pady=(4, 0))
     ttk.Label(cartf, style="CardMuted.TLabel", justify="left", wraplength=760, text=(
         "The list (MAME hash/neogeo.xml, optional) identifies the set by CRC32, loads it with the list's layout, "
-        "checks every chip and gives the CartCRC plan for each P file.")).grid(row=8, column=0, columnspan=4, sticky="we", pady=(4, 8))
+        "and checks every chip.")).grid(row=8, column=0, columnspan=4, sticky="we", pady=(4, 8))
     cart_info = tk.StringVar(value="")               # same text as the box, for scripts and tests
     cart_txt = tk.Text(cartf, height=12, wrap="none", relief="flat", bg=C["panel"], fg=C["text"], borderwidth=1,
                        highlightthickness=1, highlightbackground=C["border"],

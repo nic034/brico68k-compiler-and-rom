@@ -6,7 +6,7 @@ MAME only loads Neo Geo cartridges through a software list, so this writes:
   <out>/roms/neogeo/brtest/*      the ROM files (MAME naming and byte order)
 Content (all generated, nothing copyrighted):
   P ROM 3 MB: P1 1 MB + P2 2 MB (2 banks), pseudo-random words, fixed seed,
-              game header and security code (CartTest, CartCRC).
+              game header and security code (CartTest).
   S1 128 KB : fix tiles, tile $20 blank, other tiles striped.
   M1 64 KB  : tiny Z80 service: $03 = reset (reply $00), $01 = reply $01.
                No YM2610 code: lets TestZ80 / the TestAudio handshake run on AES.
@@ -45,7 +45,7 @@ SEC_AT = 0x186
 def p_rom():
     """3 MB of P ROM in 68000 (big-endian) order: pseudo-random words (fixed seed) and a
     game header: "NEO-GEO", NGH $0999, P ROM size $300000, security code pointer
-    $182 -> $186 (wiki "68k program header"). CartTest / CartCRC read it."""
+    $182 -> $186 (wiki "68k program header"). CartTest reads it."""
     rnd = random.Random(0xB1C068)
     p = bytearray(rnd.getrandbits(8) for _ in range(3 * 0x100000))
     p[0x100:0x108] = b"NEO-GEO\x00"

@@ -4,6 +4,23 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-07 - CartCRC removed (fork 1.35-nic034-04, Emulator 1.14)
+
+ROM SHA-256 `fb0bf47b507c6160f3e4cc0c9a3b857dbcc1cb6c57f70926c09b55901372c995` (fork
+**1.35-nic034-04**, header 1.35, **24** extensions), the same checksum from the Compiler,
+`build.py` and CMake.
+
+- ROM: the **CartCRC** extension is gone (`ExtCartCRC.s`, its declaration, the WRAM tables). CartTest,
+  with the p-bus test (diag cart), is untouched. The code now ends 728 bytes under `$7FFA`
+  (it was 4); the texts shortened for the previous release were not restored.
+- Emulator 1.14: `--crc-plan` and the CartCRC plan shown in the Cartridge tab are gone, with
+  their code. What stays: the cartridge loading, identification by CRC32 against the official
+  MAME list and the per-chip check (OK, BAD CRC, MISSING).
+- `compare_mame.py` runs 38 commands; `guiverify.py` 184 checks; bench logs regenerated.
+
+Checks: 38/38 identical to MAME with the test cartridge and 38/38 without; faults 24/25 and
+27/28 (the known palette artifact); TestBus screen 7/7; GUI 184/184.
+
 ## 2026-11-06 - p-bus test (diag cart): output enable tests (fork 1.35-nic034-03, Emulator 1.13)
 
 ROM SHA-256 `1f8ad9602bfef06a5f003f5942c4deae6bce68e7eb2b5220e4727240457d6ec0` (fork
