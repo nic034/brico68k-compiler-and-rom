@@ -538,7 +538,7 @@ CATEGORIES = [
     ("Video", ["TestVRAM", "TestLSPC", "TestTiming", "TestDAC"]),
     ("Sound", ["TestZ80", "TestAudio", "PlayEyeSnd"]),
     ("Inputs and system", ["TestInp", "TestStatusA", "TestSystype", "TestWatchdog"]),
-    ("Tools", ["Echo", "Read", "Write", "WriteB", "Dump", "Color"]),
+    ("Tools", ["Version", "Echo", "Read", "Write", "WriteB", "Dump", "Color"]),
 ]
 TOOLS = set(CATEGORIES[-1][1])
 CHK_PROGRESS, CHK_PROG_MAGIC = 0x10FFF0, 0x10FFF2   # ChipCheck progress word and its magic ($C4EC)

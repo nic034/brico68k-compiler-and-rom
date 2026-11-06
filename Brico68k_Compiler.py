@@ -717,6 +717,9 @@ def full_build(source_mode, source_path, auto, manual_vasm, manual_vlink, out_di
         data = built.read_bytes()
     checks = check_briconeo(data)
     final = make_sp1_image(data) if sp1 else data
+    fv = data.find(b"Fork version ")
+    if fv >= 0:
+        log("Fork version: " + data[fv + 13:data.index(b" ", fv + 13)].decode("ascii", "replace"))
     if sp1 and len(final) == SP1_SIZE and final[0x8D] & 4:
         checks.append((len(data) <= 0x7FFA, "NeoDiag layout (flag $0004): code fits below $7FFA, CRC32 + 3 mirrors"))
     out_dir = Path(out_dir)

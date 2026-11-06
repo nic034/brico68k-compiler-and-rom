@@ -110,6 +110,16 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_CHIP_CHECK,		BRICO_EXT_OUTPUT_TYPE_STRING,	"ChipCheck",		"Quick state of the board, one line per part (< 1 s): WRAM, palette RAM, VRAM slow/fast, LSPC2 registers, NEO-C1 ports, VBLANK/timer IRQ, Z80, NEO-D0 clocks (68KCLK vs the BricoNeo 1 ms, 24 MHz, 6 MHz). IRQs use WRAM (stack)."
 	DECLARE_EXTENSION EXT_TEST_SYSTYPE,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestSystype",		"SYSTYPE breakdown, AES/MVS-aware: TEST button, JAMMA sense on MVS; unmapped/open-bus on AES (bit layout per MAME neogeo.cpp). (no WRAM used)"
 	DECLARE_EXTENSION EXT_TEST_BUS,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBus",			"BIOS socket, 68000 -> BricoNeo, as NeoDiag: A15/A16 from the mirror bytes, A1-A14/D0-D15 by CRC32. Text + 16 screen bands (A1 at the top) until the next command. Also run at boot. (no WRAM used)"
+	; Version: written by hand (not DECLARE_EXTENSION) so that the description
+	; takes the fork version from FORK_VERSION, its only definition
+	dc.l EXT_VERSION
+	dc.w BRICO_EXT_OUTPUT_TYPE_STRING
+	dc.b "Version",0
+	align 1
+	dc.b "Fork version "
+	FORK_VERSION
+	dc.b " (the header shows 1.35, the upstream base). Prints it with its source. (no WRAM used)",0
+	align 1
 	dc.l $ffffffff ; No more extensions
 
 START:

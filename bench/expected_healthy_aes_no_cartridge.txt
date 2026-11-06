@@ -1,6 +1,12 @@
 ; Brico68k - full session for a real Neo Geo through the BricoNeo console
 ; Paste the whole file into the serial terminal (PuTTY, Tera Term...). Lines starting with ; are ignored.
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
+> Version
+Brico68k 1.35-nic034-01
+BricoExt header 1.35: upstream Aurelien34/Brico68k (52c1c92)
+Fork: github.com/nic034/brico68k-compiler-and-rom
+
+[eot, 1 ms emulated]
 > Echo $1234
 0x1234
 [eot, 0 ms emulated]
@@ -98,7 +104,7 @@ Video timing test (LSPC line counter, $3C0006)
 > Auto-animation counter: 8/8 frame steps OK
 => Test success
 
-[eot, 974 ms emulated]
+[eot, 957 ms emulated]
 > TestZ80
 Z80 handshake test (ACTIVE: stops any sound)
 Needs a standard SM1/M1 sound driver.
@@ -192,7 +198,7 @@ again to read the result (commands sent meanwhile are lost).
 > Delay 2000
 > TestWatchdog
 Watchdog test result:
-> The watchdog reset the 68000 after ~133 ms (44555 loops of 3 us)
+> The watchdog reset the 68000 after ~133 ms (44574 loops of 3 us)
   MAME MVS: 135 ms. Real boards: about 0.13 s.
 => Test success (run again to re-arm)
 

@@ -4,6 +4,19 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-06 - Fork version 1.35-nic034-01
+
+ROM SHA-256 `7713a97e1696240246582df40f05ccb75a98b9746dd5fda69c92b82e2605d3c5` (fork
+**1.35-nic034-01**, BricoExt header 1.35, 23 extensions), rebuilt from `source/` to the same
+checksum.
+
+- The fork now has a version. Brico16Bits shows the header version as two numbers
+  (`%d.%d`), so the header keeps the upstream base, 1.35. `FORK_VERSION` (`inc/define.inc`) is the
+  single definition, used by the new **Version** command and its description in the `?` list.
+  The Compiler log prints it. Earlier builds of this repository had no fork version.
+- `bench/real_aes_session.txt` starts with `Version`, so a console log says which build ran.
+- Checks: 35/35 identical to MAME with and without the test cartridge, GUI 168/168.
+
 ## 2026-11-06 - Aligned with the Brico16Bits code, TestBus, Compiler 1.3, Emulator 1.11
 
 ROM SHA-256 `faba564c2502f6fc464156326a200cbb7765fad25fea6a4df43706e895b2e41e` (BricoNeo 1.35,

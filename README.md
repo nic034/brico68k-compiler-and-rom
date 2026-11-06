@@ -187,7 +187,7 @@ build is reproducible: the same sources give the same core checksums.
 It fetches Musashi and the Z80 core at pinned commits.
 The build is reproducible: it gives the same binaries.
 
-## ROM contents: 22 extensions
+## ROM contents: 23 extensions
 
 Commands are typed on the Brico16Bits console. "No WRAM" means the test never relies on
 work RAM (no stack), so it still runs on a board with dead WRAM.
@@ -195,6 +195,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | Command | No WRAM | What it does |
 |---|:-:|---|
 | **ChipCheck** | partly | Quick state of the board, one line per part, < 1 s (see below) |
+| **Version** | yes | Fork version (`1.35-nic034-01`) and its source. Also in the `?` list. |
 | **TestBus** | yes | BIOS socket, 68000 -> BricoNeo, as NeoDiag does it: A15/A16 from the mirror bytes, A1-A14/D0-D15 by CRC32; text and 16 screen bands (see below). Also run at boot. |
 | Echo, Read, Write, WriteB, Dump | yes | Link check and raw memory access. Odd addresses are handled. Dump: at most 2045 words (BricoNeo buffer: 2048 words, address included). |
 | TestInp | yes | Controllers, memory card detect, AES/MVS mode |
@@ -344,9 +345,15 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `5859d6b` (2026-10-22, "Fixed remote keyboard detection"). Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | announces BricoNeo **1.35**, 22 extensions, flags `$0007`, SHA-256 `faba564c2502f6fc464156326a200cbb7765fad25fea6a4df43706e895b2e41e` |
+| This ROM | fork version **1.35-nic034-01**; the BricoExt header still announces **1.35**; 23 extensions, flags `$0007`, SHA-256 `7713a97e1696240246582df40f05ccb75a98b9746dd5fda69c92b82e2605d3c5` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
+
+**Versioning**: Brico16Bits prints the header version as two numbers ("Found BricoNeo ROM
+version 1.35"), so it cannot carry a fork suffix. The header keeps 1.35, the upstream base; the
+fork version `1.35-<fork>-NN` lives in one place, `FORK_VERSION` in `source/inc/define.inc`, and
+shows in the `Version` command, its `?` description and the Compiler log. NN goes up with every
+published ROM.
 
 The ROM keeps the BricoNeo header and the BricoExt layout (magic at `$80`, flags at `$8C`,
 `jmp` at `$8E`, extension table at `$A0`). The reset vector upper word is `$00C0`, so
@@ -361,7 +368,7 @@ Brico16Bits recognises the byte order.
 3. Drop `rom/Brico68k.bin` at the root of the `BricoNeo` USB drive. The root loads it in RAM only
    and resets the console: your bank 0 is untouched, and the next power cycle brings it back.
    (Put it in a bank folder to keep it.)
-4. Type `?`: the Extensions section must list the 22 commands. All screen bands green after
+4. Type `?`: the Extensions section must list the 23 commands; `Version` says which build runs. All screen bands green after
    `TestBus` = the BIOS socket path is fine.
 5. Paste the whole of `bench/real_aes_session.txt` into the terminal. The `;` lines are comments
    and `Delay` waits, both built into the BricoNeo console.

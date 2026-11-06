@@ -1,6 +1,7 @@
 ; Brico68k - full session for a real Neo Geo through the BricoNeo console
 ; Paste the whole file into the serial terminal (PuTTY, Tera Term...). Lines starting with ; are ignored.
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
+Version
 Echo $1234
 ChipCheck
 TestBus
