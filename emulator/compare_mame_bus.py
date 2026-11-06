@@ -1,7 +1,7 @@
 """TestBus (BIOS socket address lines) in the emulator core and in MAME, same fault injected:
 compares the 16 screen bands (A1 at the top) and the command status.
 Needs MAME, BRICO_SOUND_ROM (your 000-lo.lo) and a built core (emulator/build_core.py).
-Usage: BRICO_SOUND_ROM=000-lo.lo python3 emulator/compare_mame_bus.py rom/Brico68k.bin
+Usage: BRICO_SOUND_ROM=000-lo.lo python3 emulator/compare_mame_bus.py rom/ROM.BIO
 """
 import sys, os, glob, tempfile
 HERE = __import__('pathlib').Path(__file__).resolve().parent

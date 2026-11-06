@@ -4,6 +4,16 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-06 - The ROM is named ROM.BIO, Compiler 1.4
+
+ROM SHA-256 `7f88cd8d6ac9916a30caf1c635ceb52559ecdf91e6cfb4bca39369bff54be5b8` (unchanged content,
+fork 1.35-nic034-01).
+
+- The built ROM is now `ROM.BIO` (the BricoNeo drive accepts `.BIN`, `.BIO` and `.ROM`):
+  `rom/ROM.BIO` (+ `.sha256`), the Compiler output and its "Copy ROM.BIO" button, `build.py`
+  and CMake (`build/rom/ROM.BIO`). The Emulator opens `rom/ROM.BIO` by default and still finds
+  an older `Brico68k.bin`.
+
 ## 2026-11-06 - Fork version in the Version command only
 
 ROM SHA-256 `7f88cd8d6ac9916a30caf1c635ceb52559ecdf91e6cfb4bca39369bff54be5b8` (fork 1.35-nic034-01), rebuilt from `source/` to the same checksum.

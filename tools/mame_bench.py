@@ -8,7 +8,7 @@ SYSTEM_ROM_MIRROR) and stops on EOT. MAME emulates the whole hardware: this is
 the reference for the VRAM / LSPC / timing / audio tests.
 
 Usage:
-  python3 tools/mame_bench.py rom/Brico68k.bin                         # all
+  python3 tools/mame_bench.py rom/ROM.BIO                         # all
   python3 tools/mame_bench.py ROM Echo:0x1234 Read:0x320001 TestWRAM    # chosen
   python3 tools/mame_bench.py ROM @0xC00081                             # raw address
 

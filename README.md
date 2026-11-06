@@ -10,9 +10,9 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 
 | Path | What it is |
 |---|---|
-| `Brico68k_Compiler.py` | Brico68k Compiler 1.3 (Python 3.8+, standard library only, Tk window) |
+| `Brico68k_Compiler.py` | Brico68k Compiler 1.4 (Python 3.8+, standard library only, Tk window) |
 | `Brico68k_Emulator.py` | Brico68k Emulator 1.11: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
-| `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB: 32 KB of code + CRC32 + 3 mirrors, exactly what the BricoNeo builds itself for header flag `$0004` (SHA-256 in `rom/Brico68k.bin.sha256`) |
+| `rom/ROM.BIO` | Ready-to-use ROM, 128 KB: 32 KB of code + CRC32 + 3 mirrors, exactly what the BricoNeo builds itself for header flag `$0004` (SHA-256 in `rom/ROM.BIO.sha256`) |
 | `brico16bits/` | Optional Brico16Bits patch (EXCPT: 68000 exception reports). Syntax-checked only, not built for the Pico, not run |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
@@ -24,8 +24,8 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 
 1. Install Python 3.8 or newer (python.org; on Windows tick "Add to PATH").
 2. Double-click `Brico68k_Compiler.py`, or run `python Brico68k_Compiler.py`.
-3. Click **Build**. The result is `output/Brico68k.bin`.
-4. Plug the BricoNeo in over USB, then click **Detect** and **Copy Brico68k.bin**.
+3. Click **Build**. The result is `output/ROM.BIO`.
+4. Plug the BricoNeo in over USB, then click **Detect** and **Copy ROM.BIO**.
    `BANK0` is saved and loaded at start-up; the drive root loads into RAM only.
 
 The vasm assembler and the vlink linker are taken care of automatically:
@@ -55,7 +55,7 @@ repository.
 ## Brico68k Emulator
 
 Tests the ROM without a BricoNeo, a Brico16Bits or MAME. Double-click `Brico68k_Emulator.py`, or
-run `python Brico68k_Emulator.py [ROM]`. It opens `rom/Brico68k.bin` by default. Then type the
+run `python Brico68k_Emulator.py [ROM]`. It opens `rom/ROM.BIO` by default. Then type the
 same commands as on the Brico16Bits console: `Help`, `Echo 1234`, `TestWRAM`, `TestDAC 1`,
 `Dump $100000 16`.
 
@@ -366,7 +366,7 @@ Brico16Bits recognises the byte order.
    cartridge: on an AES the Z80 program comes from the cartridge, so TestZ80 and TestAudio need one.
 2. Connect the USB cable. Open the first serial port with PuTTY or Tera Term and **turn session
    logging on** (PuTTY: Session > Logging > All session output).
-3. Drop `rom/Brico68k.bin` at the root of the `BricoNeo` USB drive. The root loads it in RAM only
+3. Drop `rom/ROM.BIO` at the root of the `BricoNeo` USB drive. The root loads it in RAM only
    and resets the console: your bank 0 is untouched, and the next power cycle brings it back.
    (Put it in a bank folder to keep it.)
 4. Type `?`: the Extensions section must list the 23 commands; `Version` says which build runs. All screen bands green after
@@ -395,9 +395,9 @@ in Lua. It needs your own BIOS dumps: `000-lo.lo`, plus `sm1.sm1` and `sfix.sfix
 
 ```
 python3 tools/make_test_cart.py /tmp/testcart          # synthetic cartridge (tiny Z80 M1), nothing copyrighted
-BRICO_SOUND_ROM=000-lo.lo python3 tools/mame_bench.py rom/Brico68k.bin
-BRICO_SOUND_ROM=000-lo.lo BRICO_CART=/tmp/testcart python3 tools/mame_bench.py rom/Brico68k.bin TestZ80 TestAudio
-BRICO_SOUND_ROM=000-lo.lo BRICO_DRIVER=neogeo BRICO_MVS_DIR=dumps/ python3 tools/mame_bench.py rom/Brico68k.bin TestWatchdog Echo:1 TestWatchdog
+BRICO_SOUND_ROM=000-lo.lo python3 tools/mame_bench.py rom/ROM.BIO
+BRICO_SOUND_ROM=000-lo.lo BRICO_CART=/tmp/testcart python3 tools/mame_bench.py rom/ROM.BIO TestZ80 TestAudio
+BRICO_SOUND_ROM=000-lo.lo BRICO_DRIVER=neogeo BRICO_MVS_DIR=dumps/ python3 tools/mame_bench.py rom/ROM.BIO TestWatchdog Echo:1 TestWatchdog
 ```
 
 Verified in MAME, on `aes`, `aes` with the test cartridge, and `neogeo`: all extensions,

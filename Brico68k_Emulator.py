@@ -56,7 +56,8 @@ TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
 IS_WIN = os.name == "nt"
-ROM_CANDIDATES = ["rom/Brico68k.bin", "output/Brico68k.bin", "Brico68k.bin"]
+ROM_CANDIDATES = ["rom/ROM.BIO", "output/ROM.BIO", "ROM.BIO",
+                  "rom/Brico68k.bin", "output/Brico68k.bin", "Brico68k.bin"]   # older builds
 
 # ---------------------------------------------------------------------------
 # Core loader + Brico16Bits-like host (shared by the window and --run)

@@ -10,7 +10,7 @@ the BricoNeo board / Brico16Bits host firmware) with a simple interface.
   Other systems (macOS...): downloaded and built from source automatically
   (gcc/clang, or the zig compiler installed through pip). Your own executables
   can also be used.
-- Result: Brico68k.bin, ready to copy to the BricoNeo USB drive, with a
+- Result: ROM.BIO, ready to copy to the BricoNeo USB drive, with a
   Brico16Bits compatibility check (header, byte order, extension table, size).
 - At start-up, missing files (source files, includes, embedded tools, output
   folder) are listed in a red box instead of failing later during the build.
@@ -44,7 +44,7 @@ import zipfile
 from pathlib import Path
 
 APP_NAME = "Brico68k Compiler"
-APP_VERSION = "1.3"
+APP_VERSION = "1.4"
 
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_compiler"
@@ -85,6 +85,7 @@ GITHUB_DEFAULT_BRANCH = "main"
 # Same options as build.py in the Brico68k repository
 ASM_FLAGS = ["-chklabels", "-nocase", "-Fvobj", "-m68000", "-Dvasm=1", "-DBuildNEO=1", "-spaces", "-quiet"]
 TARGET_NAME = "Brico68k"
+ROM_FILE = "ROM.BIO"        # name of the built ROM (BricoNeo drive: .BIN, .BIO or .ROM)
 
 # Format expected by Brico16Bits (MemoryMap.h / BricoExtManager.cpp / ROMImageManager.cpp)
 SP1_SIZE = 128 * 1024
@@ -728,7 +729,7 @@ def full_build(source_mode, source_path, auto, manual_vasm, manual_vlink, out_di
         checks.append((len(data) <= 0x7FFA, "NeoDiag layout (flag $0004): code fits below $7FFA, CRC32 + 3 mirrors"))
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"{TARGET_NAME}.bin"
+    out_file = out_dir / ROM_FILE
     out_file.write_bytes(final)
     info = {
         "file": str(out_file),
@@ -982,7 +983,7 @@ def main_gui():
     r = ttk.Frame(f4); r.pack(fill="x", **pad)
     ttk.Label(r, text="Destination:").pack(side="left")
     ttk.Combobox(r, textvariable=dest, values=dest_choices, state="readonly", width=52).pack(side="left", padx=6)
-    b_send = ttk.Button(r, text="Copy Brico68k.bin", command=lambda: send())
+    b_send = ttk.Button(r, text="Copy ROM.BIO", command=lambda: send())
     b_send.pack(side="left")
 
     def detect_drive():
@@ -994,9 +995,9 @@ def main_gui():
                                           "Plug the BricoNeo in over USB, or choose the drive with 'Browse'.")
 
     def send():
-        src = Path(out_dir.get()) / f"{TARGET_NAME}.bin"
+        src = Path(out_dir.get()) / ROM_FILE
         if not src.is_file():
-            messagebox.showerror(APP_NAME, "Build first: Brico68k.bin not found in the output folder.")
+            messagebox.showerror(APP_NAME, f"Build first: {ROM_FILE} not found in the output folder.")
             return
         d = drive.get().strip()
         if not d or not Path(d).is_dir():
@@ -1007,12 +1008,12 @@ def main_gui():
             messagebox.showerror(APP_NAME, f"{target_dir} does not exist: is this really the BricoNeo drive?")
             return
         try:
-            shutil.copyfile(src, target_dir / f"{TARGET_NAME}.bin")
+            shutil.copyfile(src, target_dir / ROM_FILE)
         except OSError as ex:
             messagebox.showerror(APP_NAME, f"Copy failed: {ex}")
             return
         persist()
-        log(f"Copied to the BricoNeo: {target_dir / (TARGET_NAME + '.bin')}")
+        log(f"Copied to the BricoNeo: {target_dir / ROM_FILE}")
         messagebox.showinfo(APP_NAME, f"Copied to {target_dir}.\nThe BricoNeo programs the file then "
                                       "reconnects (the file disappears from the drive: this is normal).")
 

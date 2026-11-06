@@ -1,6 +1,6 @@
 """Compares the emulator core with the MAME bench, word for word.
 Needs MAME, BRICO_SOUND_ROM (your 000-lo.lo) and a built core (emulator/build_core.py).
-Usage: BRICO_SOUND_ROM=000-lo.lo python3 emulator/compare_mame.py rom/Brico68k.bin
+Usage: BRICO_SOUND_ROM=000-lo.lo python3 emulator/compare_mame.py rom/ROM.BIO
 """
 import sys, os, json
 HERE = __import__('pathlib').Path(__file__).resolve().parent
