@@ -74,6 +74,27 @@ def parse_uint(text):
         return int(m.group()) if m else 0
 
 
+EXC_NAMES = {2: "bus error", 3: "address error", 4: "illegal instruction", 5: "divide by zero", 6: "CHK",
+             7: "TRAPV", 8: "privilege violation", 10: "line A opcode", 11: "line F opcode",
+             24: "unexpected interrupt"}
+
+
+def format_exception(typ, values):
+    """Brico16Bits (local branch workspace/nicolas-exceptions): a 68000 exception ends the output with
+    the 68k command EXCPT + 6 words; the output before it is shown as usual, then the report
+    (CommandExtension + Command68kException). None when the output does not end with a report."""
+    if len(values) < 11 or any((values[-11 + i] != ord(ch)) for i, ch in enumerate("EXCPT")):
+        return None
+    v = values[-6:]
+    txt = format_result(typ, values[:-11]) if len(values) > 11 else ""
+    txt += (f"\n*** 68000 exception: {EXC_NAMES.get(v[0], 'reserved vector')} (vector {v[0]}) "
+            f"at PC ${(v[2] << 16) | v[3]:06x}, SR ${v[1]:04x}")
+    if v[0] in (2, 3):
+        txt += f", access ${(v[4] << 16) | v[5]:06x}"
+    return txt + " ***\n(PC/SR are read from the exception frame in work RAM)\n" \
+        "[Extension aborted by a 68000 exception]\n"
+
+
 def format_result(typ, values):
     """Text as Brico16Bits DisplayResult shows it."""
     if typ == TYPE_VOID:
@@ -137,9 +158,13 @@ class Host:
         self.pending = None
         if st == H_TIMEOUT:
             return "timeout", "[Timeout]\n", 3.0
+        exc = format_exception(typ, values)
+        if exc:
+            return "exception", exc, secs
         text = format_result(typ, values)
         if self.core.lib.neo_host_overflow():
-            text += "[Output truncated: more than 2048 words, the Brico16Bits buffer size]\n"
+            text += ("[More than 2047 words: the BricoNeo ring buffer wrapped, only the last words are left "
+                     "(Brico16Bits InputBuffer, 2048 words)]\n")
         return "eot", text, secs
 
     def run_blocking(self, line, max_frames=400):
@@ -157,17 +182,20 @@ class Host:
 # ---------------------------------------------------------------------------
 # Simulated faults
 # ---------------------------------------------------------------------------
-FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4}
+FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4, "bios": 5}
 REGION_NAMES = {0: "WRAM", 1: "Palette RAM", 2: "VRAM lower (slow)", 3: "VRAM upper (fast)",
-                4: "LSPC line counter"}
-FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2}
-DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8}
-ADDR_RANGE = {0: (1, 15), 1: (1, 13), 2: (0, 14), 3: (0, 10)}
+                4: "LSPC line counter", 5: "BIOS socket (68000 -> BricoNeo)"}
+FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2, "float": 3}
+# the BIOS socket has no data faults: a bad D line stops the boot, nothing to test
+DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8, 5: -1}
+ADDR_RANGE = {0: (1, 15), 1: (1, 13), 2: (0, 14), 3: (0, 10), 5: (1, 16)}
 
 FAULT_HELP = ("Fault syntax: REGION:data:BIT:0|1 (data bit stuck), REGION:addr:LINE:0|1 (address line stuck),\n"
-              "wram:lane:lower|upper (WRAM chip dead). REGION = wram, pal, vramlo, vramhi, line.\n"
-              "Bits: data 0-15 (line counter 0-8); address WRAM A1-A15, pal A1-A12 + 13 = bank select,\n"
-              "vramlo 0-14, vramhi 0-10. Example: --fault wram:data:5:1 --fault pal:addr:13:0")
+              "wram:lane:lower|upper (WRAM chip dead), bios:float:LINE (BIOS socket line unstable).\n"
+              "REGION = wram, pal, vramlo, vramhi, line, bios. Bits: data 0-15 (line counter 0-8);\n"
+              "address WRAM A1-A15, pal A1-A12 + 13 = bank select, vramlo 0-14, vramhi 0-10,\n"
+              "bios A1-A16 (socket, 68000 -> BricoNeo; address faults only).\n"
+              "Example: --fault wram:data:5:1 --fault pal:addr:13:0 --fault bios:addr:15:1")
 
 
 def parse_fault(spec):
@@ -180,10 +208,16 @@ def parse_fault(spec):
         if region != 0 or parts[2] not in ("lower", "upper"):
             raise ValueError("byte lane faults: wram:lane:lower or wram:lane:upper")
         return region, kind, 0, 1 if parts[2] == "upper" else 0
+    if kind == 3:
+        if region != 5 or len(parts) != 3 or not parts[2].isdigit() or not 1 <= int(parts[2]) <= 16:
+            raise ValueError("unstable line: bios:float:LINE, LINE 1-16")
+        return region, kind, int(parts[2]), 0
     if len(parts) != 4 or parts[3] not in ("0", "1") or not parts[2].isdigit():
         raise ValueError(f"bad fault '{spec}': expected REGION:{parts[1]}:BIT:0|1")
     bit, value = int(parts[2]), int(parts[3])
     if kind == 0 and bit > DATA_BITS[region]:
+        if DATA_BITS[region] < 0:
+            raise ValueError(f"{REGION_NAMES[region]}: address faults only (a bad data line stops the boot)")
         raise ValueError(f"{REGION_NAMES[region]}: data bits 0-{DATA_BITS[region]}")
     if kind == 1:
         if region not in ADDR_RANGE:
@@ -201,6 +235,8 @@ def describe_fault(f):
         return f"{name}: {'upper (D8-D15)' if value else 'lower (D0-D7)'} chip dead"
     if kind == 0:
         return f"{name}: data bit D{bit} stuck at {value}"
+    if kind == 3:
+        return f"{name}: address line A{bit} unstable"
     if region == 1 and bit == 13:
         return f"{name}: bank select stuck at bank {value}"
     return f"{name}: address line A{bit} stuck at {value}"
@@ -211,6 +247,8 @@ def fault_spec(f):
     r = {v: k for k, v in FAULT_REGIONS.items()}[region]
     if kind == 2:
         return f"{r}:lane:{'upper' if value else 'lower'}"
+    if kind == 3:
+        return f"{r}:float:{bit}"
     return f"{r}:{'data' if kind == 0 else 'addr'}:{bit}:{value}"
 
 

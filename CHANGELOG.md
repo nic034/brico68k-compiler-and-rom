@@ -4,6 +4,42 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-06 - Aligned with the Brico16Bits code, TestBus, Compiler 1.3, Emulator 1.11
+
+ROM SHA-256 `faba564c2502f6fc464156326a200cbb7765fad25fea6a4df43706e895b2e41e` (BricoNeo 1.35,
+22 extensions, flags `$0007`), rebuilt from `source/` to the same checksum; `build.py`, CMake and
+the Compiler give the same bytes.
+
+After Aurelien's review and a full read of the Brico16Bits sources:
+
+- **Command dispatch back to upstream** (`jmp JUMP_TO_COMMAND`). The command re-read loop
+  (earlier review fix) is gone: the BricoNeo writes the address in one 32-bit store and holds it 1 ms; the
+  torn read came from the MAME test host.
+- **Exceptions** are sent as the 68k command `EXCPT` (vector, SR, PC, access address) + EOT
+  instead of plain text. `brico16bits/` holds a Brico16Bits patch that shows them (syntax-checked
+  only).
+- **TestBus** (new): BIOS socket path, built on the NeoDiag layout the BricoNeo already makes for
+  header flag `$0004` (CRC32 at `$7FFC`, copy number at `$7FFA` of the copies at `$8000`,
+  `$10000`, `$18000`). Names A15/A16 stuck at 0/1; CRC32 for A1-A14/D0-D15. Text and 16 screen
+  bands; also checked at boot (screen only on a fault). One pass: `*TestBus` repeats.
+  Code limited to `$7FFA`. `tools/neodiag_image.py` replaces nothing upstream; it writes what the
+  BricoNeo writes, for SendROMPart, MAME and the emulator.
+- **ChipCheck**: no more absolute 68KCLK / frame rate from the BricoNeo's 1 ms hold (not a clock):
+  `n/a`, measure with BricoNeo `Freq`. Cycles per frame and the 6 MHz check unchanged.
+- **TestAudio**: the beeps poll the command block; a new command stops them and runs (it used to
+  time out).
+- **Dump**: at most 2045 words (BricoNeo ring buffer of 2048 words).
+- **Emulator 1.11**: port watcher modelled access by access (PIO), 2048-word ring buffer, BIOS
+  socket faults (`bios:addr:N:V`, `bios:float:N`, 3 presets), `EXCPT` display, TestBus in Overview.
+  Diagnosis: when every command timed out it points to the boot screen.
+- **Compiler 1.3**: NeoDiag layout when the header has flag `$0004`; a relative `--source`
+  folder works.
+- **MAME bench**: `BRICO_SOCKET` injects BIOS socket faults; `emulator/compare_mame_bus.py`.
+- Checks: 34/34 identical to MAME with and without the test cartridge (an address error report
+  included), 22/23 with faults (known bench palette artifact), TestBus screen 7/7, GUI 168/168
+  (the "command during the beeps times out" checks became "it runs").
+- Not verified: anything on a real AES or BricoNeo; the Brico16Bits patch was not built.
+
 ## 2026-11-06 - Palette diagnosis names NEO-G0
 
 ROM SHA-256 `0b406cc34a85815a57d3a2a7214c784c4b59c9d33afd5e571b7c999b3e9fe3da`.

@@ -44,7 +44,7 @@ import zipfile
 from pathlib import Path
 
 APP_NAME = "Brico68k Compiler"
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
 
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_compiler"
@@ -580,8 +580,26 @@ def check_briconeo(data):
 
 
 def make_sp1_image(data, fill=0xFF):
-    return data + bytes([fill]) * (SP1_SIZE - len(data))
-
+    """128 KB BricoNeo image. With header flag $0004 (bytes $8C-$8D), the image
+    the BricoNeo builds itself on a mass-storage / serial load (Brico16Bits
+    NeoDiagImageBuilder, same as tools/neodiag_image.py): CRC-32 of $0000-$7FFA
+    at $7FFC ([B2 B3 B0 B1]), mirror number in $7FFA, copies at $8000, $10000,
+    $18000 - so SendROMPart, MAME and the emulator see the same bytes.
+    Otherwise: plain padding."""
+    flags = int.from_bytes(data[0x8C:0x8E], "big") if len(data) >= 0x8E else 0
+    if not (flags & 4) or len(data) > 0x7FFA:
+        return data + bytes([fill]) * (SP1_SIZE - len(data))
+    import zlib
+    base = bytearray(data + bytes(0x8000 - len(data)))
+    crc = zlib.crc32(bytes(base[:0x7FFB]))
+    base[0x7FFC:0x8000] = bytes(((crc >> 16) & 0xFF, crc >> 24, crc & 0xFF, (crc >> 8) & 0xFF))
+    out = bytearray(base)
+    for m in (1, 2, 3):
+        copy = bytearray(base)
+        copy[0x7FFA] = m
+        copy[0x7FFC:0x8000] = bytes(4)
+        out += copy
+    return bytes(out)
 
 def find_briconeo_drives():
     """Drives that look like the BricoNeo USB drive (BANK0.. folders)."""
@@ -699,6 +717,8 @@ def full_build(source_mode, source_path, auto, manual_vasm, manual_vlink, out_di
         data = built.read_bytes()
     checks = check_briconeo(data)
     final = make_sp1_image(data) if sp1 else data
+    if sp1 and len(final) == SP1_SIZE and final[0x8D] & 4:
+        checks.append((len(data) <= 0x7FFA, "NeoDiag layout (flag $0004): code fits below $7FFA, CRC32 + 3 mirrors"))
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{TARGET_NAME}.bin"
@@ -741,6 +761,8 @@ def main_cli(argv):
     a = ap.parse_args(argv)
     src = a.source or default_source_dir()
     mode, src = _parse_source(src) if src else ("folder", "")
+    if mode != "github" and src:
+        src = str(Path(src).resolve())     # relative folder: vasm runs from another directory
     missing = startup_check(mode, src, a.out, (a.vasm, a.vlink))
     for what, detail in missing:
         print(f"MISSING: {what} -> {detail}")

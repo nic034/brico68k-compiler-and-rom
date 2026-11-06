@@ -3,6 +3,8 @@
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
 Echo $1234
 ChipCheck
+TestBus
+; TestBus: 16 bands on screen until the next command, A1 at the top, all green = OK
 TestWRAM
 TestBRAM
 TestPRAM
@@ -11,7 +13,7 @@ TestLSPC
 TestTiming
 TestZ80
 TestAudio
-; the 68000 beeps for about 3.5 s: anything sent meanwhile would time out
+; the beeps last about 3.5 s: wait to hear them (a new command stops them)
 Delay 4000
 TestInp
 TestStatusA

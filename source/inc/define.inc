@@ -74,6 +74,7 @@ BRICO_EXT_OUTPUT_TYPE_DUMP equ $3
 ; BricoNeo special flags
 BRICO_SPECIAL_FLAG_ENABLE_EXTENSIONS equ $0001		; Command extensions are active
 BRICO_SPECIAL_FLAG_68K_SENDS_COMMANDS equ $0002		; The 68k can send commands using the output port
+BRICO_SPECIAL_FLAG_NEODIAG_MIRRORS equ $0004		; The BricoNeo writes the CRC32 at $7FFC and the 3 mirrors (NeoDiagImageBuilder)
 
 ; VRAM memory mapped registers
 REG_VRAMADD	equ $3C0000
@@ -127,6 +128,13 @@ REG_STATUS_B equ $380000
 	endm
 
 	; Clobbers d0 and a0 (unchanged contract).
+	; BricoNeo side (Brico16Bits PioBusWatcherPort.pio): the read at the port
+	; arms the watcher, ONE more socket access goes by (the opcode prefetch
+	; between these two instructions) and the address of the next one is
+	; the value. Keep the two reads back to back, from code in the BIOS
+	; socket, with interrupts masked (the firmware runs at SR=$2700; the
+	; upstream Trace.s port_write_d0 masks them itself): an interrupt or a
+	; trace exception in between would shift the captured value.
 	macro InlinePortWriteD0
 		and.l #$0000ffff,d0				; cleanup high word
 		add.l d0,d0						; times 2 (16 bits ROM) - add.l Dn,Dn: 8 cycles vs 10 for lsl.l #1
@@ -211,4 +219,4 @@ REG_STATUS_B equ $380000
 	macro Nop16
 		Nop8
 		Nop8
-	endm
+	endm

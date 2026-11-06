@@ -12,9 +12,10 @@
 ; stay the reference when a line fails.
 ;
 ; Clocks (NEO-D0 outputs, neogeodev wiki "Clock" / "LSPC2-A2"):
-;  - 68KCLK 12 MHz: counted against the BricoNeo's own clock. Brico16Bits
-;    clears the command exactly 1 ms (sleep_ms(1)) after starting the
-;    extension; the 68000 counts its cycles until it sees the clear.
+;  - 68KCLK 12 MHz: not measured by the 68000. The only time reference it
+;    could use is the BricoNeo command block (held 1 ms by sleep_ms(1)),
+;    which is the BricoNeo's business, not a clock: absolute frequencies
+;    are measured with the BricoNeo Freq command (extension input pin).
 ;  - 24 MHz to the LSPC2: CPU cycles per video frame (202752 expected:
 ;    both come from the same crystal, so this checks the dividers).
 ;  - 6 MHz pixel clock: the LSPC timer counts it; CPU cycles per timer
@@ -28,7 +29,7 @@
 ; opcodes: a driven port gives the same value twice.
 ; Progress for the emulator: CHK_PROGRESS (0-100) + CHK_PROG_MAGIC.
 ;
-; d7 = failure flags (bits below), d6 = CPU cycles in the host's 1 ms.
+; d7 = failure flags (bits below).
 ; Routines called with JsrA6 destroy at most d0-d4/a0-a3: d5-d7, a4, a5
 ; are kept (a5 = saved link inside the local routines that print).
 ; ------------------------------------------------------------------------
@@ -42,8 +43,6 @@ F_CLOCK     equ 6
 F_PORTS     equ 7
 F_Z80       equ 8			; no answer: inconclusive (no cartridge?)
 
-CYC_1MS     equ 60			; addq.l 8 + tst.l abs 20 + beq 8 + cmp.l # 14 + blo 10
-CYC_PICKUP  equ 90			; avg delay command written -> this code (poll loop + stable re-read), MAME/emulator
 CYC_FRAME   equ 64			; addq.l 8 + cmpi.l # 14 + bhs 8 + move.w abs 16 + and 4 + cmp 4 + bcc 10
 CYC_TIMER   equ 56			; addq.l 8 + tst.w abs 16 + bne 8 + cmpi.l # 14 + blo 10
 TMR_TICKS   equ 30000		; 5 ms of 6 MHz pixel clock
@@ -55,18 +54,6 @@ LINE_TOP    equ $FF80
 	endm
 
 EXT_CHIP_CHECK:
-	; --- 68000 clock against the host's 1 ms (must be the very first thing) ---
-	moveq #0,d5
-.c1ms:
-	addq.l #1,d5
-	tst.l (BRICO_COMMAND_IN).l
-	beq.s .c1msDone
-	cmp.l #1000,d5				; ~5 ms: the host never cleared
-	blo.s .c1ms
-.c1msDone:
-	move.l d5,d6
-	mulu #CYC_1MS,d6			; d6 = CPU cycles in 1 ms
-	add.l #CYC_PICKUP,d6		; + the time the command loop took to start us
 	moveq #0,d7
 	move.w #$C4EC,(CHK_PROG_MAGIC).l
 	Progress 5
@@ -457,32 +444,8 @@ EXT_CHIP_CHECK:
 
 	; --- NEO-D0 outputs ----------------------------------------------------------
 	PrintLn "NEO-D0 outputs:"
-	; 68KCLK, against the host 1 ms
-	Print "  68KCLK 12 MHz  "
-	cmp.l #10800,d6
-	blo .ckBad
-	cmp.l #13200,d6
-	bhi .ckBad
-	Print "OK      ~"
-	bra .ckPrint
-.ckBad:
-	bset #F_CLOCK,d7
-	Print "FAIL    ~"
-.ckPrint:
-	move.l d6,d0
-	add.l #50,d0
-	divu #100,d0				; tenths of MHz
-	and.l #$FFFF,d0
-	divu #10,d0
-	move.l d0,d4
-	and.l #$FFFF,d0
-	JsrA6 printDec
-	Print "."
-	swap d4
-	moveq #0,d0
-	move.w d4,d0
-	JsrA6 printDec
-	PrintLn " MHz (BricoNeo 1 ms reference, +-5%)"
+	; 68KCLK: no time reference on the 68000 side
+	PrintLn "  68KCLK 12 MHz  n/a     the 68000 runs; frequency: BricoNeo Freq (input pin)"
 
 	; 24 MHz to the LSPC2: cycles per frame
 	Print "  24 MHz > LSPC2 "
@@ -499,23 +462,7 @@ EXT_CHIP_CHECK:
 	Print "OK      "
 	move.l d5,d0
 	JsrA6 printDec
-	Print " cycles/frame (202752), ~"
-	move.l d6,d0
-	mulu #2500,d0				; d6 < 65536 here: mulu is enough
-	move.l d5,d1
-	lsr.l #2,d1					; frame / 4 fits 16 bits
-	divu d1,d0					; tenths of Hz
-	and.l #$FFFF,d0
-	divu #10,d0
-	move.l d0,d4
-	and.l #$FFFF,d0
-	JsrA6 printDec
-	Print "."
-	swap d4
-	moveq #0,d0
-	move.w d4,d0
-	JsrA6 printDec
-	PrintLn " Hz"
+	PrintLn " cycles/frame (202752)"
 	bra .frEnd
 .frBad:
 	bset #F_CLOCK,d7

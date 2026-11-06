@@ -73,7 +73,7 @@
 	; Version - 4 bytes
 	BRICONEO_VERSION 1,35
 	; Special modes
-	dc.w BRICO_SPECIAL_FLAG_ENABLE_EXTENSIONS + BRICO_SPECIAL_FLAG_68K_SENDS_COMMANDS
+	dc.w BRICO_SPECIAL_FLAG_ENABLE_EXTENSIONS + BRICO_SPECIAL_FLAG_68K_SENDS_COMMANDS + BRICO_SPECIAL_FLAG_NEODIAG_MIRRORS
 
 JUMP_TO_COMMAND:
 	dc.w $4ef9 ; jmp opcode, in order to jump directly to the following address
@@ -92,9 +92,9 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_READ, 			BRICO_EXT_OUTPUT_TYPE_WORD,		"Read",				"Read word at address P1. Odd address: reads the byte (e.g. $320001). (no WRAM used)"
 	DECLARE_EXTENSION EXT_WRITE, 			BRICO_EXT_OUTPUT_TYPE_VOID,		"Write",			"Write word P1 at address P2. Odd address: writes the low byte of P1. (no WRAM used)"
 	DECLARE_EXTENSION EXT_WRITE_B, 			BRICO_EXT_OUTPUT_TYPE_VOID,		"WriteB",			"Write the low byte of P1 at address P2, even or odd (no WRAM used)"
-	DECLARE_EXTENSION EXT_MEMDUMP, 			BRICO_EXT_OUTPUT_TYPE_DUMP,		"Dump",				"Memory dump. Start address in P1 (forced even), word count in P2. The host buffer holds ~2000 words. (no WRAM used)"
+	DECLARE_EXTENSION EXT_MEMDUMP, 			BRICO_EXT_OUTPUT_TYPE_DUMP,		"Dump",				"Memory dump. Start address in P1 (forced even), word count in P2, at most 2045 (BricoNeo buffer: 2048 words). (no WRAM used)"
 	DECLARE_EXTENSION EXT_TEST_INPUTS,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestInp",			"Inputs tests, NEO-F0 / NEO-C1 (no WRAM used)"
-	DECLARE_EXTENSION EXT_TEST_AUDIO,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestAudio",		"Audio test (UniBIOS-like): Z80 handshake, then left, right and center beeps, ~1 s each. Wait ~4 s before the next command. Uses WRAM (stack)."
+	DECLARE_EXTENSION EXT_TEST_AUDIO,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestAudio",		"Audio test (UniBIOS-like): Z80 handshake, then left, right and center beeps, ~1 s each; a new command stops them. Uses WRAM (stack)."
 	DECLARE_EXTENSION EXT_EYE_SND,			BRICO_EXT_OUTPUT_TYPE_VOID,		"PlayEyeSnd",		"Plays the eyecatcher music (Z80 sound command $02: SM1 driver on MVS, cartridge M1 on AES)"
 	DECLARE_EXTENSION EXT_TEST_WRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestWRAM",			"Work RAM test: data bus walking 1/0, 0000/FFFF/AAAA/5555, increment (address lines). On error: address, expected, read, bad bits, byte (D0-D7/D8-D15). (no WRAM used)"
 	DECLARE_EXTENSION EXT_TEST_BRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBRAM",			"MVS Backup RAM test, same tests as TestWRAM. DESTRUCTIVE: erases bookkeeping/settings. N/A on AES (no backup RAM). (no WRAM used)"
@@ -109,6 +109,7 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_TEST_WATCHDOG,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestWatchdog",		"Watchdog: 1st run stops kicking it (expect a reset in ~0.13 s on MVS), run again to read the result and time. Uses WRAM $10FFE0. Not emulated by MAME on AES."
 	DECLARE_EXTENSION EXT_CHIP_CHECK,		BRICO_EXT_OUTPUT_TYPE_STRING,	"ChipCheck",		"Quick state of the board, one line per part (< 1 s): WRAM, palette RAM, VRAM slow/fast, LSPC2 registers, NEO-C1 ports, VBLANK/timer IRQ, Z80, NEO-D0 clocks (68KCLK vs the BricoNeo 1 ms, 24 MHz, 6 MHz). IRQs use WRAM (stack)."
 	DECLARE_EXTENSION EXT_TEST_SYSTYPE,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestSystype",		"SYSTYPE breakdown, AES/MVS-aware: TEST button, JAMMA sense on MVS; unmapped/open-bus on AES (bit layout per MAME neogeo.cpp). (no WRAM used)"
+	DECLARE_EXTENSION EXT_TEST_BUS,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBus",			"BIOS socket, 68000 -> BricoNeo, as NeoDiag: A15/A16 from the mirror bytes, A1-A14/D0-D15 by CRC32. Text + 16 screen bands (A1 at the top) until the next command. Also run at boot. (no WRAM used)"
 	dc.l $ffffffff ; No more extensions
 
 START:
@@ -118,6 +119,14 @@ START:
 	move.w  #$4000,(REG_LSPCMODE).l ; stop animations
 	lea RAM_RESERVED_SYS_ROM,sp		; Set stack pointer to BIOS_WORKRAM
 	DisableInterrupts 				; Interrupts are disabled by default
+	; BIOS socket A15/A16 (TestBus mirror bytes, no WRAM, < 1 ms): on a fault,
+	; show it on screen at once - with A15/A16 stuck at 1 the command block
+	; read lands in a mirror and no command can ever arrive. No mirror
+	; layout (d4 bit 2): nothing shown here, TestBus says it.
+	JsrA6 busCheck
+	tst.l d5
+	beq.s WAIT_FOR_COMMAND
+	jmp BUS_SCREEN
 
 WAIT_FOR_COMMAND:
 	; Wait for the command to be 0 again
@@ -134,86 +143,93 @@ WAIT_FOR_COMMAND:
 	beq.s .loop_wait_for_command
 
 DISPATCH_COMMAND:
-	; A move.l from ROM is TWO 16-bit bus reads. If the host writes the
-	; command between them, d0 is torn (e.g. $0000084A instead of
-	; $00C0084A - seen in MAME with a simulated host, 1 command out of
-	; ~6). Re-read until two consecutive reads agree, then jump through
-	; the register with that stable value. This also never depends on
-	; BRICO_COMMAND_IN still being set when we jump (the host clears it
-	; 1 ms after launch, Brico16Bits CommandExtension.cpp).
-	; JUMP_TO_COMMAND stays in the header unchanged (BricoExt layout).
-.stable:
-	move.l d0,d1
-	move.l (BRICO_COMMAND_IN).l,d0
-	cmp.l d0,d1
-	bne.s .stable
-	tst.l d0						; cleared by the host meanwhile: wait again
-	beq WAIT_FOR_COMMAND
+	; As upstream: jump through the header jmp, which reads the command
+	; address again from the BricoNeo. No retry here: the BricoNeo writes
+	; the address in one 32-bit store and keeps it 1 ms, it is the one in
+	; charge (a torn read was an artefact of the MAME test host).
 	; There will be no RTS as we are not sure the work RAM is working
-	movea.l d0,a0
-	jmp (a0)
+	jmp JUMP_TO_COMMAND
 
 ; ---------------------------------------------------------------------------
-; 68000 exception handlers. They never use the stack (WRAM may be the faulty
-; part), never return with RTE: they reset SP, print which exception hit,
-; send EOT so the host doesn't wait for its 3 s timeout, and go back to the
-; command loop. The CPU itself still pushes its exception frame below SP
-; (WRAM): harmless even if WRAM is broken, nothing reads it back.
-; a5 = exception name string.
+; 68000 exception handlers. The exception is reported to the BricoNeo as a
+; 68k command (BricoExt "68k sends commands" channel, flag $0002): the
+; 5-letter name EXCPT, then one word each: vector number, SR, PC high, PC
+; low, access address high, access address low (bus/address errors only,
+; else 0), then EOT. The BricoNeo shows it to the user (Brico16Bits
+; Command68kException; during an extension, CommandExtension hands it over
+; instead of printing it as the extension output).
+; SR/PC come from the exception frame the CPU pushed in WRAM: if WRAM is the
+; faulty part they may be wrong, the vector number is always right.
+; No stack used, no RTE: SP is reset and the 68000 goes back to the command
+; loop, ready for the next command.
+; d7 = vector number.
 ; ---------------------------------------------------------------------------
 EXC_BUS_ERROR:
-	lea EXC_TXT_BUS(pc),a5
+	moveq #2,d7
 	bra.s EXC_COMMON
 EXC_ADDRESS_ERROR:
-	lea EXC_TXT_ADDR(pc),a5
+	moveq #3,d7
 	bra.s EXC_COMMON
 EXC_ILLEGAL:
-	lea EXC_TXT_ILL(pc),a5
+	moveq #4,d7
 	bra.s EXC_COMMON
 EXC_ZERO_DIVIDE:
-	lea EXC_TXT_DIV(pc),a5
+	moveq #5,d7
 	bra.s EXC_COMMON
 EXC_CHK:
-	lea EXC_TXT_CHK(pc),a5
+	moveq #6,d7
 	bra.s EXC_COMMON
 EXC_TRAPV:
-	lea EXC_TXT_TRAPV(pc),a5
+	moveq #7,d7
 	bra.s EXC_COMMON
 EXC_PRIVILEGE:
-	lea EXC_TXT_PRIV(pc),a5
+	moveq #8,d7
 	bra.s EXC_COMMON
 EXC_LINE_A:
-	lea EXC_TXT_LINEA(pc),a5
+	moveq #10,d7
 	bra.s EXC_COMMON
 EXC_LINE_F:
-	lea EXC_TXT_LINEF(pc),a5
+	moveq #11,d7
 	bra.s EXC_COMMON
 EXC_INTERRUPT:
-	lea EXC_TXT_INT(pc),a5
+	moveq #24,d7				; vectors 24-31 share this handler
 	bra.s EXC_COMMON
 EXC_OTHER:
-	lea EXC_TXT_OTHER(pc),a5
+	moveq #-1,d7				; reserved vectors: $FFFF
 
 EXC_COMMON:
 	move #$2700,sr
-	lea RAM_RESERVED_SYS_ROM,sp
 	WatchDog
-	Print "*** 68000 EXCEPTION: "
-	move.l a5,a1
-	PrintA1
-	PrintLn " - extension aborted ***"
+	movea.l sp,a2				; exception frame
+	moveq #0,d6					; access address (bus/address error only)
+	cmp.w #3,d7
+	bhi.s .short
+	tst.w d7
+	bmi.s .short
+	move.l 2(a2),d6				; group 0: status word, address, IR, SR, PC
+	addq.l #8,a2
+.short:
+	move.w (a2),d5				; SR
+	move.l 2(a2),d4				; PC
+	lea RAM_RESERVED_SYS_ROM,sp
+	lea EXC_CMD(pc),a1
+	PrintA1						; "EXCPT", one word per letter
+	move.w d7,d0
+	InlinePortWriteD0
+	move.w d5,d0
+	InlinePortWriteD0
+	move.l d4,d0
+	swap d0
+	InlinePortWriteD0
+	move.w d4,d0
+	InlinePortWriteD0
+	move.l d6,d0
+	swap d0
+	InlinePortWriteD0
+	move.w d6,d0
+	InlinePortWriteD0
 	WriteEOT
 	jmp WAIT_FOR_COMMAND
 
-EXC_TXT_BUS:	dc.b "bus error",0
-EXC_TXT_ADDR:	dc.b "address error (odd address?)",0
-EXC_TXT_ILL:	dc.b "illegal instruction",0
-EXC_TXT_DIV:	dc.b "divide by zero",0
-EXC_TXT_CHK:	dc.b "CHK",0
-EXC_TXT_TRAPV:	dc.b "TRAPV",0
-EXC_TXT_PRIV:	dc.b "privilege violation",0
-EXC_TXT_LINEA:	dc.b "line A opcode",0
-EXC_TXT_LINEF:	dc.b "line F opcode",0
-EXC_TXT_INT:	dc.b "unexpected interrupt",0
-EXC_TXT_OTHER:	dc.b "reserved/unknown vector",0
+EXC_CMD:	dc.b "EXCPT",0
 	even

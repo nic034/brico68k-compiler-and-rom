@@ -20,6 +20,13 @@ EXT_MEMDUMP:
 	swap d0
     PortWriteD0
 
+	; The BricoNeo keeps the output in a ring of 2048 words (Brico16Bits
+	; InputBuffer): past 2047 words in all it wraps and the host shows only
+	; the tail, without the address. 2 address words + 2045 = 2047.
+	cmp.l #2045,d3
+	bls.s .countOk
+	move.l #2045,d3
+.countOk:
 	; Compute end of dump address => a3
 	add.l d3,d3						; word count x2 = byte length
 	movea.l a2,a3

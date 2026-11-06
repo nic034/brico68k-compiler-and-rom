@@ -10,7 +10,7 @@ import mame_bench
 R = sys.argv[1]
 JOBS = ["Echo:0x1234","Read:0x320001","Read:0x380000","Read:0x300000","Write:0x5A:0x100001","WriteB:0xA5:0x100000","Dump:0x100000:8",
         "TestInp","TestWRAM","TestBRAM","TestPRAM","TestVRAM","TestLSPC","Color:0x7FFF",
-        "TestStatusA","TestSystype","TestZ80","TestTiming","ChipCheck","TestDAC","Echo:0x77","TestDAC:0x10","PlayEyeSnd","TestAudio","Echo:0x88",
+        "TestStatusA","TestSystype","TestZ80","TestTiming","ChipCheck","TestDAC","Echo:0x77","TestDAC:0x10","TestBus","Echo:0x66","@0xC00001","Echo:0x55","PlayEyeSnd","TestAudio","Echo:0x88",
         "TestWatchdog","Echo:0x99","TestWatchdog","Dump:0xC00000:16","Read:0x400000"]
 res, _ = mame_bench.run(R, JOBS)
 mame = [r for r in res if 'name' in r]
@@ -26,8 +26,10 @@ def measured_only(a, b):
     return f(a) == f(b)
 same = 0
 for job, m in zip(JOBS, mame):
-    ext = h.find(job.split(':')[0])
-    err = h.start(job.replace(':', ' '))
+    if job.startswith('@'):              # raw address: here an odd one, for the 68000 exception report
+        c.lib.neo_host_send(int(job[1:], 16), 0, 0, 0); h.pending = ('raw', 0, 2, '')
+    else:
+        err = h.start(job.replace(':', ' '))
     vals = None
     for f in range(400):
         c.lib.neo_run_frame()

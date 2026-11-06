@@ -51,7 +51,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.10"
+APP_VERSION = "1.11"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -403,9 +403,15 @@ def diagnose_report(d, log_name, top=8):
             rest = "explains every command" if not c["still_different"] else \
                 "still different: " + ", ".join(c["still_different"])
             out.append(f"  {i}. {c['fault']}  [{c['spec']}]  {c['explained']}/{c['total']}, {rest}")
+        if exact and all(c["spec"].startswith("bios:") for c in exact):
+            out.append("The console never answers: a BIOS socket address line (68000 -> BricoNeo) is suspect, "
+                       "and the log cannot say which one. Look at the screen after power-on: the firmware runs "
+                       "TestBus at boot and, on a fault, shows 16 bands, A1 at the top (red = stuck at 0, "
+                       "blue = stuck at 1, orange = unstable). No bands: a line the code itself needs (A1-A14, "
+                       "D0-D15): reseat the BricoNeo, then BricoNeo Trace and a continuity meter.")
     out.append("Limits: one stuck-at fault at a time, in the modelled chips only (WRAM, palette RAM, VRAM, "
-               "line counter). Intermittent faults, shorts between lines, timing faults and other chips "
-               "are not in the dictionary.")
+               "line counter, BIOS socket address lines). Intermittent faults, shorts between lines, timing "
+               "faults and other chips are not in the dictionary.")
     return "\n".join(out) + "\n"
 
 
@@ -527,7 +533,7 @@ def main_cli(argv):
 # Diagnostic catalogue: how the tests are grouped, run and judged
 # ---------------------------------------------------------------------------
 CATEGORIES = [
-    ("Overview", ["ChipCheck"]),
+    ("Overview", ["ChipCheck", "TestBus"]),
     ("Memory", ["TestWRAM", "TestBRAM", "TestPRAM"]),
     ("Video", ["TestVRAM", "TestLSPC", "TestTiming", "TestDAC"]),
     ("Sound", ["TestZ80", "TestAudio", "PlayEyeSnd"]),
@@ -557,7 +563,7 @@ def classify(name, status, text):
     lines = [l.strip() for l in text.splitlines()]
     verdicts = [l for l in lines if l.startswith("=>")]
     errors = [l for l in lines if l.startswith("ERROR")]
-    exc = [l for l in lines if "EXCEPTION" in l]
+    exc = [l for l in lines if "EXCEPTION" in l.upper() and "***" in l]
     if exc:
         return "FAIL", (exc[-1].strip("* ") + ". Most extensions use WRAM for the stack: "
                         "if TestWRAM fails, fix that first.")
@@ -848,7 +854,8 @@ def main_gui(rom_arg=None):
     ttk.Separator(flt).grid(row=4, column=0, columnspan=4, sticky="we", pady=12)
     ttk.Label(flt, text="Add a fault", style="CardBold.TLabel").grid(row=5, column=0, columnspan=4, sticky="w")
     REGIONS = [("WRAM", "wram"), ("Palette RAM", "pal"), ("VRAM lower (slow)", "vramlo"),
-               ("VRAM upper (fast)", "vramhi"), ("LSPC line counter", "line")]
+               ("VRAM upper (fast)", "vramhi"), ("LSPC line counter", "line"),
+               ("BIOS socket (68000 -> BricoNeo)", "bios")]
     reg_var = tk.StringVar(value=REGIONS[0][0]); kind_var = tk.StringVar(value="Data bit stuck")
     bit_var = tk.StringVar(value="0"); lvl_var = tk.StringVar(value="1"); range_var = tk.StringVar(); ferr = tk.StringVar()
     ttk.Label(flt, text="Component", style="Card.TLabel").grid(row=6, column=0, sticky="w", pady=3)
@@ -868,7 +875,9 @@ def main_gui(rom_arg=None):
                ("WRAM: address line A9 stuck at 0", "wram:addr:9:0"), ("Palette RAM: dark bit D15 stuck at 0", "pal:data:15:0"),
                ("Palette RAM: R4 (D11) stuck at 0", "pal:data:11:0"), ("Palette RAM: bank select stuck at bank 0", "pal:addr:13:0"),
                ("VRAM lower: address line A3 stuck at 0", "vramlo:addr:3:0"), ("VRAM upper: data D7 stuck at 1", "vramhi:data:7:1"),
-               ("LSPC line counter: bit 3 stuck at 1", "line:data:3:1")]
+               ("LSPC line counter: bit 3 stuck at 1", "line:data:3:1"),
+               ("BIOS socket: A15 stuck at 1", "bios:addr:15:1"), ("BIOS socket: A16 stuck at 0", "bios:addr:16:0"),
+               ("BIOS socket: A5 unstable (bad contact)", "bios:float:5")]
     pre_var = tk.StringVar(value=PRESETS[0][0])
     ttk.Combobox(flt, textvariable=pre_var, values=[n for n, _ in PRESETS], state="readonly", width=44).grid(
         row=12, column=0, columnspan=3, sticky="we", pady=4)
@@ -1229,6 +1238,8 @@ def main_gui(rom_arg=None):
             st["faults"].clear(); push_faults(); out("--- All faults removed ---\n", "info")
 
     def kinds_for(code):
+        if code == "bios":
+            return ["Address line stuck", "Address line unstable"]
         k = ["Data bit stuck"]
         if code != "line":
             k.append("Address line stuck")
@@ -1249,6 +1260,10 @@ def main_gui(rom_arg=None):
                 lvl_var.set("upper (D8-D15)")
             range_var.set("Writes to that chip are lost, it reads $FF."); return
         sp_bit.grid(); lvl_lbl.configure(text="Stuck at"); cb_lvl.configure(values=["0", "1"])
+        if k.endswith("unstable"):
+            lvl_lbl.configure(text="Level"); cb_lvl.configure(values=["random"]); lvl_var.set("random")
+        elif lvl_var.get() == "random":
+            lvl_var.set("1")
         if lvl_var.get() not in ("0", "1"):
             lvl_var.set("1")
         if k.startswith("Data"):
@@ -1256,7 +1271,8 @@ def main_gui(rom_arg=None):
             range_var.set(f"Data bits D0-D{hi}" + (" (palette: also changes the colours on screen)" if code == "pal" else ""))
         else:
             lo, hi = ADDR_RANGE[FAULT_REGIONS[code]]; bit_lbl.configure(text="Line A")
-            range_var.set(f"Address lines A{lo}-A{hi}" + (" (13 = bank select)" if code == "pal" else ""))
+            range_var.set(f"Address lines A{lo}-A{hi}" + (" (13 = bank select)" if code == "pal" else "")
+                          + (" between the 68000 and the BricoNeo; A1-A14 stop the boot" if code == "bios" else ""))
         sp_bit.configure(from_=lo, to=hi)
         try:
             if not lo <= int(bit_var.get()) <= hi:
@@ -1269,7 +1285,10 @@ def main_gui(rom_arg=None):
         if k.startswith("Chip"):
             fault_add(f"wram:lane:{lvl_var.get().split()[0]}")
         else:
-            fault_add(f"{code}:{'data' if k.startswith('Data') else 'addr'}:{bit_var.get().strip()}:{lvl_var.get()}")
+            if k.endswith("unstable"):
+                fault_add(f"{code}:float:{bit_var.get().strip()}")
+            else:
+                fault_add(f"{code}:{'data' if k.startswith('Data') else 'addr'}:{bit_var.get().strip()}:{lvl_var.get()}")
 
     # --- screen --------------------------------------------------------------------------------
     def layout_big(_e=None):

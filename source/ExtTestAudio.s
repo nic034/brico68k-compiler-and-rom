@@ -48,12 +48,15 @@ EXT_TEST_AUDIO:
 	bsr.w SM1_ShortWait
 	PrintLn "Z80 init sequence sent ($01, $03, $07)"
 	PrintLn "Now playing: left, right, center beeps (~1 s each)."
-	PrintLn "Listen to the audio output. Wait ~4 s before the next command."
+	PrintLn "Listen to the audio output. A new command stops the beeps."
 
 	; Single EOT: the host prints the report now, the beeps follow.
 	WriteEOT
 
-	; Step 3: left / right / center beep commands
+	; Step 3: left / right / center beep commands. The BricoNeo keeps a
+	; command in the block for 1 ms only (Brico16Bits CommandExtension):
+	; the waits poll it, else a command typed during the beeps would be
+	; lost and time out. A new command stops the beeps and runs.
 	move.b #$5C,(REG_SOUND).l
 	bsr.w Wait_1Second
 	move.b #$5D,(REG_SOUND).l
@@ -110,10 +113,22 @@ SM1_CommandDelay:
 	dbra d1,.outer
 	rts
 
-; ~1 s: 18 x SM1_CommandDelay
+; ~1 s: 1536 x ~0.65 ms, polling the BricoNeo command block in between
+; (it holds a command 1 ms).
+; A command arrives: stop the sound (Z80 $03), reset SP (the bsr frames are
+; dropped) and run it.
 Wait_1Second:
-	moveq #17,d2
+	move.w #1536-1,d2
 .loop:
-	bsr.w SM1_CommandDelay
+	move.w #$0300,d0			; 769 x 10 cycles = ~0.64 ms
+.inner:
+	dbra d0,.inner
+	WatchDog
+	tst.l (BRICO_COMMAND_IN).l
+	bne.s .command
 	dbra d2,.loop
 	rts
+.command:
+	move.b #3,(REG_SOUND).l
+	lea RAM_RESERVED_SYS_ROM,sp
+	jmp DISPATCH_COMMAND

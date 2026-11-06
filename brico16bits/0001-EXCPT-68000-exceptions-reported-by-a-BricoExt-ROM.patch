@@ -1,0 +1,365 @@
+From 79d114f89cbbe0f635b3bed9a17f5aec781338e9 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 6 Nov 2026 16:58:25 +0100
+Subject: [PATCH] EXCPT: 68000 exceptions reported by a BricoExt ROM
+
+The Brico68k exception handlers send the 68k command EXCPT (vector, SR,
+PC, access address) then EOT, instead of plain text:
+- idle: HandleCommands runs it like PRTXT;
+- during an extension: CommandExtension shows the output sent before the
+  exception as usual (InputBuffer read limit), then runs the report and
+  returns "[Extension aborted by a 68000 exception]" (stops a loop).
+
+Only syntax-checked on a PC (g++ with stub SDK headers): not built with the
+Pico SDK, not run on a BricoNeo.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01A4z9PLhKHyqQSeWRabEyo9
+---
+ CMakeLists.txt                      |  2 +
+ CommandManager68k.cpp               | 46 +++++++++++++++++++++
+ CommandManager68k.h                 |  2 +
+ Commands/CommandExtension.cpp       | 15 +++++++
+ Commands68k/Command68kException.cpp | 48 ++++++++++++++++++++++
+ Commands68k/Command68kException.h   | 13 ++++++
+ InputBuffer.cpp                     | 62 +++++++++++++++++++++++++++++
+ InputBuffer.h                       |  5 +++
+ 8 files changed, 193 insertions(+)
+ create mode 100644 Commands68k/Command68kException.cpp
+ create mode 100644 Commands68k/Command68kException.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 033237d..fdaa41b 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -17,6 +17,7 @@ set (COMMANDS_68K_CPP
+     Commands68k/Command68kPrintText.cpp
+     Commands68k/Command68kPrintHex.cpp
+     Commands68k/Command68kSwitchBank.cpp
++    Commands68k/Command68kException.cpp
+     )
+ 
+ set (COMMANDS_68K_H
+@@ -24,6 +25,7 @@ set (COMMANDS_68K_H
+     Commands68k/Command68kPrintText.h
+     Commands68k/Command68kPrintHex.h
+     Commands68k/Command68kSwitchBank.h
++    Commands68k/Command68kException.h
+     )
+ 
+ set (SRC Brico16Bits.cpp
+diff --git a/CommandManager68k.cpp b/CommandManager68k.cpp
+index 9580630..5a251b5 100644
+--- a/CommandManager68k.cpp
++++ b/CommandManager68k.cpp
+@@ -10,6 +10,7 @@
+ #include "Commands68k/Command68kPrintText.h"
+ #include "Commands68k/Command68kPrintHex.h"
+ #include "Commands68k/Command68kSwitchBank.h"
++#include "Commands68k/Command68kException.h"
+ 
+ #define BUILTIN_COMMAND_COUNT (sizeof(CommandManager68k::gaBuiltInCommandConstructors)/sizeof(void *))
+ 
+@@ -19,6 +20,7 @@ Command68k * (* CommandManager68k::gaBuiltInCommandConstructors [])() =
+     []() -> Command68k * { return new Command68kPrintText(); },
+     []() -> Command68k * { return new Command68kPrintHex(); },
+     []() -> Command68k * { return new Command68kSwitchBank(); },
++    []() -> Command68k * { return new Command68kException(); },
+ };
+ 
+ Command68k * CommandManager68k::GetCommand(int commandIndex)
+@@ -82,6 +84,50 @@ void CommandManager68k::HandleCommands()
+     }
+ }
+ 
++// Called after an EOT while an extension runs. A 68000 exception handler
++// ends the output with a 68k command: name (COMMAND68K_NAME_LENGTH letters)
++// then valueCount words. If the buffer ends with onlyName + valueCount words,
++// limits the reads to what comes before it (the extension output) and
++// returns true: display that output, then call RunCutCommand().
++bool CommandManager68k::CutBufferedCommand(const char *onlyName, int valueCount)
++{
++    int start = InputBuffer::GetCount() - COMMAND68K_NAME_LENGTH - valueCount;
++    if (start < 0)
++    {
++        return false;
++    }
++    for (int i = 0; i < COMMAND68K_NAME_LENGTH; ++i)
++    {
++        uint16_t val;
++        if (!InputBuffer::PeekValue(start + i, &val) || val != (uint8_t)onlyName[i])
++        {
++            return false;
++        }
++    }
++    InputBuffer::SetReadLimit(start);
++    return true;
++}
++
++// After CutBufferedCommand(): drops what the display did not read before the
++// command, then reads the command name and runs it.
++void CommandManager68k::RunCutCommand()
++{
++    InputBuffer::SkipToReadLimit();
++    char commandName[COMMAND68K_NAME_LENGTH + 1];
++    for (int i = 0; i < COMMAND68K_NAME_LENGTH; ++i)
++    {
++        commandName[i] = (char)InputBuffer::GetValue();
++    }
++    commandName[COMMAND68K_NAME_LENGTH] = 0;
++    Command68k *cmd = GetCommandByName(commandName);
++    if (cmd != NULL)
++    {
++        cmd->Execute();
++        delete cmd;
++    }
++    InputBuffer::Clear(false);
++}
++
+ Command68k * CommandManager68k::GetCommandByName(char * name)
+ {
+     Command68k *cmd = NULL;
+diff --git a/CommandManager68k.h b/CommandManager68k.h
+index ce4ec89..030d998 100644
+--- a/CommandManager68k.h
++++ b/CommandManager68k.h
+@@ -4,6 +4,8 @@ class CommandManager68k
+ {
+ public:
+     static void HandleCommands();
++    static bool CutBufferedCommand(const char *onlyName, int valueCount);
++    static void RunCutCommand();
+     static class Command68k * GetCommandByName(char * name);
+ private:
+     static class Command68k *GetCommand(int commandIndex);
+diff --git a/Commands/CommandExtension.cpp b/Commands/CommandExtension.cpp
+index 6310136..32e7634 100644
+--- a/Commands/CommandExtension.cpp
++++ b/Commands/CommandExtension.cpp
+@@ -5,6 +5,7 @@
+ #include "InputBuffer.h"
+ #include "DisplayResult.h"
+ #include "CommandManager.h"
++#include "CommandManager68k.h"
+ 
+ #include "CommandExtension.h"
+ 
+@@ -56,6 +57,10 @@ bool CommandExtension::Execute(char *returnMessage, int messageMaxSize, const ch
+     }
+     else
+     {
++        // A 68000 exception ends the output with the 68k command EXCPT +
++        // 6 words (Brico68k exception handlers): the output before it is
++        // shown as usual, then the exception report.
++        bool bException = CommandManager68k::CutBufferedCommand("EXCPT", 6);
+         uint32_t bufferCRC = InputBuffer::GetLastBufferCRC();
+         // Compare results CRC to the previous results
+         if (bufferCRC != GetLastCommandDataCRC() || !IsLoopMode())
+@@ -72,12 +77,22 @@ bool CommandExtension::Execute(char *returnMessage, int messageMaxSize, const ch
+             {
+                 CommandManager::ShowCursor();
+             }
++            if (bException)
++            {
++                CommandManager68k::RunCutCommand();
++            }
+         }
+         else
+         {
+             // Same results, clear command buffer
+             InputBuffer::Clear(true);
+         }
++        if (bException)
++        {
++            // Stops a loop (*command) too
++            sprintf(returnMessage, "[Extension aborted by a 68000 exception]");
++            bFail = true;
++        }
+     }
+     return !bFail;
+ }
+diff --git a/Commands68k/Command68kException.cpp b/Commands68k/Command68kException.cpp
+new file mode 100644
+index 0000000..edcc787
+--- /dev/null
++++ b/Commands68k/Command68kException.cpp
+@@ -0,0 +1,48 @@
++#include "Command68kException.h"
++
++#define COMMAND_NAME "EXCPT"
++
++void Command68kException::GetName(char *name) const
++{
++    strncpy(name, COMMAND_NAME, COMMAND68K_NAME_LENGTH);
++}
++
++static const char *VectorName(uint16_t vector)
++{
++    switch (vector)
++    {
++        case 2: return "bus error";
++        case 3: return "address error";
++        case 4: return "illegal instruction";
++        case 5: return "divide by zero";
++        case 6: return "CHK";
++        case 7: return "TRAPV";
++        case 8: return "privilege violation";
++        case 10: return "line A opcode";
++        case 11: return "line F opcode";
++        case 24: return "unexpected interrupt";
++        default: return "reserved vector";
++    }
++}
++
++void Command68kException::Execute()
++{
++    uint16_t v[6] = { 0, 0, 0, 0, 0, 0 };
++    int count = 0;
++    while (count < 6 && InputBuffer::GetValue(&v[count]))
++    {
++        ++count;
++    }
++    if (count < 4)
++    {
++        printf("\n*** 68000 exception (incomplete report) ***\n");
++        return;
++    }
++    uint32_t pc = ((uint32_t)v[2] << 16) | v[3];
++    printf("\n*** 68000 exception: %s (vector %d) at PC $%06lx, SR $%04x", VectorName(v[0]), v[0], (unsigned long)pc, v[1]);
++    if ((v[0] == 2 || v[0] == 3) && count == 6)
++    {
++        printf(", access $%06lx", (unsigned long)(((uint32_t)v[4] << 16) | v[5]));
++    }
++    printf(" ***\n(PC/SR are read from the exception frame in work RAM)\n");
++}
+diff --git a/Commands68k/Command68kException.h b/Commands68k/Command68kException.h
+new file mode 100644
+index 0000000..a797a79
+--- /dev/null
++++ b/Commands68k/Command68kException.h
+@@ -0,0 +1,13 @@
++#pragma once
++
++#include "Command68k.h"
++
++// EXCPT: sent by the 68000 exception handlers of a BricoNeo ROM (Brico68k).
++// Values after the name: vector number, SR, PC high, PC low, access address
++// high, access address low (bus/address errors only, else 0).
++class Command68kException : public Command68k
++{
++public:
++    virtual void GetName(char *name) const;
++    virtual void Execute();
++};
+diff --git a/InputBuffer.cpp b/InputBuffer.cpp
+index 047a34c..840c2e4 100644
+--- a/InputBuffer.cpp
++++ b/InputBuffer.cpp
+@@ -6,13 +6,50 @@
+ #define ADDRESS_END ((uint16_t *)(BASE_ADDRESS_INPUT_RING_BUFFER + (1 << INPUT_BUFFER_SIZE_POWEROF2)))
+ 
+ uint16_t *InputBuffer::gpNextReadPosition = ADDRESS_START;
++uint16_t *InputBuffer::gpReadLimit = NULL;
+ uint32_t InputBuffer::lastBufferCRC;
+ 
+ bool InputBuffer::IsEmpty()
+ {
++    if (gpReadLimit != NULL && gpNextReadPosition == gpReadLimit)
++    {
++        return true;
++    }
+     return (gpNextReadPosition == (uint16_t *)dma_channel_hw_addr(DMA_CHANNEL_INPUT_BUFFER)->write_addr);
+ }
+ 
++// Number of values not read yet
++int InputBuffer::GetCount()
++{
++    uint16_t *writePosition = (uint16_t *)dma_channel_hw_addr(DMA_CHANNEL_INPUT_BUFFER)->write_addr;
++    int count = writePosition - gpNextReadPosition;
++    if (count < 0)
++    {
++        count += ADDRESS_END - ADDRESS_START;
++    }
++    return count;
++}
++
++// The next reads stop after count values (IsEmpty() becomes true there)
++void InputBuffer::SetReadLimit(int count)
++{
++    gpReadLimit = gpNextReadPosition + count;
++    if (gpReadLimit >= ADDRESS_END)
++    {
++        gpReadLimit -= ADDRESS_END - ADDRESS_START;
++    }
++}
++
++// Drops what is left before the limit and removes the limit
++void InputBuffer::SkipToReadLimit()
++{
++    if (gpReadLimit != NULL)
++    {
++        gpNextReadPosition = gpReadLimit;
++        gpReadLimit = NULL;
++    }
++}
++
+ uint16_t InputBuffer::GetValue()
+ {
+     uint16_t value;
+@@ -37,8 +74,33 @@ bool InputBuffer::GetValue(uint16_t *value)
+     }
+ }
+ 
++// Value at gpNextReadPosition + index, without consuming it
++bool InputBuffer::PeekValue(int index, uint16_t *value)
++{
++    uint16_t *p = gpNextReadPosition;
++    uint16_t *writePosition = (uint16_t *)dma_channel_hw_addr(DMA_CHANNEL_INPUT_BUFFER)->write_addr;
++    for (int i = 0; i < index; ++i)
++    {
++        if (p == writePosition)
++        {
++            return false;
++        }
++        if (++p >= ADDRESS_END)
++        {
++            p = ADDRESS_START;
++        }
++    }
++    if (p == writePosition)
++    {
++        return false;
++    }
++    *value = *p;
++    return true;
++}
++
+ void InputBuffer::Clear(bool clearEOT)
+ {
++    gpReadLimit = NULL;
+     // Point to the next address to be read by the DMA channel
+     gpNextReadPosition = (uint16_t *)(void *)(dma_channel_hw_addr(DMA_CHANNEL_INPUT_BUFFER)->write_addr);
+     
+diff --git a/InputBuffer.h b/InputBuffer.h
+index 0441f37..98c28cb 100644
+--- a/InputBuffer.h
++++ b/InputBuffer.h
+@@ -14,9 +14,14 @@ public:
+     static bool IsEmpty();
+     static uint16_t GetValue();
+     static bool GetValue(uint16_t *value);
++    static bool PeekValue(int index, uint16_t *value);
++    static int GetCount();
++    static void SetReadLimit(int count);
++    static void SkipToReadLimit();
+     static bool CheckEOTSignalAndClearEOT();
+     static inline uint32_t GetLastBufferCRC() { return lastBufferCRC; }
+ private:
+     static uint16_t *gpNextReadPosition;
++    static uint16_t *gpReadLimit;
+     static uint32_t lastBufferCRC;
+ };
+\ No newline at end of file
+-- 
+2.43.0
+

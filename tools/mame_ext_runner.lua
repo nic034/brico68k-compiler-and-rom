@@ -36,9 +36,51 @@ local f = io.open(OUT, "w")
 -- la region est lue/ecrite en ordre natif (little-endian) alors que le
 -- 68000 la voit en big-endian : on echange les octets de chaque mot.
 local function sw(v) return v end -- verifie empiriquement : write_u16 est deja dans le bon ordre pour le 68000
+
+-- BIOS socket address faults (68000 -> BricoNeo), BRICO_SOCKET="bit,value;..."
+-- (A1-A16 stuck at value). The CPU at socket offset x gets the word of
+-- salias(x): the region is rewritten once, and everything the BricoNeo does
+-- by address (command block, port, EOT) uses the address the socket sees.
+local SOCK = {}
+for b, v in string.gmatch(os.getenv("BRICO_SOCKET") or "", "(%d+),(%d)") do
+  table.insert(SOCK, {bit = tonumber(b), v = tonumber(v)})
+end
+local function salias(o)
+  for _, s in ipairs(SOCK) do
+    local m = 1 << s.bit
+    if s.v == 1 then o = o | m else o = o & ~m end
+  end
+  return o & 0x1fffe
+end
+-- CPU offsets whose socket address is o (none when a stuck line forbids o)
+local function preimages(o)
+  local out = {}
+  local n = #SOCK
+  for c = 0, (1 << n) - 1 do
+    local x = o
+    for i, s in ipairs(SOCK) do
+      local m = 1 << s.bit
+      if (c >> (i - 1)) & 1 == 1 then x = x | m else x = x & ~m end
+    end
+    if salias(x) == o then out[x] = true end
+  end
+  local list = {}
+  for x in pairs(out) do table.insert(list, x) end
+  return list
+end
+if #SOCK > 0 then
+  local orig = {}
+  for x = 0, 0x1fffe, 2 do orig[x] = region:read_u16(x) end
+  for x = 0, 0x1fffe, 2 do region:write_u16(x, orig[salias(x)]) end
+end
+
+local function w16(off, v)
+  if #SOCK == 0 then region:write_u16(off, sw(v)); return end
+  for _, x in ipairs(preimages(off)) do region:write_u16(x, sw(v)) end
+end
 local function w32(off, v)
-  region:write_u16(off, sw((v >> 16) & 0xffff))
-  region:write_u16(off + 2, sw(v & 0xffff))
+  w16(off, (v >> 16) & 0xffff)
+  w16(off + 2, v & 0xffff)
 end
 
 local function json_escape(s)
@@ -57,19 +99,30 @@ local values = {}
 local eot = false
 local resets = 0
 
-BRICO_TAP_PORT = space:install_read_tap(0xc1ff00, 0xc1ff03, "brico_port", function(offset, data, mask)
-  if offset == 0xc1ff02 then
+local function port_tap(offset, data, mask)
+  local o = salias(offset & 0x1fffe)
+  if o == 0x1ff02 then
     expecting = true
-  elseif offset == 0xc1ff00 then
+  elseif o == 0x1ff00 then
     eot = true
   end
   return data
-end)
+end
+BRICO_TAP_PORT = {}
+if #SOCK == 0 then
+  BRICO_TAP_PORT[1] = space:install_read_tap(0xc1ff00, 0xc1ff03, "brico_port", port_tap)
+else
+  for _, t in ipairs({0x1ff00, 0x1ff02}) do
+    for _, x in ipairs(preimages(t)) do
+      table.insert(BRICO_TAP_PORT, space:install_read_tap(0xc00000 + x, 0xc00001 + x, "brico_port" .. x, port_tap))
+    end
+  end
+end
 
 BRICO_TAP_DATA = space:install_read_tap(0xc20000, 0xc3ffff, "brico_data", function(offset, data, mask)
   if expecting then
     expecting = false
-    table.insert(values, (offset - 0xc20000) // 2)
+    table.insert(values, salias((offset - 0xc20000) & 0x1fffe) // 2)
   end
   return data
 end)
@@ -142,13 +195,23 @@ local function clear_cmd()
   BRICO_CLEARED = true
   w32(CMD_IN, 0); w32(CMD_IN + 4, 0); w32(CMD_IN + 8, 0); w32(CMD_IN + 12, 0)
 end
-BRICO_TAP_1MS = space:install_read_tap(0xc00090, 0xc0009f, "brico_clear_1ms", function(offset, data, mask)
+local function clear_tap(offset, data, mask)
   if not BRICO_CLEARED and BRICO_T_LAUNCH and manager.machine.time:as_double() - BRICO_T_LAUNCH >= 0.001 then
     clear_cmd()
     return 0
   end
   return data
-end)
+end
+BRICO_TAP_1MS = {}
+if #SOCK == 0 then
+  BRICO_TAP_1MS[1] = space:install_read_tap(0xc00090, 0xc0009f, "brico_clear_1ms", clear_tap)
+else
+  for o = 0x90, 0x9e, 2 do
+    for _, x in ipairs(preimages(o)) do
+      table.insert(BRICO_TAP_1MS, space:install_read_tap(0xc00000 + x, 0xc00001 + x, "brico_clear" .. x, clear_tap))
+    end
+  end
+end
 
 -- Captures d'ecran : BRICO_SNAP="i,j" (numeros de commande, 1 = premiere)
 local SNAP = {}

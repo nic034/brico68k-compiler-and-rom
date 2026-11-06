@@ -18,8 +18,8 @@ VBLANK IRQ       OK      level 1
 Timer IRQ        OK      level 2
 Z80              OK      sound driver answered (cartridge M1)
 NEO-D0 outputs:
-  68KCLK 12 MHz  OK      ~12.0 MHz (BricoNeo 1 ms reference, +-5%)
-  24 MHz > LSPC2 OK      202752 cycles/frame (202752), ~59.3 Hz
+  68KCLK 12 MHz  n/a     the 68000 runs; frequency: BricoNeo Freq (input pin)
+  24 MHz > LSPC2 OK      202752 cycles/frame (202752)
   6 MHz pixel    OK      2.00 CPU cycles per pixel (2.00)
   Z80 control    OK      Z80 ROM/RAM access (driver answered)
   YM2610 I/F, 12 MHz > cartridge, memory card bank, joypad outputs:
@@ -28,6 +28,17 @@ NEO-D0 outputs:
 Not covered: video output (TestDAC), watchdog (TestWatchdog), sound (TestAudio).
 
 [eot, 337 ms emulated]
+> TestBus
+BIOS socket, 68000 -> BricoNeo (NeoDiag mirrors + CRC32)
+A15      OK
+A16      OK
+CRC32    OK (A1-A14, D0-D15)
+=> Test success: the BIOS socket path works
+Screen: 16 bands, A1 at the top, groups of 4. Green OK, red reads 0,
+blue reads 1, orange unstable, yellow CRC error. *TestBus repeats.
+
+[eot, 478 ms emulated]
+; TestBus: 16 bands on screen until the next command, A1 at the top, all green = OK
 > TestWRAM
 Work RAM (WRAM) test
 > Data bus walking 1/0 Test Success
@@ -87,7 +98,7 @@ Video timing test (LSPC line counter, $3C0006)
 > Auto-animation counter: 8/8 frame steps OK
 => Test success
 
-[eot, 771 ms emulated]
+[eot, 281 ms emulated]
 > TestZ80
 Z80 handshake test (ACTIVE: stops any sound)
 Needs a standard SM1/M1 sound driver.
@@ -101,10 +112,10 @@ Neo-Geo UniBIOS-like audio test
 Z80 ACK $01 received
 Z80 init sequence sent ($01, $03, $07)
 Now playing: left, right, center beeps (~1 s each).
-Listen to the audio output. Wait ~4 s before the next command.
+Listen to the audio output. A new command stops the beeps.
 
 [eot, 154 ms emulated]
-; the 68000 beeps for about 3.5 s: anything sent meanwhile would time out
+; the beeps last about 3.5 s: wait to hear them (a new command stops them)
 > Delay 4000
 > TestInp
   (AES detected: no physical DIP bank - bits below are open-bus, not real switches)
@@ -184,7 +195,7 @@ again to read the result (commands sent meanwhile are lost).
 > Delay 2000
 > TestWatchdog
 Watchdog test result:
-> The watchdog reset the 68000 after ~133 ms (44567 loops of 3 us)
+> The watchdog reset the 68000 after ~133 ms (44558 loops of 3 us)
   MAME MVS: 135 ms. Real boards: about 0.13 s.
 => Test success (run again to re-arm)
 

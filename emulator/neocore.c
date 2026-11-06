@@ -45,7 +45,7 @@
 #define VSSTART       256u                   /* auto-animation tick line */
 #define HOST_CLEAR    (CPU_HZ / 1000u)       /* 1 ms */
 #define HOST_TIMEOUT  (CPU_HZ * 3u)          /* 3 s */
-#define HOST_WORDS    2048                   /* Brico16Bits input buffer */
+#define HOST_WORDS    2048                   /* Brico16Bits input buffer: a ring of 2048 words (InputBuffer.h) */
 #define WDOG_CYCLES   1622015u               /* 3244030 ticks of 24 MHz */
 #define Z80_DELAY     (CPU_HZ / 500u)        /* 2 ms answer delay */
 /* Interrupts, as MAME neogeo.cpp: IRQ1 VBLANK at line $F0 + 58 mclk, IRQ2 = LSPC timer (32-bit down
@@ -101,12 +101,15 @@ static uint64_t h_done_cycles;
 
 /* ---- simulated faults (repair training / diagnostic checks) ----------------
  * region: 0 WRAM, 1 palette RAM, 2 VRAM lower (slow, $0000-$7FFF),
- *         3 VRAM upper (fast, $8000-$87FF), 4 LSPC line counter
+ *         3 VRAM upper (fast, $8000-$87FF), 4 LSPC line counter,
+ *         5 BIOS socket address lines A1-A16 (68000 -> BricoNeo)
  * kind:   0 data bit stuck at `value` (what the CPU - and for the palette
  *           the DAC - reads; the cell cannot hold the other level)
  *         1 address line stuck at `value` (accesses fold onto the other half)
  *         2 WRAM byte lane dead (value 0 = lower chip D0-D7, 1 = upper D8-D15):
  *           writes lost, reads $FF (floating bus pulled up)
+ *         3 BIOS socket line unstable (cut and floating, bad contact): a random
+ *           level on each access
  * Address lines: WRAM A1-A15, palette A1-A12 + 13 = bank select (latch Q7),
  * VRAM lower 0-14, VRAM upper 0-10 (VRAM word address). Faults survive
  * power cycles, as a real hardware fault does. */
@@ -131,6 +134,24 @@ static unsigned fault_addr(int region, unsigned idx, int shift)
 		}
 	return idx;
 }
+
+/* address the BIOS socket (and the BricoNeo) sees for CPU byte offset o */
+static uint32_t float_rng = 0x2545F491u;
+static unsigned socket_addr(unsigned o)
+{
+	for (int i = 0; i < nfaults; i++)
+		if (faults[i].region == 5) {
+			unsigned m = 1u << faults[i].bit;
+			int v = faults[i].value;
+			if (faults[i].kind == 3) {
+				float_rng ^= float_rng << 13; float_rng ^= float_rng >> 17; float_rng ^= float_rng << 5;
+				v = float_rng & 1;
+			}
+			o = v ? (o | m) : (o & ~m);
+		}
+	return o & 0x1FFFE;
+}
+static unsigned bios_word(unsigned o) { return (bios[o] << 8) | bios[o + 1]; }
 
 static int lane_dead(int lane)
 {
@@ -173,10 +194,7 @@ static uint16_t video_control(void)
 static uint16_t open_bus(void)
 {
 	unsigned pc = m68k_get_reg(NULL, M68K_REG_PC) & 0xFFFFFE;
-	if (pc >= 0xC00000 && pc < 0xD00000) {
-		unsigned o = pc & 0x1FFFF;
-		return (uint16_t)((bios[o] << 8) | bios[o + 1]);
-	}
+	if (pc >= 0xC00000 && pc < 0xD00000) return (uint16_t)bios_word(socket_addr(pc & 0x1FFFE));
 	return 0xFFFF;
 }
 
@@ -256,19 +274,29 @@ static void vram_write(uint16_t d)
 	vram_set_offset((uint16_t)((vram_offset & 0x8000) | ((vram_offset + vram_modulo) & 0x7FFF)));
 }
 
-static void host_port_read(unsigned a)
+/* Every BIOS socket access, as the BricoNeo port watcher sees it (PioBusWatcherPort.pio):
+ * an access at the port ($1FF02) arms it; the watcher then lets ONE more socket access go by
+ * (the opcode prefetch between the two 68000 instructions) and captures the address of the
+ * next one as the value, whatever it is. Anything else in between (an interrupt, a trace
+ * exception) shifts the capture, as on the real board. Not armed: $1FF00 = EOT. */
+static void host_port_read(unsigned a, unsigned o)    /* o = address seen at the socket */
 {
-	if (a == 0xC1FF02) { h_armed = 1; return; }
-	if (a == 0xC1FF00) {
-		if (h_state == H_SENT || h_state == H_WAIT) { h_state = H_DONE; h_done_cycles = now() - h_t0; }
+	(void)a;
+	if (h_armed) {
+		if (--h_armed) return;                          /* the access that goes by */
+		if (h_state == H_SENT || h_state == H_WAIT) {
+			/* ring, as the BricoNeo DMA (DMAManager.cpp): the host reads from where the ring
+			 * was at launch up to the write position, so after K words it sees only the
+			 * last K mod 2048 (K = 2048: nothing at all) */
+			h_values[h_count % HOST_WORDS] = (uint16_t)(o >> 1);
+			h_count++;
+			if (h_count >= HOST_WORDS) h_overflow = 1;
+		}
 		return;
 	}
-	if (h_armed && a >= 0xC20000 && a < 0xC40000) {
-		h_armed = 0;
-		if (h_state == H_SENT || h_state == H_WAIT) {
-			if (h_count < HOST_WORDS) h_values[h_count++] = (uint16_t)((a - 0xC20000) >> 1);
-			else h_overflow = 1;
-		}
+	if (o == 0x1FF02) { h_armed = 2; return; }
+	if (o == 0x1FF00) {
+		if (h_state == H_SENT || h_state == H_WAIT) { h_state = H_DONE; h_done_cycles = now() - h_t0; }
 	}
 }
 
@@ -276,7 +304,12 @@ static void host_port_read(unsigned a)
 static unsigned read16(unsigned a, int lsb_only)
 {
 	a &= 0xFFFFFE;
-	if (a < 0x000080) return latch[1] ? 0xFFFF : ((bios[a] << 8) | bios[a + 1]);
+	if (a < 0x000080) {                                     /* vectors: BIOS socket unless swapped */
+		if (latch[1]) return 0xFFFF;
+		unsigned o = socket_addr(a);
+		host_port_read(a, o);
+		return bios_word(o);
+	}
 	if (a < 0x100000) return 0xFFFF;                        /* no cartridge */
 	if (a < 0x200000) {
 		unsigned o = wram_index(a);
@@ -304,9 +337,9 @@ static unsigned read16(unsigned a, int lsb_only)
 	if (a < 0x800000) return fault_data(1, pal[pal_index(a)]);
 	if (a < 0xC00000) return 0xFFFF;                        /* memory card: none */
 	if (a < 0xD00000) {
-		host_port_read(a);
-		unsigned o = a & 0x1FFFF;
-		return (bios[o] << 8) | bios[o + 1];
+		unsigned o = socket_addr(a & 0x1FFFE);
+		host_port_read(a, o);
+		return bios_word(o);
 	}
 	return open_bus();                                      /* AES: no backup RAM */
 }
@@ -542,10 +575,12 @@ EXPORT int neo_host_send(uint32_t addr, uint32_t p1, uint32_t p2, uint32_t p3)
 }
 
 EXPORT int neo_host_state(void) { return h_state; }
-EXPORT int neo_host_values(uint16_t *out, int max)
+EXPORT int neo_host_values(uint16_t *out, int max)    /* what Brico16Bits would read: the last count % 2048 words */
 {
-	int n = h_count < max ? h_count : max;
-	memcpy(out, h_values, (size_t)n * 2);
+	int n = h_count % HOST_WORDS;
+	if (n > max) n = max;
+	for (int i = 0; i < n; i++)
+		out[i] = h_values[(h_count - (h_count % HOST_WORDS) + i) % HOST_WORDS];
 	return n;
 }
 EXPORT int neo_host_overflow(void) { return h_overflow; }
@@ -566,13 +601,14 @@ EXPORT void neo_fault_clear(void) { nfaults = 0; }
 EXPORT int neo_fault_count(void) { return nfaults; }
 EXPORT int neo_fault_add(int region, int kind, int bit, int value)
 {
-	static const int data_bits[5] = { 15, 15, 15, 15, 8 };
-	static const int addr_lo[5] = { 1, 1, 0, 0, -1 }, addr_hi[5] = { 15, 13, 14, 10, -1 };
-	if (nfaults >= MAX_FAULTS || region < 0 || region > 4 || value < 0 || value > 1) return -1;
+	static const int data_bits[6] = { 15, 15, 15, 15, 8, -1 };
+	static const int addr_lo[6] = { 1, 1, 0, 0, -1, 1 }, addr_hi[6] = { 15, 13, 14, 10, -1, 16 };
+	if (nfaults >= MAX_FAULTS || region < 0 || region > 5 || value < 0 || value > 1) return -1;
 	if (kind == 0 && (bit < 0 || bit > data_bits[region])) return -1;
-	if (kind == 1 && (addr_lo[region] < 0 || bit < addr_lo[region] || bit > addr_hi[region])) return -1;
+	if ((kind == 1 || kind == 3) && (addr_lo[region] < 0 || bit < addr_lo[region] || bit > addr_hi[region])) return -1;
 	if (kind == 2 && region != 0) return -1;
-	if (kind < 0 || kind > 2) return -1;
+	if (kind == 3 && region != 5) return -1;
+	if (kind < 0 || kind > 3) return -1;
 	faults[nfaults].region = region; faults[nfaults].kind = kind;
 	faults[nfaults].bit = bit; faults[nfaults].value = value;
 	nfaults++;
