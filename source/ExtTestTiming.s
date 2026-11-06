@@ -112,6 +112,12 @@ EXT_TEST_TIMING:
 	PrintLn ""
 	bra .end
 .changed:
+	; confirm the new value with a second read before judging the step: a
+	; read that lands while the counter changes must not count as a bad step
+	move.w (REG_LSPCMODE).l,d2
+	and.w d3,d2
+	cmp.w d0,d2
+	bne .scan
 	cmp.w #LINE_TOP,d1
 	beq .frameEnd				; $1FF -> wrap: frame complete
 	move.w d1,d2

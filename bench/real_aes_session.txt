@@ -6,10 +6,7 @@ ChipCheck
 TestWRAM
 TestBRAM
 TestPRAM
-TestVRAML
-TestVRAMU
-MarchVRAML
-MarchVRAMU
+TestVRAM
 TestLSPC
 TestTiming
 TestZ80

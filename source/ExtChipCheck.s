@@ -82,6 +82,63 @@ EXT_CHIP_CHECK:
 	Print "Work RAM         "
 	moveq #F_WRAM,d5
 	JsrA6 memReport
+	; byte writes: each byte written alone must change only its own chip
+	; (NEO-C1 WWU/WWL, 68000 UDS/LDS). Another value is written to the next
+	; word before each read so a floating bus cannot keep the written byte.
+	Print "WRAM byte writes "
+	btst #F_WRAM,d7
+	beq.s .bwGo
+	PrintLn "SKIP    Work RAM already failing"
+	bra .bwEnd
+.bwGo:
+	lea RAM_START,a3
+	moveq #0,d3
+	move.w #$0000,(a3)
+	move.b #$A5,(a3)
+	move.w #$5A5A,2(a3)
+	move.w (a3),d0
+	eor.w #$A500,d0
+	or.w d0,d3
+	move.b #$5A,1(a3)
+	move.w #$0F0F,2(a3)
+	move.w (a3),d0
+	eor.w #$A55A,d0
+	or.w d0,d3
+	move.w #$FFFF,(a3)
+	move.b #$00,(a3)
+	move.w #$1234,2(a3)
+	move.w (a3),d0
+	eor.w #$00FF,d0
+	or.w d0,d3
+	move.b #$00,1(a3)
+	move.w #$FFFF,2(a3)
+	move.w (a3),d0
+	or.w d0,d3
+	tst.w d3
+	bne.s .bwBad
+	PrintLn "OK"
+	bra .bwEnd
+.bwBad:
+	bset #F_WRAM,d7
+	Print "FAIL    bits $"
+	move.w d3,d0
+	JsrA6 printWord
+	move.w d3,d0
+	and.w #$00FF,d0
+	beq.s .bwUp
+	move.w d3,d0
+	and.w #$FF00,d0
+	beq.s .bwLo
+	PrintLn " (both chips)"
+	bra.s .bwHint
+.bwUp:
+	PrintLn " (upper chip D8-D15)"
+	bra.s .bwHint
+.bwLo:
+	PrintLn " (lower chip D0-D7)"
+.bwHint:
+	PrintLn "                 -> that chip's write strobe: NEO-C1 WWU/WWL, 68000 UDS/LDS. Next: TestWRAM"
+.bwEnd:
 	Progress 15
 
 	; --- Palette RAM, both banks + bank select ------------------------------
@@ -306,9 +363,10 @@ EXT_CHIP_CHECK:
 	move.w #7,(REG_IRQACK).l
 	move.w #$4030,(REG_LSPCMODE).l		; timer IRQ on, reload when TIMERLOW is written
 	move.w #0,(REG_TIMERHIGH).l
-	move #$2100,sr				; level 2 and up only
-	moveq #0,d4
 	move.w #TMR_TICKS-1,(REG_TIMERLOW).l	; starts the timer
+	move.w #2,(REG_IRQACK).l	; a timer IRQ left pending from before must not count
+	moveq #0,d4
+	move #$2100,sr				; level 2 and up only
 .tw:
 	addq.l #1,d4
 	tst.w (CHK_TMR_COUNT).l
@@ -653,7 +711,7 @@ memprobe_JsrA6:
 	endm
 	macro VRead					; \1 = VRAM address (Dn), result in d0
 		move.w \1,(REG_VRAMADD).l
-		Nop2
+		Nop4						; wiki "VRAM": read valid >= 16 cycles after the address (28 here)
 		move.w (REG_VRAMRW).l,d0
 	endm
 	macro VAddr					; d0 = d1 | (1 << d4), no stack (WRAM may be bad)

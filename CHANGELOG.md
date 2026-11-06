@@ -4,6 +4,33 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-06 - Merged RAM and VRAM tests, hardened LSPC2 tests, Emulator 1.10
+
+ROM SHA-256 `c69eb140111ee70c75d9651e4470c8a81a1f66fc21ba23653294fa7f805f5ad1` (BricoNeo 1.35,
+21 extensions), rebuilt from `source/` to the same checksum.
+
+- **TestVRAM** replaces TestVRAML, TestVRAMU, MarchVRAML and MarchVRAMU: per zone (slow, fast)
+  data bus walking 1/0, each address line named (stuck at 0 / 1), March C- with data background
+  $5555/$AAAA on every word, then the zone is cleared. Covers $8700-$87FF (never tested before);
+  $8600-$86FF (sprite lists rewritten by the LSPC2) is skipped. 1.8 s, where the four old tests
+  took 2.25 s together. The old increment pattern never set D11-D15 of the fast VRAM nor D15 of
+  the slow VRAM: those stuck at 0 went unseen.
+- **TestWRAM / TestPRAM / TestBRAM** (one suite): walking 1/0, byte writes (WRAM/BRAM only: each
+  byte written alone, finds write strobe faults that word tests cannot), each address line
+  named, March C- $5555/$AAAA (coupling faults; replaces the fixed patterns and the increment
+  test). TestWRAM 0.42 s (was 0.47 s).
+- **Every error names the chip**: upper (D8-D15), lower (D0-D7) or both, with the bad bits by
+  name; address errors name the lines.
+- **Wiki rules** (VRAM access delays, no byte test where byte writes fill both bytes, no
+  read-buffer assumption, sprite list area skipped) applied with >= 8 cycles of margin. ChipCheck
+  VRAM reads now 28 cycles after the address (was 20).
+- **ChipCheck**: WRAM byte-write line; a timer IRQ left pending is cleared after starting the
+  timer, so it cannot shorten the 6 MHz measure.
+- **TestTiming**: a line counter change is confirmed by a second read before the step is judged.
+- Checks: 30/30 identical to MAME without and with the test cartridge (the former TestTiming
+  one-pass difference is gone); 22/23 with faults (the known bench palette artifact); every
+  emulator fault preset named with the right chip; `guiverify.py` 168/168.
+
 ## 2026-11-06 - ChipCheck, Emulator 1.9 (interrupts, progress)
 
 ROM SHA-256 `cadca47e7e621b019d66391bd41ea24a05a41de0785712f059e924ad2cacab07` (BricoNeo 1.35,

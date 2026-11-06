@@ -51,7 +51,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.9"
+APP_VERSION = "1.10"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -529,7 +529,7 @@ def main_cli(argv):
 CATEGORIES = [
     ("Overview", ["ChipCheck"]),
     ("Memory", ["TestWRAM", "TestBRAM", "TestPRAM"]),
-    ("Video", ["TestVRAML", "TestVRAMU", "MarchVRAML", "MarchVRAMU", "TestLSPC", "TestTiming", "TestDAC"]),
+    ("Video", ["TestVRAM", "TestLSPC", "TestTiming", "TestDAC"]),
     ("Sound", ["TestZ80", "TestAudio", "PlayEyeSnd"]),
     ("Inputs and system", ["TestInp", "TestStatusA", "TestSystype", "TestWatchdog"]),
     ("Tools", ["Echo", "Read", "Write", "WriteB", "Dump", "Color"]),

@@ -8,6 +8,7 @@
 Chip check: quick state of the board (details: the long tests)
 Part             Result  Detail
 Work RAM         OK
+WRAM byte writes OK
 Palette RAM      OK
 VRAM slow        OK
 VRAM fast        OK
@@ -30,14 +31,12 @@ Not covered: video output (TestDAC), watchdog (TestWatchdog), sound (TestAudio).
 > TestWRAM
 Work RAM (WRAM) test
 > Data bus walking 1/0 Test Success
-> 0000 Test Success
-> FFFF Test Success
-> AAAA Test Success
-> 5555 Test Success
-> Increment Test Success
+> Byte write Test Success
+> Address lines Test Success
+> March C- ($5555/$AAAA) Test Success
 => Test Success
 
-[eot, 469 ms emulated]
+[eot, 422 ms emulated]
 > TestBRAM
 Backup RAM (BRAM) test - DESTRUCTIVE: erases the MVS backup RAM (bookkeeping, settings, scores)
   N/A: AES detected (STATUS_B bit7=0) - the AES has no backup RAM ($D00000 unmapped, saves go to the memory card)
@@ -48,54 +47,29 @@ Backup RAM (BRAM) test - DESTRUCTIVE: erases the MVS backup RAM (bookkeeping, se
 Palette RAM (PRAM) test - both banks
 -- Palette bank 0 --
 > Data bus walking 1/0 Test Success
-> 0000 Test Success
-> FFFF Test Success
-> AAAA Test Success
-> 5555 Test Success
-> Increment Test Success
+> Address lines Test Success
+> March C- ($5555/$AAAA) Test Success
 -- Palette bank 1 --
 > Data bus walking 1/0 Test Success
-> 0000 Test Success
-> FFFF Test Success
-> AAAA Test Success
-> 5555 Test Success
-> Increment Test Success
+> Address lines Test Success
+> March C- ($5555/$AAAA) Test Success
 > Bank 0 / bank 1 independence Test Success
 => Test Success
 
-[eot, 175 ms emulated]
-> TestVRAML
-VRAM test
+[eot, 163 ms emulated]
+> TestVRAM
+VRAM test: slow $0000-$7FFF, fast $8000-$85FF + $8700-$87FF
+> Slow VRAM: data bus walking 1/0 OK
+> Slow VRAM: address lines A0-A14 OK
+> Slow VRAM: March C- $0000-$7FFF OK
+> Fast VRAM: data bus walking 1/0 OK
+> Fast VRAM: address lines A0-A10 OK
+> Fast VRAM: March C- $8000-$85FF OK
+> Fast VRAM: March C- $8700-$87FF OK
+Not testable: $8600-$86FF (sprite lists written by the LSPC2 during display).
 => Test success
 
-[eot, 404 ms emulated]
-> TestVRAMU
-VRAM test
-=> Test success
-
-[eot, 19 ms emulated]
-> MarchVRAML
-March-C VRAM test
-> Pass 1 up(w0)    OK
-> Pass 2 up(r0,w1) OK
-> Pass 3 up(r1,w0) OK
-> Pass 4 dn(r0,w1) OK
-> Pass 5 dn(r1,w0) OK
-> Pass 6 up(r0)    OK
-=> Test success
-
-[eot, 1749 ms emulated]
-> MarchVRAMU
-March-C VRAM test
-> Pass 1 up(w0)    OK
-> Pass 2 up(r0,w1) OK
-> Pass 3 up(r1,w0) OK
-> Pass 4 dn(r0,w1) OK
-> Pass 5 dn(r1,w0) OK
-> Pass 6 up(r0)    OK
-=> Test success
-
-[eot, 83 ms emulated]
+[eot, 1773 ms emulated]
 > TestLSPC
 LSPC2-A2 register test
 > REG_VRAMMOD   OK
@@ -109,11 +83,11 @@ Video timing test (LSPC line counter, $3C0006)
 > Lines per frame: 264 (NTSC flag, expected 264)
 > Line counter range: $00F8 - $01FF
 > Sequence: every line step is +1
-> CPU cycles per frame: 202739 (expected 202752 = 384 x 264 x 2)
+> CPU cycles per frame: 202724 (expected 202752 = 384 x 264 x 2)
 > Auto-animation counter: 8/8 frame steps OK
 => Test success
 
-[eot, 1311 ms emulated]
+[eot, 771 ms emulated]
 > TestZ80
 Z80 handshake test (ACTIVE: stops any sound)
 Needs a standard SM1/M1 sound driver.
@@ -210,7 +184,7 @@ again to read the result (commands sent meanwhile are lost).
 > Delay 2000
 > TestWatchdog
 Watchdog test result:
-> The watchdog reset the 68000 after ~133 ms (44566 loops of 3 us)
+> The watchdog reset the 68000 after ~133 ms (44567 loops of 3 us)
   MAME MVS: 135 ms. Real boards: about 0.13 s.
 => Test success (run again to re-arm)
 

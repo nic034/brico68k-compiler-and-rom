@@ -23,7 +23,7 @@ CASES = [
   ("line:data:0:0",   {"BRICO_STUCK": "0x3c0006,0x3c0007,0,0xFF7F"},    ["TestTiming", "ChipCheck"]),
 ]
 VRAM = [("vramlo:data:2:1", "vramhi:data:2:1", {"BRICO_STUCK": "0x3c0002,0x3c0003,0x0004,0xFFFF"},
-         ["TestVRAML", "TestVRAMU", "MarchVRAML", "MarchVRAMU", "TestLSPC", "ChipCheck"])]
+         ["TestVRAM", "TestLSPC", "ChipCheck"])]
 def emu_run(faults, jobs):
     c = Core(os.environ.get('CORE', str(HERE / 'build' / 'libneocore_zig.so'))); c.load(rom); c.power_on(); c.lib.neo_set_options(0, 0)
     apply_faults(c, [parse_fault(f) for f in faults])

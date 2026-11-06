@@ -55,6 +55,12 @@
 .\@:
 	endm
 
+	macro SetStep
+		swap d7
+		move.b #\1,d7
+		swap d7
+	endm
+
 	macro CallA3
 		lea .\@(pc),a3
 		jmp \1
@@ -125,6 +131,7 @@ START_TEST:
 	CallA3 RAM_SUITE
 	move.l #RAMT_TXT_BANKS,a1
 	PrintA1
+	SetStep 10
 	move.b d0,REG_PALBANK0
 	andi.w #$00ff,d7
 	moveq #0,d3
@@ -148,17 +155,30 @@ START_TEST:
 	jmp RAM_ALL_OK
 
 ; -----------------------------------------------------------------------------
-; RAM_SUITE: walking 1/0, 4 patterns, increment test on [a5,a4).
-; Returns through a3. On error jumps to RAM_ERROR (never returns).
+; RAM_SUITE on [a5,a4): returns through a3, on error jumps to RAM_ERROR or
+; ADDR_ERROR (never returns). Steps (step id in bits 16-23 of d7):
+;   1 data bus walking 1 / walking 0 on the first word (complement written to
+;     the next word before each read: a floating bus cannot fake a pass);
+;   2 byte writes, WRAM/BRAM only: each byte written alone must change only
+;     its own chip (NEO-C1 WWU/WWL, 68000 UDS/LDS). Not on palette RAM: a
+;     byte write there sets both bytes (neogeodev wiki, "Palettes");
+;   3 address lines A1-A15 (palette: A1-A12 per bank), each named, stuck at
+;     0 or at 1;
+;   4 March C- on every word, background $5555 / $AAAA (each bit sees 0 and
+;     1, neighbouring data lines always opposite, coupling and address
+;     decoder faults by the march order):
+;       up(w B) up(r B,w ~B) up(r ~B,w B) dn(r B,w ~B) dn(r ~B,w B) up(r B)
 ; -----------------------------------------------------------------------------
+
 RAM_SUITE:
 	; --- 1. data bus walking 1 / walking 0 on the first word ---
+	SetStep 1
 	Print "> Data bus walking 1/0 Test "
 	moveq #1,d1
 .walk:
 	WatchDog
 	move.w d1,d2
-	not.l d2					; d2.w = complement (not.l: see SIMULATOR NOTE)
+	not.l d2					; d2.w = complement
 	move.w d1,(a5)
 	move.w d2,2(a5)				; drive the bus with the opposite value
 	move.w (a5),d6
@@ -174,33 +194,119 @@ RAM_SUITE:
 	move.l #RAMT_TXT_SUCCESS,a1
 	PrintA1
 
-	; --- 2. fill / verify patterns (pointer kept in d5: a0-a2/a6 are
-	;     clobbered by the helpers and Print, a3-a5 are reserved) ---
-	lea RAMT_PATTERNS(pc),a1
-	move.l a1,d5
-.patternLoop:
-	movea.l d5,a1
-	move.w (a1),d1
-	Print "> "
-	move.w d1,d0
-	JsrA6 printWord
-	Print " Test "
-	move.w d1,d0
-	swap d1
-	move.w d0,d1				; d1 = pattern:pattern
-	CallA2 FILL_L
-	CallA2 CHECK_L
+	; --- 2. byte writes (not palette RAM) ---
+	cmp.b #2,d7
+	beq .noByte
+	SetStep 2
+	Print "> Byte write Test "
+	WatchDog
+	move.w #$0000,(a5)
+	move.b #$A5,(a5)			; upper byte only
+	move.w #$5A5A,2(a5)			; other value on the bus before reading
+	move.w #$A500,d5
+	move.w (a5),d6
+	cmp.w d5,d6
+	bne .byteErr
+	move.b #$5A,1(a5)			; lower byte only
+	move.w #$0F0F,2(a5)
+	move.w #$A55A,d5
+	move.w (a5),d6
+	cmp.w d5,d6
+	bne .byteErr
+	move.w #$FFFF,(a5)
+	move.b #$00,(a5)
+	move.w #$1234,2(a5)
+	move.w #$00FF,d5
+	move.w (a5),d6
+	cmp.w d5,d6
+	bne .byteErr
+	move.b #$00,1(a5)
+	move.w #$FFFF,2(a5)
+	moveq #0,d5
+	move.w (a5),d6
+	cmp.w d5,d6
+	bne .byteErr
 	move.l #RAMT_TXT_SUCCESS,a1
 	PrintA1
-	addq.l #2,d5
-	cmpi.l #RAMT_PATTERNS+8,d5
-	bne .patternLoop
+.noByte:
 
-	; --- 3. increment (address) test ---
-	Print "> Increment Test "
-	moveq #0,d3
-	CallA2 FILL_INC
-	CallA2 CHECK_INC
+	; --- 3. address lines ---
+	SetStep 3
+	Print "> Address lines Test "
+	moveq #15,d3				; highest line: A15 (64 KiB)
+	cmp.b #2,d7
+	bne.s .hiLine
+	moveq #12,d3				; palette bank: 8 KiB, A12
+.hiLine:
+	moveq #0,d2					; d2 = bad lines (bit k = Ak)
+	moveq #0,d6					; d6 = bad bits seen (which chip)
+	moveq #1,d4
+.al1:							; word at base + 2^k holds k
+	moveq #1,d1
+	lsl.l d4,d1
+	move.w d4,(a5,d1.l)
+	addq.w #1,d4
+	cmp.w d3,d4
+	bls.s .al1
+	move.w #$A5A5,(a5)
+	moveq #1,d4
+.al2:							; changed by the base write: stuck at 1
+	moveq #1,d1
+	lsl.l d4,d1
+	move.w (a5,d1.l),d0
+	eor.w d4,d0
+	beq.s .al2ok
+	or.w d0,d6
+	bset d4,d2
+.al2ok:
+	addq.w #1,d4
+	cmp.w d3,d4
+	bls.s .al2
+	moveq #1,d4
+.al3:							; writing base + 2^k changes the base: stuck at 0
+	WatchDog
+	moveq #1,d1
+	lsl.l d4,d1
+	move.w #$5A5A,(a5,d1.l)
+	move.w (a5),d0
+	eor.w #$A5A5,d0
+	beq.s .al3ok
+	or.w d0,d6
+	bset d4,d2
+	move.w #$A5A5,(a5)
+.al3ok:
+	addq.w #1,d4
+	cmp.w d3,d4
+	bls.s .al3
+	tst.w d2
+	bne ADDR_ERROR
+	move.l #RAMT_TXT_SUCCESS,a1
+	PrintA1
+
+	; --- 4. March C-, background $5555 / $AAAA ---
+	Print "> March C- ($5555/$AAAA) Test "
+	SetStep 4
+	move.w #$5555,d2
+	CallA2 MARCH_W
+	SetStep 5
+	move.w #$5555,d1
+	move.w #$AAAA,d2
+	CallA2 MARCH_UP
+	SetStep 6
+	move.w #$AAAA,d1
+	move.w #$5555,d2
+	CallA2 MARCH_UP
+	SetStep 7
+	move.w #$5555,d1
+	move.w #$AAAA,d2
+	CallA2 MARCH_DN
+	SetStep 8
+	move.w #$AAAA,d1
+	move.w #$5555,d2
+	CallA2 MARCH_DN
+	SetStep 9
+	move.w #$5555,d1
+	CallA2 MARCH_R
 	move.l #RAMT_TXT_SUCCESS,a1
 	PrintA1
 	jmp (a3)
@@ -213,38 +319,69 @@ RAM_SUITE:
 	movea.l a5,a1
 	move.w d2,d5
 	jmp RAM_ERROR
+.byteErr:
+	movea.l a5,a1
+	jmp RAM_ERROR
 
 ; -----------------------------------------------------------------------------
-; Helpers (return through a2, never print)
+; March elements on [a5,a4), word accesses in strict march order. Return
+; through a2. d1 = value read, d2 = value written. Uses a1.
 ; -----------------------------------------------------------------------------
-; FILL_L: [a5,a4) <- long d1. Uses a1.
-FILL_L:
+MARCH_W:
 	movea.l a5,a1
 .loop:
 	WatchDog
 	rept 8
-	move.l d1,(a1)+
+	move.w d2,(a1)+
 	endr
 	cmpa.l a4,a1
 	bne.s .loop
 	jmp (a2)
 
-; CHECK_L: verify [a5,a4) == long d1. Uses a1, d2, d4.
-CHECK_L:
+MARCH_UP:
 	movea.l a5,a1
 .loop:
 	WatchDog
 	rept 8
-	move.l (a1)+,d2
-	cmp.l d1,d2
-	bne.s .mismatch
+	cmp.w (a1),d1
+	bne MARCH_MISMATCH
+	move.w d2,(a1)+
 	endr
 	cmpa.l a4,a1
-	bne.s .loop
+	bne .loop
 	jmp (a2)
-.mismatch:
-	move.l d1,d4
-	jmp LONG_MISMATCH
+
+MARCH_DN:
+	movea.l a4,a1
+.loop:
+	WatchDog
+	rept 8
+	cmp.w -(a1),d1
+	bne MARCH_MISMATCH
+	move.w d2,(a1)
+	endr
+	cmpa.l a5,a1
+	bne .loop
+	jmp (a2)
+
+MARCH_R:
+	movea.l a5,a1
+.loop:
+	WatchDog
+	rept 8
+	cmp.w (a1)+,d1
+	bne MARCH_MISMATCH_POST
+	endr
+	cmpa.l a4,a1
+	bne .loop
+	jmp (a2)
+
+MARCH_MISMATCH_POST:
+	subq.l #2,a1
+MARCH_MISMATCH:					; a1 = failing word, d1 = expected
+	move.w d1,d5
+	move.w (a1),d6
+	jmp RAM_ERROR
 
 ; Increment pattern: word at address A holds (A & $FFFF) >> 1, XOR d3
 ; (d3 = 0 or $FFFFFFFF). Same values as the original test.
@@ -306,13 +443,39 @@ LONG_MISMATCH:
 ; RAM_ERROR: a1 = failing word address, d5 = expected word, d6 = read word.
 ; -----------------------------------------------------------------------------
 RAM_ERROR:
-	movea.l a1,a2				; a1 is clobbered by Print
+	movea.l a1,a4				; a1 is clobbered by Print, a2 by printDec (a4 = end: no longer needed)
 	PrintLn "Failure"
+	swap d7						; step
+	cmp.b #1,d7
+	bne .st2
+	PrintLn "  Step     : data bus walking 1/0"
+	bra .stEnd
+.st2:
+	cmp.b #2,d7
+	bne .st10
+	PrintLn "  Step     : byte write (each byte written alone)"
+	bra .stEnd
+.st10:
+	cmp.b #10,d7
+	bne .st4
+	PrintLn "  Step     : bank 0 / bank 1 independence (bank select: system latch, palette RAM A12)"
+	bra .stEnd
+.st4:
+	Print "  Step     : March C- element M"
+	moveq #0,d0
+	move.b d7,d0
+	subq.b #4,d0
+	swap d7
+	JsrA6 printDec				; destroys d0-d3, a0, a2: d5/d6/d7/a4 kept
+	swap d7
+	PrintLn ""
+.stEnd:
+	swap d7
 	Print "  Address  : $"
-	move.l a2,d0
+	move.l a4,d0
 	swap d0
 	JsrA6 printWord
-	move.l a2,d0
+	move.l a4,d0
 	JsrA6 printWord
 	PrintLn ""
 	Print "  Expected : $"
@@ -328,25 +491,52 @@ RAM_ERROR:
 	eor.l d6,d1					; d1.w = bad bits (eor.l: see SIMULATOR NOTE)
 	move.w d1,d0
 	JsrA6 printWord
-	move.l d1,d3
-	andi.l #$000000ff,d3		; lower byte bad?
-	beq.s .upperOnly
-	andi.l #$0000ff00,d1		; upper byte bad too?
-	beq.s .lowerOnly
-	PrintLn " (BOTH bytes: D0-D7 and D8-D15)"
-	bra.s .bank
+	move.w d1,d6				; d6.w = bad bits (read value already printed)
+	Print " ="
+	moveq #0,d4
+.bits:
+	btst d4,d6
+	beq .bitNext
+	Print " D"
+	moveq #0,d0
+	move.w d4,d0
+	JsrA6 printDec				; keeps d4, d6
+.bitNext:
+	addq.w #1,d4
+	cmp.w #16,d4
+	bne .bits
+	PrintLn ""
+CHIP_REPORT:					; d6.w = bad bits (also reached from ADDR_ERROR)
+	Print "  Chip     : "
+	move.w d6,d0
+	and.w #$00FF,d0
+	beq .upperOnly
+	move.w d6,d0
+	and.w #$FF00,d0
+	beq .lowerOnly
+	PrintLn "BOTH chips (D0-D15)"
+	bra .hint
 .upperOnly:
-	PrintLn " (upper byte: D8-D15)"
-	bra.s .bank
+	PrintLn "upper chip (D8-D15)"
+	bra .hint
 .lowerOnly:
-	PrintLn " (lower byte: D0-D7)"
+	PrintLn "lower chip (D0-D7)"
+.hint:
+	swap d7
+	cmp.b #2,d7
+	bne .hintEnd
+	swap d7
+	PrintLn "  Hint     : write strobe of that chip (WRAM: NEO-C1 WWU/WWL, 68000 UDS/LDS)"
+	bra .bank
+.hintEnd:
+	swap d7
 .bank:
 	cmp.b #2,d7
-	bne.s .final
+	bne .final
 	btst #8,d7
-	bne.s .bank1
+	bne .bank1
 	PrintLn "  Palette bank : 0"
-	bra.s .final
+	bra .final
 .bank1:
 	PrintLn "  Palette bank : 1"
 .final:
@@ -355,6 +545,36 @@ RAM_ERROR:
 	move.l #RAMT_TXT_FAILURE,a1
 	PrintA1
 	jmp RAM_END_OF_TEST
+
+; -----------------------------------------------------------------------------
+; ADDR_ERROR: d2 = bad address lines (bit k = Ak), d6 = bad bits seen.
+; -----------------------------------------------------------------------------
+ADDR_ERROR:
+	PrintLn "Failure"
+	Print "  Address line(s):"
+	movea.l d2,a4
+	moveq #0,d4
+.l:
+	move.l a4,d0
+	btst d4,d0
+	beq .n
+	Print " A"
+	moveq #0,d0
+	move.w d4,d0
+	JsrA6 printDec				; keeps d4, d6, a4
+.n:
+	addq.w #1,d4
+	cmp.w #16,d4
+	bne .l
+	PrintLn ""
+	cmp.b #2,d7
+	beq .apal
+	PrintLn "  Shared by both chips: 68000 address bus or both chips' pins; seen by one chip only: that chip's pin."
+	bra .aend
+.apal:
+	PrintLn "  Shared by both chips: NEO-B1 palette address switch or both chips' pins; one chip only: that chip's pin."
+.aend:
+	jmp CHIP_REPORT
 
 RAM_ALL_OK:
 	move.l #RAMT_TXT_FINAL,a1
@@ -370,8 +590,6 @@ RAM_END_OF_TEST:
     ; Jump back to the command loop
 	jmp WAIT_FOR_COMMAND
 
-RAMT_PATTERNS:
-	dc.w $0000,$FFFF,$AAAA,$5555
 RAMT_TXT_WRAM:
 	dc.b "Work RAM (WRAM) test",10,0
 RAMT_TXT_BRAM:

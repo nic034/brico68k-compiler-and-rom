@@ -9,7 +9,7 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.2 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.9: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.10: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
 | `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB padded with `$FF` (SHA-256 in `rom/Brico68k.bin.sha256`) |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
@@ -94,15 +94,13 @@ MAME's driver:
   **Run script...** (or `--script FILE` in text mode) plays a whole file, such as
   `bench/real_aes_session.txt`.
 
-Checked against MAME, 33 test commands each time (`emulator/compare_mame.py`), with
+Checked against MAME, 30 test commands each time (`emulator/compare_mame.py`), with
 word-for-word identical output (ChipCheck's two measured clock values may differ in the last
 digit, see Testing):
 
-- `aes` without a cartridge, against the Z80 without a program: 33 out of 33;
+- `aes` without a cartridge, against the Z80 without a program: 30 out of 30;
 - `aes` with the bench test cartridge, whose real MAME Z80 runs the same M1, against the
-  built-in test M1: 32 out of 33. This covers TestZ80, TestAudio and PlayEyeSnd. The one
-  difference is TestTiming, by one pass of its measuring loop (202,724 against 202,739
-  cycles over 4 frames): scheduling phase, not behaviour.
+  built-in test M1: 30 out of 30. This covers TestZ80, TestAudio and PlayEyeSnd.
 
 Nothing to install with pip: the emulator uses only the Python standard library, and its core is
 embedded. The window needs Tkinter. It comes with Python on Windows (python.org installer); on
@@ -164,10 +162,10 @@ python Brico68k_Emulator.py --fault help
 ```
 
 Checked against the MAME bench with the same fault injected (`emulator/compare_mame_faults.py`):
-25 out of 26 outputs are identical, ChipCheck included. That covers WRAM data bits, a dead chip and address lines,
+22 out of 23 outputs are identical, ChipCheck included. That covers WRAM data bits, a dead chip and address lines,
 palette data and address lines, the line counter, and VRAM data. MAME's probes cannot model the
 palette bank select, VRAM address lines or the on-screen effect, so those were checked by hand:
-TestPRAM reports bank independence, TestVRAML or TestVRAMU fails on the right half, and the R4
+TestPRAM reports bank independence, TestVRAM names the zone and the line, and the R4
 band turns black. The one difference: the bench's palette address fault shares one store
 between both banks, so MAME's ChipCheck also reports a bank-select fault that a real board
 would not have.
@@ -179,7 +177,7 @@ build is reproducible: the same sources give the same core checksums.
 It fetches Musashi and the Z80 core at pinned commits.
 The build is reproducible: it gives the same binaries.
 
-## ROM contents: 24 extensions
+## ROM contents: 21 extensions
 
 Commands are typed on the Brico16Bits console. "No WRAM" means the test never relies on
 work RAM (no stack), so it still runs on a board with dead WRAM.
@@ -189,8 +187,8 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | **ChipCheck** | partly | Quick state of the board, one line per part, < 1 s (see below) |
 | Echo, Read, Write, WriteB, Dump | yes | Link check and raw memory access. Odd addresses are handled. |
 | TestInp | yes | Controllers, memory card detect, AES/MVS mode |
-| TestWRAM / TestBRAM / TestPRAM | yes | Data bus walking 1/0, patterns, address lines; PRAM checks both banks + bank select. TestBRAM is MVS only and destructive. |
-| TestVRAML / TestVRAMU / MarchVRAML / MarchVRAMU | yes | Slow and fast VRAM, including March-C |
+| TestWRAM / TestBRAM / TestPRAM | yes | One suite (see below): data bus walking 1/0, byte writes (not palette), each address line named, March C- $5555/$AAAA on every word. PRAM: both banks + bank select. TestBRAM is MVS only and destructive. |
+| **TestVRAM** | yes | All VRAM in one test, replaces TestVRAML/U and MarchVRAML/U (see below) |
 | TestLSPC | yes | LSPC2-A2 registers, VRAM auto-increment |
 | Color | yes | Whole screen in one colour (upstream) |
 | TestStatusA / TestSystype | yes | Coin, service and RTC bits / TEST and JAMMA sense, AES/MVS aware |
@@ -203,6 +201,32 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 
 Bold entries are new in this repository.
 
+### RAM and VRAM tests: what each step finds
+
+Every memory is two 8-bit chips on the 16-bit bus: upper byte D8-D15 and lower byte D0-D7
+(neogeodev wiki: two CXK5814 for the fast VRAM, two CXK5864 for the palette RAM; 64 KiB on a
+16-bit bus for WRAM and slow VRAM). On an error the test prints the address, expected and read
+words, the bad bits by name (`D3 D12`) and **which chip**: upper, lower or both.
+
+| Step | Finds | Where |
+|---|---|---|
+| Data bus walking 1/0 on the first word (the complement goes to the next word before each read, so a floating bus cannot fake a pass) | Data line stuck, open or shorted to another | all |
+| Byte writes: `$A5` to the upper byte alone, `$5A` to the lower byte alone, then the same to `$00` | A chip written by the other byte's write, or not written: write strobes (NEO-C1 WWU/WWL, 68000 UDS/LDS) | WRAM, BRAM. Not palette RAM or VRAM: there a byte write sets both bytes (wiki "Palettes", "Memory mapped registers") |
+| Address lines: word at base + 2^k holds k; the base write must not change them (line stuck at 1); writing them must not change the base (stuck at 0) | Each bad line named (A9) | WRAM A1-A15, palette A1-A12 per bank, slow VRAM A0-A14, fast VRAM A0-A10 |
+| March C- on every word, data background $5555/$AAAA: up(w B) up(r B,w ~B) up(r ~B,w B) dn(r B,w ~B) dn(r ~B,w B) up(r B) | Stuck cells, transition faults, coupling between cells, address decoder faults, and shorts between neighbouring data lines (always opposite values) | all |
+| Bank 0 / bank 1 independence | Palette bank select (system latch, palette RAM A12) | palette |
+
+The former fixed patterns ($0000/$FFFF/$AAAA/$5555) and the increment test are covered by the
+March C- and the named address lines. Durations (3 s host limit): TestWRAM 0.42 s, TestPRAM
+0.16 s, TestVRAM 1.8 s.
+
+TestVRAM follows the wiki's VRAM rules with at least 8 cycles of margin: a read 28 CPU cycles
+after the address write (16 required), a new address 28 cycles after a data write (16), the
+next data write 28 cycles after the previous one (12). The address is set before every read
+(the wiki does not describe a read buffer, so none is relied on). It covers $0000-$7FFF,
+$8000-$85FF and $8700-$87FF; $8600-$86FF holds the sprite lists the LSPC2 rewrites during the
+display and cannot be tested from the 68000. Each zone is cleared to 0 afterwards.
+
 ### ChipCheck: quick state of the board
 
 One line per part, what to suspect when it fails, and the test to run next. About 0.35 s
@@ -211,6 +235,7 @@ One line per part, what to suspect when it fails, and the test to run next. Abou
 | Line | How it is checked | A failure points to |
 |---|---|---|
 | Work RAM | Walking 1/0 on both bytes, then each address line A1-A15 (stuck at 0 and at 1) | The bits (D3, D8-D15...) or lines (A9) named; upper/lower chip or NEO-C1 WRU/WRL/WWU/WWL |
+| WRAM byte writes | Each byte written alone must change only its own chip | That chip's write strobe: NEO-C1 WWU/WWL, 68000 UDS/LDS |
 | Palette RAM | Same on both banks (A1-A12), plus bank select | Palette RAM chip or latch, NEO-B1 bus switch; bank: system latch |
 | VRAM slow / fast | Same through the LSPC2 (A0-A14 / A0-A10), with the LSPC access delays | The VRAM chip, LSPC2-A2 B/E or C/F bus |
 | LSPC2 registers | `REG_VRAMMOD` write and read-back | LSPC2-A2, NEO-C1 LSPOE/LSPWE |
@@ -245,12 +270,15 @@ together: the test cannot tell them apart.
   version sent an EOT after its first line, so its later messages were lost. It now sends
   one EOT before the beeps and no longer leaks stack on the error path.
 - **Write**: odd addresses no longer crash with a 68000 address error.
-- **VRAM tests**: two `nop` between the VRAM address write and the read, so the read comes more
-  than 16 CPU cycles after the address (neogeodev wiki, "VRAM"). It came 12 cycles after the end
-  of the write before. MAME does not model this delay, so only a real board can show the
-  difference. MarchVRAML now takes 1.75 s of the 3 s host limit.
-- **RAM tests**: more precise reports (address, expected, read, bad bits, byte lane), plus
-  general optimizations.
+- **VRAM tests**: merged into TestVRAM, which follows the wiki's access delays with margin (the
+  1.35 tests read 12 cycles after the end of the address write, 16 required; MAME does not
+  model this delay, so only a real board could show it). Upper data bits are now exercised
+  (the old increment pattern never set D11-D15 in the fast VRAM, D15 in the slow one) and
+  $8700-$87FF is tested.
+- **RAM tests**: byte writes, named address lines, March C-; reports name the bad bits and
+  the chip.
+- **TestTiming**: a line counter change is confirmed by a second read before the step is
+  judged, so a read landing during the change cannot report a false bad step.
 
 ## References
 
@@ -258,7 +286,7 @@ together: the test cannot tell them apart.
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `5859d6b` (2026-10-22, "Fixed remote keyboard detection"). Compatible **without modification**. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | announces BricoNeo **1.35**, 24 extensions, SHA-256 `cadca47e7e621b019d66391bd41ea24a05a41de0785712f059e924ad2cacab07` |
+| This ROM | announces BricoNeo **1.35**, 21 extensions, SHA-256 `c69eb140111ee70c75d9651e4470c8a81a1f66fc21ba23653294fa7f805f5ad1` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
@@ -275,7 +303,7 @@ Brico16Bits recognises the byte order.
 3. Drop `rom/Brico68k.bin` at the root of the `BricoNeo` USB drive. The root loads it in RAM only
    and resets the console: your bank 0 is untouched, and the next power cycle brings it back.
    (Put it in a bank folder to keep it.)
-4. Type `?`: the Extensions section must list the 24 commands.
+4. Type `?`: the Extensions section must list the 21 commands.
 5. Paste the whole of `bench/real_aes_session.txt` into the terminal. The `;` lines are comments
    and `Delay` waits, both built into the BricoNeo console.
 6. In the emulator, **Compare** tab > **Open real console log...** (or
@@ -313,11 +341,9 @@ each well under the 3 s host limit.
   so MAME also reports a bank-select fault that a real board would not have. The two measured
   clock values may differ in the last digit: the bench clears the command at the first read
   after 1 ms of machine time (`tools/mame_ext_runner.lua`), the real host at exactly 1 ms.
-- With the test cartridge, TestTiming can differ from the emulator by one pass of its measuring
-  loop (202,724 against 202,739 cycles over 4 frames): scheduling phase, not behaviour.
 
 - TestDAC: 16 exact colours on screenshots.
-- TestTiming: 202,739 cycles per frame against 202,752 expected. Injected stuck counter bits,
+- TestTiming: 202,724 cycles per frame against 202,752 expected (within the resolution of its 58-cycle measuring loop). Injected stuck counter bits,
   at 0 and at 1, are named exactly.
 - TestWatchdog: reset after ~133 ms on MVS (MAME: 135 ms).
 - TestZ80: passes with a real SM1 and with the test M1.
