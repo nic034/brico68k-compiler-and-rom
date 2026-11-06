@@ -34,9 +34,9 @@ CART_CASES = [
 # A21 masked off is one RAM seen at $0xxxxx and $2xxxxx, written by byte lanes: the board's SRAM
 # (WRAM keeps its own shadow). The emulator inserts the board with a zeroed SRAM, as the shadow.
 DIAG_CASES = [
-  ("diag",              {"BRICO_ALIAS": "0x000080,0x2fffff,0xDFFFFF"},  ["CartTest", "TestWRAM", "CartTest"]),
-  ("diag+cart:addr:5:0", {"BRICO_ALIAS": "0x000080,0x2fffff,0xDFFFDF"}, ["CartTest"]),
-  ("diag+cart:addr:19:0", {"BRICO_ALIAS": "0x000080,0x2fffff,0xD7FFFF"}, ["CartTest"]),
+  ("diag",              {"BRICO_ALIAS": "0x000080,0x2fffff,0xDFFFFF"},  ["CartDiag", "TestWRAM", "CartDiag"]),
+  ("diag+cart:addr:5:0", {"BRICO_ALIAS": "0x000080,0x2fffff,0xDFFFDF"}, ["CartDiag"]),
+  ("diag+cart:addr:19:0", {"BRICO_ALIAS": "0x000080,0x2fffff,0xD7FFFF"}, ["CartDiag"]),
 ] if not os.environ.get("BRICO_CART") else []
 VRAM = [("vramlo:data:2:1", "vramhi:data:2:1", {"BRICO_STUCK": "0x3c0002,0x3c0003,0x0004,0xFFFF"},
          ["TestVRAM", "TestLSPC", "ChipCheck"])]

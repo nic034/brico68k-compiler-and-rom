@@ -11,7 +11,7 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.4 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.14: tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.15: tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
 | `rom/ROM.BIO` | Ready-to-use ROM, 128 KB: 32 KB of code + CRC32 + 3 mirrors, exactly what the BricoNeo builds itself for header flag `$0004` (SHA-256 in `rom/ROM.BIO.sha256`) |
 | `brico16bits/` | Optional Brico16Bits patch (EXCPT: 68000 exception reports). Syntax-checked only, not built for the Pico, not run |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
@@ -203,7 +203,7 @@ Checked against the MAME bench with the same fault injected (`emulator/compare_m
 27 out of 28 outputs are identical without a cartridge, 24 out of 25 with the test cartridge,
 ChipCheck included. That covers WRAM data bits, a dead chip and address lines, palette data and
 address lines, the line counter, VRAM data, cartridge slot data lines (CartTest on the test
-cartridge), and the PROG board: MAME has no such board, so the bench's shadow RAM over
+cartridge), and the PROG board (CartDiag): MAME has no such board, so the bench's shadow RAM over
 `$000080-$2FFFFF` with A21 masked off plays it (one RAM seen at `$0xxxxx` and `$2xxxxx`, written
 by byte lanes), healthy and with slot A5 or A19 stuck at 0. MAME's probes cannot model the
 palette bank select, VRAM address lines or the on-screen effect, so those were checked by hand:
@@ -219,7 +219,7 @@ build is reproducible: the same sources give the same core checksums.
 It fetches Musashi and the Z80 core at pinned commits.
 The build is reproducible: it gives the same binaries.
 
-## ROM contents: 24 extensions
+## ROM contents: 25 extensions
 
 Commands are typed on the Brico16Bits console. "No WRAM" means the test never relies on
 work RAM (no stack), so it still runs on a board with dead WRAM.
@@ -227,7 +227,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | Command | No WRAM | What it does |
 |---|:-:|---|
 | **ChipCheck** | partly | Quick state of the board, one line per part, < 1 s (see below) |
-| **Version** | yes | The only place with the fork version: says it is the Nic034 fork, `1.35-nic034-04`, the upstream base and the source. Also in the `?` list. |
+| **Version** | yes | The only place with the fork version: says it is the Nic034 fork, `1.35-nic034-05`, the upstream base and the source. Also in the `?` list. |
 | **TestBus** | yes | BIOS socket, 68000 -> BricoNeo, as NeoDiag does it: A15/A16 from the mirror bytes, A1-A14/D0-D15 by CRC32; text and 16 screen bands (see below). Also run at boot. |
 | Echo, Read, Write, WriteB, Dump | yes | Link check and raw memory access. Odd addresses are handled. Dump: at most 2045 words (BricoNeo buffer: 2048 words, address included). |
 | TestInp | yes | Controllers, memory card detect, AES/MVS mode |
@@ -242,14 +242,15 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | **TestDAC** | yes | RGB DAC pattern: 16 bands, one colour bit each. `P1=1` adds the dark bit; `P1=$10+n` fills the screen with band n for a scope or multimeter. |
 | **TestTiming** | yes | LSPC line counter (+1 steps, range, lines per frame, stuck bits named), CPU cycles per frame, auto-animation counter |
 | **TestWatchdog** | no | First run starves the watchdog; the second run reports the reset and its delay |
-| **CartTest** | yes | Cartridge P bus D0-D15. Game cartridge, read only: P1 by the security code (names stuck / open lines), P2 activity. Diagnostic PROG board: write/read test of D0-D15, both byte lanes, A1-A19, /ROMOE and /PORTOE (see below) |
+| **CartTest** | yes | Game cartridge P bus D0-D15, read only (never writes): P1 by the security code (names stuck / open lines), P2 activity |
+| **CartDiag** | yes | "p-bus test (diag cart)" on the jwestfall69 PROG board, **writes** its SRAM: /ROMOE and /PORTOE (prefetch, bus hold), write/read test of D0-D15, both byte lanes, A1-A19 (see below) |
 
 Bold entries are new in this repository.
 
 The code now fills the 32 KB below `$7FFA` (14 bytes free): a new extension needs room made
 elsewhere first (shorter texts, shared code).
 
-### CartTest: the cartridge P bus
+### CartTest and CartDiag: the cartridge P bus
 
 **CartTest, game cartridge** (read only):
 
@@ -269,19 +270,18 @@ elsewhere first (shorter texts, shared code).
   `$2FE000-$2FFFFF` (NEO-SMA registers there: random number generators that step on reads).
 - Verdict: the same lines on P1 and P2 point to the edge, the slot or the console (another
   cartridge with the same lines = console side); P1 only or P2 only point to that chip.
-- Nothing is written while the header reads. Without a header, the PROG board probe writes
-  bytes at `$200000` and `$255554`: upper byte first (even address: /PORTWEU only; a game
-  cartridge's bank latch takes /PORTWEL), then, only if nothing followed, the lower byte with
-  D0-D2 = 0, so a bank latch can only take bank 0, the bank it has after reset.
+- **CartTest never writes.** On a cartridge without a header it says so and points to `CartDiag`.
 - Limits: an address line fault on a game cartridge shows as "P1 answers but reads wrong", not
   named (the PROG board names it). Protected cartridges answer the same way as long as their P1
   is not encrypted.
 
-**CartTest, diagnostic PROG board** (the "p-bus test (diag cart)", destroys its content): the
-test prints its name and the board's address,
+**CartDiag, diagnostic PROG board** (the "p-bus test (diag cart)", destroys its content). A
+command of its own: two choices, `CartTest` for a game cartridge (read only) and `CartDiag` for
+the PROG board, no automatic detection. Do not run `CartDiag` on a game cartridge: it writes,
+and a word written in P2 latches the bank. The test prints its name and the board's address,
 <https://github.com/jwestfall69/neogeo-diag-aes-prog> (jwestfall69, the board and the diag BIOS
-whose P bus tests it follows). Its SRAM answers in both windows, so the test can write. The probe
-tolerates bad lines and a dead strobe (any bit that follows both writes is enough), then:
+whose P bus tests it follows). Its SRAM answers in both windows, so the test can write. It starts at once, without
+probing, and the bad lines or a dead strobe it finds are named. In order:
 
 1. **output enable (prefetch)**, the BIOS's method: a byte read three times, each time followed
    by another opcode, and compared with that opcode's byte on the same lane; a chip that drives
@@ -307,8 +307,7 @@ healthy board, A5 and A19 in MAME too. **The PROG board itself has not been run 
 The two output enable tests can only be checked against the assumption they make (the prefetched
 word, the held value): the emulator models exactly that, MAME models neither, and no real board
 has confirmed it. A healthy board that failed them would mean the assumption is wrong on your
-hardware, not necessarily the board. On a game cartridge these two tests do not run: the
-board probe decides first, and a game cartridge can at most latch bank 0.
+hardware, not necessarily the board. 
 
 ### RAM and VRAM tests: what each step finds
 
@@ -442,7 +441,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `5859d6b` (2026-10-22, "Fixed remote keyboard detection"). Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-04** (Version command only); the header announces **1.35**, the upstream base; 24 extensions, flags `$0007`, SHA-256 `fb0bf47b507c6160f3e4cc0c9a3b857dbcc1cb6c57f70926c09b55901372c995` |
+| This ROM | fork version **1.35-nic034-05** (Version command only); the header announces **1.35**, the upstream base; 25 extensions, flags `$0007`, SHA-256 `26f517773add88740cce238eebbe3421dc6b037ec505d8091d33a118b95dceb4` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
@@ -466,7 +465,7 @@ Brico16Bits recognises the byte order.
 3. Drop `rom/ROM.BIO` at the root of the `BricoNeo` USB drive. The root loads it in RAM only
    and resets the console: your bank 0 is untouched, and the next power cycle brings it back.
    (Put it in a bank folder to keep it.)
-4. Type `?`: the Extensions section must list the 24 commands; `Version` says which build runs. All screen bands green after
+4. Type `?`: the Extensions section must list the 25 commands; `Version` says which build runs. All screen bands green after
    `TestBus` = the BIOS socket path is fine.
 5. Paste the whole of `bench/real_aes_session.txt` into the terminal. The `;` lines are comments
    and `Delay` waits, both built into the BricoNeo console.
@@ -516,7 +515,7 @@ each well under the 3 s host limit.
 ### Known limits (read before trusting a result)
 
 - **Nothing here has been validated on real hardware yet.** MAME is the reference used.
-- **CartTest**: MAME has no PROG board (the bench plays it with a shadow RAM) and no
+- **CartTest / CartDiag**: MAME has no PROG board (the bench plays it with a shadow RAM) and no
   slot address faults on a ROM. The test cartridge's softlist entry needs `<feature name="slot"
   value="rom"/>`: without it MAME 0.264 maps `$000100-$000103` to a protection handler that reads
   `$FFFF`.

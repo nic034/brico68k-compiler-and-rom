@@ -1,12 +1,13 @@
 	include "inc/define.inc"
 
 	global EXT_CART_TEST
+	global EXT_CART_DIAG
 
 	section text
 
 ; ------------------------------------------------------------------------
-; CartTest - cartridge P bus data lines D0-D15: game cartridge read only,
-; or the diagnostic PROG board (SRAM) with writes.
+; CartTest - cartridge P bus data lines D0-D15 of a game cartridge, read only.
+; CartDiag - the same bus on the diagnostic PROG board (SRAM), with writes.
 ;
 ; P1 ($000000-$0FFFFF, /ROMOE, wiki "Signals"): every cartridge holds the
 ; same 61-word security code, at the address in the header long $182
@@ -34,10 +35,8 @@
 ;
 ; Header ($100 "NEO-GEO", $108 NGH number, $10A P ROM size) is printed as
 ; read: a bad data line changes it too.
-; No header: byte writes at $200000/$255554 check for the diagnostic PROG
-; board (SRAM); if it answers, CART_BOARD tests the P bus with writes
-; (below). The probe runs only when the header does not read; on a game
-; cartridge it can only latch bank 0, the bank at reset (see the probe).
+; CartTest never writes. The diagnostic PROG board (SRAM) has its own
+; command, CartDiag (CART_BOARD, below).
 ; P1 without the security code: its activity is sampled like P2 (a dead
 ; window, or lines that never toggle; else an address line or a strobe).
 ; No WRAM, no stack. ROM mode < 0.5 s.
@@ -46,7 +45,6 @@ SEC_N       equ 61
 P1_END      equ $100000
 P2_START    equ $200000
 P2_STOP     equ $2FE000			; NEO-SMA registers above
-P2_DRIVE    equ $255554			; PROG board probe: bus driver address
 FOUND_MAX   equ 5				; more bad lines than this: not the security code
 
 EXT_CART_TEST:
@@ -87,54 +85,9 @@ EXT_CART_TEST:
 	JsrA6 printWord
 	PrintLn ""
 
-	; --- no header: diagnostic PROG board? ------------------------------------
-	; Its 16-bit SRAM is read in both windows (P1 and P2) and written through
-	; P2. Probe at $200000, twice (a value, then its complement), each write
-	; followed by the opposite value at P2_DRIVE (9 address lines differ: one
-	; bad line cannot merge the two) so a floating bus cannot fake a RAM. A
-	; RAM = some bit follows both writes (bad lines and a dead strobe still
-	; leave a board found, and RAM_SUITE names them).
-	; Upper byte first: an even byte write drives /PORTWEU only, and a game
-	; cartridge's bank latch takes /PORTWEL (wiki "Bankswitching"). Only if no
-	; upper bit follows, the lower byte, with D0-D2 = 0 in every value: a
-	; latch would take bank 0, the bank at reset.
-	movea.l #P2_START,a0
-	movea.l #P2_DRIVE,a1
-	moveq #-1,d4				; bits that follow every write
-	move.b (a0),d2
-	not.l d2					; ~(byte read): differs from the content
-	moveq #1,d3
-.probeU:
-	move.b d2,(a0)
-	not.l d2
-	move.b d2,(a1)
-	not.l d2
-	move.b (a0),d0
-	eor.b d2,d0					; bits that did not follow
-	not.l d0
-	and.b d0,d4
-	not.l d2					; second pass: the complement
-	dbra d3,.probeU
-	tst.b d4
-	bne.s .board
-	moveq #-1,d4
-	moveq #$A8-$100,d2			; $A8, then $50: D0-D2 = 0
-	moveq #1,d3
-.probeL:
-	move.b d2,1(a0)
-	eor.b #$F8,d2
-	move.b d2,1(a1)
-	eor.b #$F8,d2
-	move.b 1(a0),d0
-	eor.b d2,d0
-	not.l d0
-	and.b d0,d4
-	eor.b #$F8,d2
-	dbra d3,.probeL
-	and.b #$F8,d4
-	beq.s .secSearch			; nothing written: ROM or nothing, go on read only
-.board:
-	jmp CART_BOARD
+	PrintLn "  (diag PROG board: use CartDiag)"
+	; no header: nothing is written here (the diagnostic PROG board has its own
+	; command, CartDiag)
 
 	; --- P1: find the security code ----------------------------------------
 	; a5 bit 31 = P1 option (kept), a3 = best address, a4 = best count,
@@ -511,7 +464,7 @@ OE_HOLD245:
 	jmp (a1)
 
 ; ------------------------------------------------------------------------
-; CART_BOARD: diagnostic PROG board (jwestfall69 neogeo-diag-aes-prog: one
+; CartDiag, CART_BOARD: diagnostic PROG board (jwestfall69 neogeo-diag-aes-prog: one
 ; 1 MiB 16-bit SRAM, A0-A18 = slot A1-A19, D0-D15 = slot D0-D15, read by
 ; /ROMOE and /PORTOE, written by /PORTWEU and /PORTWEL). Destroys its content.
 ; Console name: "p-bus test (diag cart)", with the board's GitHub address.
@@ -523,6 +476,7 @@ OE_HOLD245:
 ;   2. P1 window: 32 words written through P2 ($200200, walking 1 then
 ;      walking 0) read back through P1 ($000200): /ROMOEU, /ROMOEL.
 ; ------------------------------------------------------------------------
+EXT_CART_DIAG:
 CART_BOARD:
 	PrintLn "p-bus test (diag cart): SRAM $200000, ERASED"
 	PrintLn "https://github.com/jwestfall69/neogeo-diag-aes-prog"

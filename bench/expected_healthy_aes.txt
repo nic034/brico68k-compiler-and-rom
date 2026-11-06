@@ -4,7 +4,7 @@ CART:   Generated P ROM: header + security code at $186, pseudo-random words (sa
 ; Paste the whole file into the serial terminal (PuTTY, Tera Term...). Lines starting with ; are ignored.
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
 > Version
-Brico68k 1.35-nic034-04 - Nic034 fork (Nicolas), not an Aurelien34 release
+Brico68k 1.35-nic034-05 - Nic034 fork (Nicolas), not an Aurelien34 release
 Based on Aurelien34/Brico68k 1.35 (52c1c92): the BricoNeo shows 1.35
 Source: github.com/nic034/brico68k-compiler-and-rom
 
@@ -219,6 +219,7 @@ P2       activity $200000-$002FDFFF, 65024 words
 => Test success: P1 security code exact, P2 lines active or untested
 
 [eot, 574 ms emulated]
+; diagnostic PROG board only (it WRITES its SRAM, never on a game cartridge): CartDiag
 > TestDAC
 RGB DAC test pattern, top to bottom:
   R4 R3 R2 R1 R0 | G4 G3 G2 G1 G0 | B4 B3 B2 B1 B0 | white

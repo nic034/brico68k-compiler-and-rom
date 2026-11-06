@@ -89,7 +89,7 @@ pump(1.5)
 ext_rows = [i for g in tree.get_children() for i in tree.get_children(g)]
 groups = [tree.item(g, "text") for g in tree.get_children()]
 check("auto power on", st["core"] is not None and st["running"])
-check("24 extensions in the sidebar", len(ext_rows) == 24, str(len(ext_rows)))
+check("25 extensions in the sidebar", len(ext_rows) == 25, str(len(ext_rows)))
 check("grouped by category", groups == ["Overview", "Memory", "Video", "Sound", "Inputs and system", "Cartridge", "Tools"], str(groups))
 check("Tools group collapsed", not tree.item("cat_Tools", "open"))
 check("lamps", "running" in b["lamps"]["cpu"][1].cget("text") and "ready" in b["lamps"]["host"][1].cget("text"))
@@ -168,7 +168,7 @@ check("WRAM byte write keeps the other byte", "0x0056" in console()[-40:], conso
 
 # built-ins, errors, history
 b["send"]("Help"); pump(0.2)
-check("Help lists the extensions", "24 extensions in this ROM" in console())
+check("Help lists the extensions", "25 extensions in this ROM" in console())
 b["send"]("Nope"); pump(0.2)
 check("unknown command message", "Unknown command: Nope" in console())
 b["cmd"].set(""); b["history"](-1)
@@ -283,11 +283,11 @@ check("slot D3 stuck -> CartTest FAIL naming D3", badge("CartTest") == "FAIL" an
 b["fault_clear"](); pump(0.1)
 b["cart"].set("diag"); pump(0.3)
 check("PROG board inserted (lamp)", "PROG board" in b["lamps"]["cart"][1].cget("text"))
-b["send"]("CartTest"); wait_idle()
-check("PROG board: CartTest PASS (write/read test)", badge("CartTest") == "PASS" and "p-bus test (diag cart)" in console()[-1500:])
+b["send"]("CartDiag"); wait_idle()
+check("PROG board: CartDiag PASS (write/read test)", badge("CartDiag") == "PASS" and "p-bus test (diag cart)" in console()[-1500:])
 kind.set("Strobe dead"); pump(0.05); lvl.set("ROMOEU"); add_form(); pump(0.1)
-b["send"]("CartTest"); wait_idle()
-check("PROG board, /ROMOEU dead -> FAIL on the output enable test", badge("CartTest") == "FAIL" and "P1 D8-D15: output dead" in console()[-400:], console()[-400:])
+b["send"]("CartDiag"); wait_idle()
+check("PROG board, /ROMOEU dead -> FAIL on the output enable test", badge("CartDiag") == "FAIL" and "P1 D8-D15: output dead" in console()[-400:], console()[-400:])
 b["fault_clear"](); pump(0.1)
 fs = os.environ.get("GV_FAKESETS")
 if fs:

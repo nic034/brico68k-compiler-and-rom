@@ -4,6 +4,25 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-07 - Two commands: CartTest and CartDiag (fork 1.35-nic034-05, Emulator 1.15)
+
+ROM SHA-256 `26f517773add88740cce238eebbe3421dc6b037ec505d8091d33a118b95dceb4` (fork
+**1.35-nic034-05**, header 1.35, **25** extensions), the same checksum from the Compiler,
+`build.py` and CMake.
+
+- **CartTest** (game cartridge) never writes any more: the automatic PROG board probe is gone. On a
+  cartridge without a header it prints "diag PROG board: use CartDiag". Run in the emulator on
+  the test cartridge, no cartridge and the PROG board: 0 cartridge writes each time.
+- **CartDiag** (new): the p-bus test (diag cart) on the PROG board, started directly. It writes:
+  on a game cartridge it would latch banks (words written in P2), so it is for the PROG board only.
+  Checked: on the test cartridge it writes 4 times and fails, which is the expected misuse.
+- Code ends 712 bytes under `$7FFA`.
+- Emulator 1.15: CartDiag in the Cartridge category, `compare_mame_faults.py` and `guiverify.py`
+  call it for the PROG board; 184 GUI checks, bench logs regenerated.
+
+Checks: 38/38 identical to MAME with the test cartridge and 38/38 without; faults 24/25 and 27/28
+(the known palette artifact); TestBus screen 7/7; GUI 184/184. The PROG board itself has not run it.
+
 ## 2026-11-07 - CartCRC removed (fork 1.35-nic034-04, Emulator 1.14)
 
 ROM SHA-256 `fb0bf47b507c6160f3e4cc0c9a3b857dbcc1cb6c57f70926c09b55901372c995` (fork

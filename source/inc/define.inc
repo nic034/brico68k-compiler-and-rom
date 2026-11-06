@@ -99,7 +99,7 @@ REG_STATUS_B equ $380000
 	; Brico16Bits shows "Found BricoNeo ROM version 1.35". build.py and the
 	; Compiler check that the header equals the base of this string.
 	macro FORK_VERSION
-		dc.b "1.35-nic034-04"
+		dc.b "1.35-nic034-05"
 	endm
 
 	macro BRICONEO_VERSION
