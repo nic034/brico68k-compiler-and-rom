@@ -721,9 +721,9 @@ def full_build(source_mode, source_path, auto, manual_vasm, manual_vlink, out_di
     if fv:
         log("Fork version: " + fv.group(0)[13:].decode("ascii", "replace"))
         major, minor = struct.unpack_from(">HH", data, OFF_VERSION)
-        want = (int(fv.group(1)), int(fv.group(2)) * 100 + int(fv.group(3)))
-        checks.append(((major, minor) == want, f"Header version {major}.{minor} matches the fork version "
-                       f"(minor = base x 100 + build: {want[0]}.{want[1]})"))
+        want = (int(fv.group(1)), int(fv.group(2)))
+        checks.append(((major, minor) == want, f"Header version {major}.{minor} = base of the fork version "
+                       f"({want[0]}.{want[1]})"))
     if sp1 and len(final) == SP1_SIZE and final[0x8D] & 4:
         checks.append((len(data) <= 0x7FFA, "NeoDiag layout (flag $0004): code fits below $7FFA, CRC32 + 3 mirrors"))
     out_dir = Path(out_dir)

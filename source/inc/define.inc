@@ -90,10 +90,10 @@ REG_P2CNT equ $340000
 REG_STATUS_B equ $380000
 
 	; Version of this fork (nic034/brico68k-compiler-and-rom): upstream base
-	; 1.35 + build NN. Brico16Bits prints the header version as two numbers
-	; ("%d.%d"), so the header carries major 1, minor 35 x 100 + NN and shows
-	; "Found BricoNeo ROM version 1.3501". Keep BRICONEO_VERSION (Brico68k.s)
-	; and this string in step: build.py and the Compiler check it.
+	; 1.35 + build NN, shown only by the Version command and its description.
+	; The header (BRICONEO_VERSION in Brico68k.s) keeps the upstream base:
+	; Brico16Bits shows "Found BricoNeo ROM version 1.35". build.py and the
+	; Compiler check that the header equals the base of this string.
 	macro FORK_VERSION
 		dc.b "1.35-nic034-01"
 	endm

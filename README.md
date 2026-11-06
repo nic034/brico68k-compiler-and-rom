@@ -195,7 +195,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | Command | No WRAM | What it does |
 |---|:-:|---|
 | **ChipCheck** | partly | Quick state of the board, one line per part, < 1 s (see below) |
-| **Version** | yes | Says it is the Nic034 fork, its version (`1.35-nic034-01`), the upstream base and the source. Also in the `?` list. |
+| **Version** | yes | The only place with the fork version: says it is the Nic034 fork, `1.35-nic034-01`, the upstream base and the source. Also in the `?` list. |
 | **TestBus** | yes | BIOS socket, 68000 -> BricoNeo, as NeoDiag does it: A15/A16 from the mirror bytes, A1-A14/D0-D15 by CRC32; text and 16 screen bands (see below). Also run at boot. |
 | Echo, Read, Write, WriteB, Dump | yes | Link check and raw memory access. Odd addresses are handled. Dump: at most 2045 words (BricoNeo buffer: 2048 words, address included). |
 | TestInp | yes | Controllers, memory card detect, AES/MVS mode |
@@ -345,18 +345,16 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `5859d6b` (2026-10-22, "Fixed remote keyboard detection"). Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-01**, header **1.3501** (Brico16Bits: "Found BricoNeo ROM version 1.3501"); 23 extensions, flags `$0007`, SHA-256 `083455becae63b8fc09e914679777ddf69aa8fdade61ec2dea356f6fb570e6db` |
+| This ROM | fork version **1.35-nic034-01** (Version command only); the header announces **1.35**, the upstream base; 23 extensions, flags `$0007`, SHA-256 `7f88cd8d6ac9916a30caf1c635ceb52559ecdf91e6cfb4bca39369bff54be5b8` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
 **Versioning**: the fork version is `1.35-nic034-NN` (upstream base 1.35, fork build NN, +1 for
-every published ROM). Brico16Bits prints the header version as two numbers (`%d.%d`), so the
-header carries major 1 and minor 35 x 100 + NN: "Found BricoNeo ROM version 1.3501" for build 01.
-The string is `FORK_VERSION` in `source/inc/define.inc`, the numbers `BRICONEO_VERSION` in
-`source/Brico68k.s`; `build.py` and the Compiler refuse a build where they disagree. The
-`Version` command says it is the Nic034 fork and gives the upstream base and the source.
-Caveat: as plain numbers, 1.3501 is "greater" than a future upstream 1.36; Brico16Bits only
-prints the version today, it does not compare it.
+every published ROM), shown only by the `Version` command and its `?` description, which say it
+is the Nic034 fork. The header keeps the upstream base, so Brico16Bits shows "Found BricoNeo ROM
+version 1.35" (it prints two numbers, `%d.%d`, and has no room for a suffix). The string is
+`FORK_VERSION` in `source/inc/define.inc`; `build.py` and the Compiler check that the header
+(`BRICONEO_VERSION` in `source/Brico68k.s`) equals its base.
 
 The ROM keeps the BricoNeo header and the BricoExt layout (magic at `$80`, flags at `$8C`,
 `jmp` at `$8E`, extension table at `$A0`). The reset vector upper word is `$00C0`, so

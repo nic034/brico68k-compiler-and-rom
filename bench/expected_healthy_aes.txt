@@ -3,8 +3,7 @@
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
 > Version
 Brico68k 1.35-nic034-01 - Nic034 fork (Nicolas), not an Aurelien34 release
-Based on Aurelien34/Brico68k 1.35 (52c1c92)
-Header version 1.3501 = 1.35 + fork build 01
+Based on Aurelien34/Brico68k 1.35 (52c1c92): the BricoNeo shows 1.35
 Source: github.com/nic034/brico68k-compiler-and-rom
 
 [eot, 2 ms emulated]
@@ -202,7 +201,7 @@ again to read the result (commands sent meanwhile are lost).
 > Delay 2000
 > TestWatchdog
 Watchdog test result:
-> The watchdog reset the 68000 after ~133 ms (44568 loops of 3 us)
+> The watchdog reset the 68000 after ~133 ms (44567 loops of 3 us)
   MAME MVS: 135 ms. Real boards: about 0.13 s.
 => Test success (run again to re-arm)
 

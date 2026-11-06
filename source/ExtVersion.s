@@ -14,8 +14,7 @@ EXT_VERSION:
 	lea VERSION_TXT(pc),a1
 	PrintA1
 	PrintLn " - Nic034 fork (Nicolas), not an Aurelien34 release"
-	PrintLn "Based on Aurelien34/Brico68k 1.35 (52c1c92)"
-	PrintLn "Header version 1.3501 = 1.35 + fork build 01"
+	PrintLn "Based on Aurelien34/Brico68k 1.35 (52c1c92): the BricoNeo shows 1.35"
 	PrintLn "Source: github.com/nic034/brico68k-compiler-and-rom"
 	WriteEOT
 	jmp WAIT_FOR_COMMAND
