@@ -41,7 +41,14 @@ PALETTE_0   equ $400000		; palette 0, colours 0-15 (colour 0 = transparent)
 ; WRAM words kept across a watchdog reset by TestWatchdog (system ROM area,
 ; above the stack: SP starts at $10F300 and grows down)
 WDOG_MAGIC  equ $10FFE0		; 4 words
-WDOG_COUNT  equ $10FFE8		; long: loop iterations before the reset
+WDOG_COUNT  equ $10FFE8
+; ChipCheck (BIOS work RAM area, above the stack)
+CHK_PROGRESS   equ $10FFF0	; word 0-100, read by the emulator
+CHK_PROG_MAGIC equ $10FFF2	; word $C4EC while ChipCheck runs
+CHK_VBL_COUNT  equ $10FFF4	; word, IRQ1 count
+CHK_TMR_COUNT  equ $10FFF6	; word, IRQ2 count
+CHK_IRQ_MAGIC  equ $10FFF8	; long: the IRQ handlers count only when it holds CHK_IRQ_MAGIC_VAL
+CHK_IRQ_MAGIC_VAL equ $43484B49	; "CHKI"		; long: loop iterations before the reset
 
 ; Backup RAM write protection (MVS only, same HC259 latch, output Q6)
 REG_SRAMLOCK   equ $3A000D
@@ -53,6 +60,8 @@ INITIAL_PC_ORG          equ $402
 REG_WATCHDOG	equ $300001
 REG_LSPCMODE	equ $3C0006
 REG_IRQACK		equ $3C000C
+REG_TIMERHIGH	equ $3C0008
+REG_TIMERLOW	equ $3C000A
 
 BRICO_PORT_OUT	equ SYSTEM_ROM + $1FF02
 BRICO_PORT_EOT	equ BRICO_PORT_OUT - 2

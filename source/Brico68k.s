@@ -45,8 +45,8 @@
 	dc.l	EXC_OTHER			; 22 (reserved)
 	dc.l	EXC_OTHER			; 23 (reserved)
 	dc.l	EXC_INTERRUPT		; 24 spurious interrupt
-	dc.l	EXC_INTERRUPT		; 25 level 1 (VBLANK) - masked, the firmware runs at SR=$2700
-	dc.l	EXC_INTERRUPT		; 26 level 2 (HBLANK/timer) - masked
+	dc.l	IRQ1_HANDLER		; 25 level 1 (VBLANK) - masked (SR=$2700) except during ChipCheck
+	dc.l	IRQ2_HANDLER		; 26 level 2 (timer) - masked except during ChipCheck
 	dc.l	EXC_INTERRUPT		; 27 level 3 - masked
 	dc.l	EXC_INTERRUPT		; 28 level 4 - masked
 	dc.l	EXC_INTERRUPT		; 29 level 5 - masked
@@ -63,6 +63,8 @@
 	; Entry for extensions that keep running until the next command arrives
 	; (e.g. TestDAC): jump here with d0 = a non-zero BRICO_COMMAND_IN read
 	global  DISPATCH_COMMAND
+	; Unexpected interrupt report, also used by the ChipCheck IRQ handlers
+	global  EXC_INTERRUPT
 
 	section	text,code
 
@@ -108,6 +110,7 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_TEST_DAC,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestDAC",			"RGB DAC test pattern: 16 bands, one colour bit each (R4..R0, G4..G0, B4..B0, white), shown until the next command. P1=1: dark bit set. P1=$10+n: full screen band n (n=0..15), for scope/multimeter. (no WRAM used)"
 	DECLARE_EXTENSION EXT_TEST_TIMING,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestTiming",		"Video timing: LSPC line counter alive, +1 steps (stuck bit), $F8-$1FF range, lines per frame, NTSC/PAL bit, auto-animation counter, CPU cycles per frame. (no WRAM used)"
 	DECLARE_EXTENSION EXT_TEST_WATCHDOG,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestWatchdog",		"Watchdog: 1st run stops kicking it (expect a reset in ~0.13 s on MVS), run again to read the result and time. Uses WRAM $10FFE0. Not emulated by MAME on AES."
+	DECLARE_EXTENSION EXT_CHIP_CHECK,		BRICO_EXT_OUTPUT_TYPE_STRING,	"ChipCheck",		"Quick state of the board, one line per part (< 1 s): WRAM, palette RAM, VRAM slow/fast, LSPC2 registers, NEO-C1 ports, VBLANK/timer IRQ, Z80, NEO-D0 clocks (68KCLK vs the BricoNeo 1 ms, 24 MHz, 6 MHz). IRQs use WRAM (stack)."
 	DECLARE_EXTENSION EXT_TEST_SYSTYPE,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestSystype",		"SYSTYPE breakdown, AES/MVS-aware: TEST button, JAMMA sense on MVS; unmapped/open-bus on AES (bit layout per MAME neogeo.cpp). (no WRAM used)"
 	dc.l $ffffffff ; No more extensions
 

@@ -2,6 +2,7 @@
 ; Paste the whole file into the serial terminal (PuTTY, Tera Term...). Lines starting with ; are ignored.
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
 Echo $1234
+ChipCheck
 TestWRAM
 TestBRAM
 TestPRAM

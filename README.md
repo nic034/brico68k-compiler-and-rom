@@ -9,7 +9,7 @@ It is a BIOS-socket diagnostic for Neo Geo AES and MVS consoles.
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.2 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.8: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.9: tests the ROM on an emulated AES, no MAME and no BricoNeo needed |
 | `rom/Brico68k.bin` | Ready-to-use ROM, 128 KB padded with `$FF` (SHA-256 in `rom/Brico68k.bin.sha256`) |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
 | `tools/` | MAME test bench and its synthetic test cartridge |
@@ -79,8 +79,14 @@ MAME's driver:
   palette shows the difference.
 - **Options**: the watchdog and the Z80 program.
 - **Not emulated**: the YM2610 (ports `$04`-`$07` read 0) and sound, Z80 ROM banking, sprites,
-  the fix layer, interrupts, a cartridge and a memory card. The screen shows the backdrop colour
-  of each line, which is enough for TestDAC and Color.
+  the fix layer, a cartridge and a memory card. The screen shows the backdrop colour of each
+  line, which is enough for TestDAC and Color.
+- **Interrupts** (1.9): VBLANK (level 1, line `$F0` + 58 mclk), LSPC timer (level 2, 6 MHz
+  pixel clock, `REG_LSPCMODE` bits 4-7, `REG_TIMERHIGH/LOW`, reloads as in MAME) and level 3
+  pending from power-on, acknowledged through `REG_IRQACK`. Taken from MAME `neogeo.cpp`.
+- **ChipCheck progress**: while ChipCheck runs, the status bar shows its percentage (the test
+  writes it in WRAM, `$10FFF0`). The real BricoNeo console cannot show it: Brico16Bits displays
+  an extension's output only once it has ended.
 - **Not modelled either, in MAME or here**: the LSPC VRAM access delays of real boards (a read
   is valid 16 CPU cycles after the address write; 12 cycles between two writes). Code that
   accesses VRAM too fast passes in both and can fail on a real console.
@@ -88,13 +94,15 @@ MAME's driver:
   **Run script...** (or `--script FILE` in text mode) plays a whole file, such as
   `bench/real_aes_session.txt`.
 
-Checked against MAME, 32 test commands each time, with word-for-word identical output:
+Checked against MAME, 33 test commands each time (`emulator/compare_mame.py`), with
+word-for-word identical output (ChipCheck's two measured clock values may differ in the last
+digit, see Testing):
 
-- `aes` without a cartridge, against the Z80 without a program: 32 out of 32;
+- `aes` without a cartridge, against the Z80 without a program: 33 out of 33;
 - `aes` with the bench test cartridge, whose real MAME Z80 runs the same M1, against the
-  built-in test M1: 32 out of 32. This covers TestZ80, TestAudio and PlayEyeSnd.
-
-TestTiming gives 202,739 cycles per frame in both.
+  built-in test M1: 32 out of 33. This covers TestZ80, TestAudio and PlayEyeSnd. The one
+  difference is TestTiming, by one pass of its measuring loop (202,724 against 202,739
+  cycles over 4 frames): scheduling phase, not behaviour.
 
 Nothing to install with pip: the emulator uses only the Python standard library, and its core is
 embedded. The window needs Tkinter. It comes with Python on Windows (python.org installer); on
@@ -156,11 +164,13 @@ python Brico68k_Emulator.py --fault help
 ```
 
 Checked against the MAME bench with the same fault injected (`emulator/compare_mame_faults.py`):
-15 out of 15 outputs are identical. That covers WRAM data bits, a dead chip and address lines,
+25 out of 26 outputs are identical, ChipCheck included. That covers WRAM data bits, a dead chip and address lines,
 palette data and address lines, the line counter, and VRAM data. MAME's probes cannot model the
 palette bank select, VRAM address lines or the on-screen effect, so those were checked by hand:
 TestPRAM reports bank independence, TestVRAML or TestVRAMU fails on the right half, and the R4
-band turns black.
+band turns black. The one difference: the bench's palette address fault shares one store
+between both banks, so MAME's ChipCheck also reports a bank-select fault that a real board
+would not have.
 
 Text mode: `python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234"` and `--check`.
 Rebuild the core: `python3 emulator/build_core.py` (needs git and `pip install ziglang`; clones
@@ -169,13 +179,14 @@ build is reproducible: the same sources give the same core checksums.
 It fetches Musashi and the Z80 core at pinned commits.
 The build is reproducible: it gives the same binaries.
 
-## ROM contents: 23 extensions
+## ROM contents: 24 extensions
 
 Commands are typed on the Brico16Bits console. "No WRAM" means the test never relies on
 work RAM (no stack), so it still runs on a board with dead WRAM.
 
 | Command | No WRAM | What it does |
 |---|:-:|---|
+| **ChipCheck** | partly | Quick state of the board, one line per part, < 1 s (see below) |
 | Echo, Read, Write, WriteB, Dump | yes | Link check and raw memory access. Odd addresses are handled. |
 | TestInp | yes | Controllers, memory card detect, AES/MVS mode |
 | TestWRAM / TestBRAM / TestPRAM | yes | Data bus walking 1/0, patterns, address lines; PRAM checks both banks + bank select. TestBRAM is MVS only and destructive. |
@@ -191,6 +202,37 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | **TestWatchdog** | no | First run starves the watchdog; the second run reports the reset and its delay |
 
 Bold entries are new in this repository.
+
+### ChipCheck: quick state of the board
+
+One line per part, what to suspect when it fails, and the test to run next. About 0.35 s
+(0.6 s when the Z80 does not answer). The long tests stay the reference for a failing line.
+
+| Line | How it is checked | A failure points to |
+|---|---|---|
+| Work RAM | Walking 1/0 on both bytes, then each address line A1-A15 (stuck at 0 and at 1) | The bits (D3, D8-D15...) or lines (A9) named; upper/lower chip or NEO-C1 WRU/WRL/WWU/WWL |
+| Palette RAM | Same on both banks (A1-A12), plus bank select | Palette RAM chip or latch, NEO-B1 bus switch; bank: system latch |
+| VRAM slow / fast | Same through the LSPC2 (A0-A14 / A0-A10), with the LSPC access delays | The VRAM chip, LSPC2-A2 B/E or C/F bus |
+| LSPC2 registers | `REG_VRAMMOD` write and read-back | LSPC2-A2, NEO-C1 LSPOE/LSPWE |
+| NEO-C1 ports | P1, P2, STATUS_B, SOUND/STATUS_A each read from two places followed by different opcodes: a port nobody drives returns the open bus (the next opcode) | NEO-C1 input buffers |
+| VBLANK / timer IRQ | The 68000 takes level 1 and level 2 interrupts (needs WRAM for the stack: skipped if WRAM fails) | LSPC2-A2 interrupt outputs IP0/IP1, its timer |
+| Z80 | Standard sound driver handshake, as TestZ80 | No cartridge (inconclusive), else Z80, M1, Z80 RAM, latches |
+| NEO-D0: 68KCLK 12 MHz | CPU cycles counted until Brico16Bits clears the command, 1 ms after the launch (its own crystal): about +-5 % | 68000 clock |
+| NEO-D0: 24 MHz > LSPC2 | CPU cycles per video frame, 202,752 expected (same crystal: checks the dividers), and the frame rate from the 1 ms reference | LSPC2 line counter or the 24 MHz path |
+| NEO-D0: 6 MHz pixel | CPU cycles per LSPC timer tick, 2.00 expected | Pixel clock |
+| NEO-D0: Z80 control | Shown by the Z80 answer | - |
+
+Not visible from the 68000, so not in the table: the YM2610 interface, the 12 MHz to the
+cartridge (NEO-ZMC2), the memory card bank select (needs a multi-bank card), the joypad
+outputs, the LSPC2 -> NEO-B1 pixel pipeline (sprites, fix: TestDAC covers palette RAM to the
+DAC only), the watchdog (TestWatchdog; the wiki notes it can be disabled by jumper J2) and the
+sound itself (TestAudio). A part that stops the console from booting cannot be checked at all:
+then nothing answers.
+
+Limits: the floating-port check can only miss a dead port, not flag a healthy one (a bus pulled
+to a fixed value would hide it). The two clock lines measured against the BricoNeo are
+approximate. Failures of several parts at once (e.g. WRAM chip or NEO-C1 select) are listed
+together: the test cannot tell them apart.
 
 ### Changes compared with upstream Brico68k 1.35
 
@@ -216,7 +258,7 @@ Bold entries are new in this repository.
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `5859d6b` (2026-10-22, "Fixed remote keyboard detection"). Compatible **without modification**. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | announces BricoNeo **1.35**, 23 extensions, SHA-256 `79c5fb48de32345ddca940e232949d07d749e641cfa82bb7f3d9754ca6f02075` |
+| This ROM | announces BricoNeo **1.35**, 24 extensions, SHA-256 `cadca47e7e621b019d66391bd41ea24a05a41de0785712f059e924ad2cacab07` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
@@ -233,7 +275,7 @@ Brico16Bits recognises the byte order.
 3. Drop `rom/Brico68k.bin` at the root of the `BricoNeo` USB drive. The root loads it in RAM only
    and resets the console: your bank 0 is untouched, and the next power cycle brings it back.
    (Put it in a bank folder to keep it.)
-4. Type `?`: the Extensions section must list the 23 commands.
+4. Type `?`: the Extensions section must list the 24 commands.
 5. Paste the whole of `bench/real_aes_session.txt` into the terminal. The `;` lines are comments
    and `Delay` waits, both built into the BricoNeo console.
 6. In the emulator, **Compare** tab > **Open real console log...** (or
@@ -263,8 +305,16 @@ BRICO_SOUND_ROM=000-lo.lo BRICO_CART=/tmp/testcart python3 tools/mame_bench.py r
 BRICO_SOUND_ROM=000-lo.lo BRICO_DRIVER=neogeo BRICO_MVS_DIR=dumps/ python3 tools/mame_bench.py rom/Brico68k.bin TestWatchdog Echo:1 TestWatchdog
 ```
 
-Verified in MAME, on `aes`, `aes` with the test cartridge, and `neogeo`: all 23 extensions,
+Verified in MAME, on `aes`, `aes` with the test cartridge, and `neogeo`: all extensions,
 each well under the 3 s host limit.
+
+- ChipCheck: identical to MAME (`aes`, with and without the test cartridge), and under every
+  bench fault but one: the bench's palette address fault shares one store between both banks,
+  so MAME also reports a bank-select fault that a real board would not have. The two measured
+  clock values may differ in the last digit: the bench clears the command at the first read
+  after 1 ms of machine time (`tools/mame_ext_runner.lua`), the real host at exactly 1 ms.
+- With the test cartridge, TestTiming can differ from the emulator by one pass of its measuring
+  loop (202,724 against 202,739 cycles over 4 frames): scheduling phase, not behaviour.
 
 - TestDAC: 16 exact colours on screenshots.
 - TestTiming: 202,739 cycles per frame against 202,752 expected. Injected stuck counter bits,

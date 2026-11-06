@@ -21,9 +21,11 @@ Simulated faults (window: Faults tab, text mode: --fault): data bit stuck,
 address line stuck, WRAM chip dead, on WRAM, palette RAM (also seen on the
 screen), VRAM and the LSPC line counter - to see how each test reacts.
 NOT emulated: YM2610 and sound, Z80 ROM banking, sprites and fix layer (the
-screen shows the backdrop colour of each line), interrupts, cartridge, memory
-card, and the LSPC VRAM access delays of real boards (neither does MAME): code
-that accesses VRAM too fast passes here and can fail on a real console. Checked word for word against MAME: 32/32 commands with both Z80 setups.
+screen shows the backdrop colour of each line), cartridge, memory card, and the
+LSPC VRAM access delays of real boards (neither does MAME): code that accesses
+VRAM too fast passes here and can fail on a real console. Interrupts: VBLANK
+(IRQ1), LSPC timer (IRQ2) and IRQ3 at power-on, timed as in MAME. Checked word
+for word against MAME: 33/33 commands with both Z80 setups.
 
 Run: double-click, or  python Brico68k_Emulator.py [ROM]
 Text mode: python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234" [--rom ROM]
@@ -49,7 +51,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.8"
+APP_VERSION = "1.9"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -525,6 +527,7 @@ def main_cli(argv):
 # Diagnostic catalogue: how the tests are grouped, run and judged
 # ---------------------------------------------------------------------------
 CATEGORIES = [
+    ("Overview", ["ChipCheck"]),
     ("Memory", ["TestWRAM", "TestBRAM", "TestPRAM"]),
     ("Video", ["TestVRAML", "TestVRAMU", "MarchVRAML", "MarchVRAMU", "TestLSPC", "TestTiming", "TestDAC"]),
     ("Sound", ["TestZ80", "TestAudio", "PlayEyeSnd"]),
@@ -532,6 +535,7 @@ CATEGORIES = [
     ("Tools", ["Echo", "Read", "Write", "WriteB", "Dump", "Color"]),
 ]
 TOOLS = set(CATEGORIES[-1][1])
+CHK_PROGRESS, CHK_PROG_MAGIC = 0x10FFF0, 0x10FFF2   # ChipCheck progress word and its magic ($C4EC)
 # what the emulator cannot judge by itself
 LOOK = {"TestDAC": "Look at the screen: 16 bands, one colour bit each (a black band = dead bit).",
         "PlayEyeSnd": "Sound is not emulated: the eyecatcher music cannot be heard here."}
@@ -896,8 +900,8 @@ def main_gui(rom_arg=None):
     ttk.Label(sett, style="CardMuted.TLabel", justify="left", wraplength=760, text=(
         "68000 (Musashi, exact cycle counts), Z80 (4 MHz) running a test M1, WRAM, palette RAM (2 banks), "
         "system latch, LSPC registers and VRAM, line counter and frame timing, AES inputs with nothing plugged in, "
-        "open bus, Brico16Bits host (1 ms clear, 3 s timeout).\nNot emulated: YM2610 and sound, sprites, fix layer, "
-        "interrupts, cartridge, memory card. Checked word for word against MAME (32/32 commands).\n"
+        "open bus, VBLANK and timer interrupts, Brico16Bits host (1 ms clear, 3 s timeout).\nNot emulated: YM2610 "
+        "and sound, sprites, fix layer, cartridge, memory card. Checked word for word against MAME (33/33 commands).\n"
         "Keys: F5 reset, F8 pause, Ctrl+L clear the console, Up/Down command history.")).grid(
         row=13, column=0, columnspan=3, sticky="we")
     sett.columnconfigure(0, weight=1)
@@ -1090,7 +1094,8 @@ def main_gui(rom_arg=None):
 
     def record(name, line, stt, text, secs, forced=None):
         s, v = forced or classify(name, stt, text)
-        if name in ("TestZ80", "TestAudio") and s in ("FAIL", "WARN") and z80_var.get().startswith("No"):
+        if name in ("TestZ80", "TestAudio", "ChipCheck") and s in ("FAIL", "WARN") and z80_var.get().startswith("No") \
+                and (name != "ChipCheck" or "Z80" in v):
             v += "  Expected here: Settings > Z80 program is 'No program' (AES without cartridge)."
         st["results"][name] = {"status": s, "verdict": v, "text": text, "secs": secs, "line": line,
                                "when": time.strftime("%H:%M:%S")}
@@ -1464,7 +1469,15 @@ def main_gui(rom_arg=None):
                 st["plan_total"] = 0
         if st["busy_t0"] is not None and core:
             el = (core.lib.neo_cycles() - st["busy_t0"]) / 12e6
-            busy_var.set(f"{st['busy_name']} · {min(el, 3.0):.1f} s / 3 s"); busy_bar["value"] = min(el, 3.0)
+            pct = None
+            if core.lib.neo_peek16(CHK_PROG_MAGIC) == 0xC4EC:   # the test publishes its progress in WRAM
+                pct = min(100, core.lib.neo_peek16(CHK_PROGRESS))
+            if pct is not None:
+                busy_var.set(f"{st['busy_name']} · {pct} %"); busy_bar.configure(maximum=100); busy_bar["value"] = pct
+            else:
+                busy_var.set(f"{st['busy_name']} · {min(el, 3.0):.1f} s / 3 s")
+                busy_bar.configure(maximum=3.0); busy_bar["value"] = min(el, 3.0)
+            st["last_pct"] = pct
             lamp("host", C["warn"], "Host busy")
         elif st["wait_until"] is not None:
             busy_var.set("Waiting (beeps / watchdog)..."); busy_bar["value"] = 0; lamp("host", C["warn"], "Host waiting")
@@ -1549,7 +1562,7 @@ def main_gui(rom_arg=None):
                   "summary": summary, "fault_add": fault_add, "fault_remove": fault_remove,
                   "fault_clear": fault_clear, "fault_list": flb, "fault_form": (reg_var, kind_var, bit_var, lvl_var,
                   fault_add_form, ferr), "big": big, "thumb": thumb,
-                  "key_widgets": [b_power, b_reset, b_pause, b_open, b_runall, b_run, b_stop, tree, thumb]}
+                  "busy_bar": busy_bar, "key_widgets": [b_power, b_reset, b_pause, b_open, b_runall, b_run, b_stop, tree, thumb]}
     return root
 
 

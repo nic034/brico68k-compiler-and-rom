@@ -10,7 +10,7 @@ import mame_bench
 R = sys.argv[1]
 JOBS = ["Echo:0x1234","Read:0x320001","Read:0x380000","Read:0x300000","Write:0x5A:0x100001","WriteB:0xA5:0x100000","Dump:0x100000:8",
         "TestInp","TestWRAM","TestBRAM","TestPRAM","TestVRAML","TestVRAMU","MarchVRAML","MarchVRAMU","TestLSPC","Color:0x7FFF",
-        "TestStatusA","TestSystype","TestZ80","TestTiming","TestDAC","Echo:0x77","TestDAC:0x10","PlayEyeSnd","TestAudio","Echo:0x88",
+        "TestStatusA","TestSystype","TestZ80","TestTiming","ChipCheck","TestDAC","Echo:0x77","TestDAC:0x10","PlayEyeSnd","TestAudio","Echo:0x88",
         "TestWatchdog","Echo:0x99","TestWatchdog","Dump:0xC00000:16","Read:0x400000"]
 res, _ = mame_bench.run(R, JOBS)
 mame = [r for r in res if 'name' in r]
@@ -18,6 +18,12 @@ rom = open(R, 'rb').read()
 c = Core(os.environ.get('CORE', str(HERE / 'build' / 'libneocore_zig.so'))); c.load(rom); c.power_on(); c.lib.neo_set_options(int(os.environ.get("Z80","0")), 0)
 for _ in range(60): c.lib.neo_run_frame()
 h = Host(c, rom)
+def measured_only(a, b):
+    """ChipCheck measures the 68000 clock against the host's 1 ms clear, which the MAME bench can only
+    approximate (first command read after 1 ms of machine time): the last digit may differ."""
+    import re
+    f = lambda v: re.sub(r"~\d+\.\d (MHz|Hz)", r"~x \1", ''.join(chr(x) for x in v if x == 10 or 32 <= x < 127))
+    return f(a) == f(b)
 same = 0
 for job, m in zip(JOBS, mame):
     ext = h.find(job.split(':')[0])
@@ -36,7 +42,7 @@ for job, m in zip(JOBS, mame):
         st = 'stuck'
     mv = [int(x, 16) for x in m['hex'].split()] if m['hex'] else []
     if st == 'timeout': vals = []
-    ok = (st == m['status']) and (vals == mv)
+    ok = (st == m['status']) and (vals == mv or measured_only(vals or [], mv))
     same += ok
     if not ok:
         print(f"DIFF {job}: emu={st} {len(vals or [])} words / mame={m['status']} {len(mv)} words")

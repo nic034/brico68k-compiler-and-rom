@@ -4,6 +4,34 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-06 - ChipCheck, Emulator 1.9 (interrupts, progress)
+
+ROM SHA-256 `cadca47e7e621b019d66391bd41ea24a05a41de0785712f059e924ad2cacab07` (BricoNeo 1.35,
+24 extensions), rebuilt from `source/` to the same checksum.
+
+- **ChipCheck** (new extension): quick state of the board, one line per part, < 1 s:
+  WRAM, palette RAM (both banks + bank select), VRAM slow and fast (data bits and address
+  lines named, stuck at 0 or 1), LSPC2 registers, NEO-C1 ports driven (open-bus check),
+  VBLANK and timer interrupts, Z80 handshake, NEO-D0 outputs (68KCLK against the BricoNeo's
+  1 ms, 24 MHz to the LSPC2 by cycles per frame, 6 MHz pixel by the LSPC timer). Each failure
+  names what to suspect and the test to run next. Level 1/2 vectors now go to handlers that
+  count only during ChipCheck (otherwise unchanged: unexpected interrupt report).
+- **Emulator core**: VBLANK, LSPC timer and IRQ3 interrupts timed as in MAME `neogeo.cpp`.
+  Fixed time base: outside an execution slice the core counted the last slice twice, so the
+  host's 1 ms clear came up to ~0.6 ms early (outputs of the existing tests unchanged). The
+  1 ms clear now lands exactly.
+- **Emulator 1.9**: Overview category (ChipCheck first in Run all); the status bar shows
+  ChipCheck's progress in % (read from WRAM `$10FFF0`). The real BricoNeo console cannot:
+  Brico16Bits shows an output only at the end.
+- **MAME bench**: the command is cleared at the first read after 1 ms of machine time, as on
+  the real host, instead of one frame later.
+- Checks: 33/33 identical to MAME without cartridge; 32/33 with the test cartridge (TestTiming:
+  one loop pass, scheduling phase); 25/26 with faults (bench palette alias artifact, see README);
+  every emulator fault preset named exactly by ChipCheck; floating-port detection checked on a
+  variant reading unmapped addresses (emulator and MAME). `guiverify.py` 174/174.
+- Not checked on a real AES: the open-bus behaviour of an undriven port, the 1 ms pickup delay
+  (90 cycles assumed), and everything else on real hardware.
+
 ## 2026-11-05 - Emulator 1.8: compare with the real console, fault dictionary
 
 - **Compare** tab and `--compare LOG`: reads a PuTTY / Tera Term session log of the BricoNeo

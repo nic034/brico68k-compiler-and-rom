@@ -133,6 +133,23 @@ if lr then
   end)
 end
 
+-- 1 ms clear, as Brico16Bits (CommandExtension.cpp: sleep_ms(1) then clear):
+-- the first read of the command block 1 ms (machine time) or more after the
+-- launch sees it cleared. The frame-based clear below stays as a fallback.
+BRICO_T_LAUNCH = nil
+BRICO_CLEARED = true
+local function clear_cmd()
+  BRICO_CLEARED = true
+  w32(CMD_IN, 0); w32(CMD_IN + 4, 0); w32(CMD_IN + 8, 0); w32(CMD_IN + 12, 0)
+end
+BRICO_TAP_1MS = space:install_read_tap(0xc00090, 0xc0009f, "brico_clear_1ms", function(offset, data, mask)
+  if not BRICO_CLEARED and BRICO_T_LAUNCH and manager.machine.time:as_double() - BRICO_T_LAUNCH >= 0.001 then
+    clear_cmd()
+    return 0
+  end
+  return data
+end)
+
 -- Captures d'ecran : BRICO_SNAP="i,j" (numeros de commande, 1 = premiere)
 local SNAP = {}
 for n in string.gmatch(os.getenv("BRICO_SNAP") or "", "%d+") do SNAP[tonumber(n)] = true end
@@ -220,6 +237,8 @@ BRICO_SUB = emu.add_machine_frame_notifier(function()
       w32(CMD_IN + 8, j.p2)
       w32(CMD_IN + 12, j.p3)
       w32(CMD_IN, j.addr)
+      BRICO_T_LAUNCH = manager.machine.time:as_double()
+      BRICO_CLEARED = false
       if os.getenv("BRICO_TRACE") then
         f:write(string.format('{"set_cmd":"%08x","seen":"%08x","p1seen":"%08x","pc":"%x"}\n', j.addr, space:read_u32(0xc00090), space:read_u32(0xc00094), cpu.state["CURPC"].value))
         f:flush()
@@ -231,10 +250,9 @@ BRICO_SUB = emu.add_machine_frame_notifier(function()
   end
   if state == "run" then
     job_frames = job_frames + 1
-    if job_frames == 1 then
-      -- comme Brico16Bits (CommandExtension.cpp) : commande ET parametres
-      -- remis a 0 juste apres le lancement (1 ms sur le vrai hote, 1 trame ici)
-      w32(CMD_IN, 0); w32(CMD_IN + 4, 0); w32(CMD_IN + 8, 0); w32(CMD_IN + 12, 0)
+    if job_frames == 1 and not BRICO_CLEARED then
+      -- fallback: the extension did not read the command after 1 ms
+      clear_cmd()
     end
     if job_frames == 2 and os.getenv("BRICO_TRACE") then
       f:write(string.format('{"trace_pc":"%x","cmd_seen":"%08x","p1_seen":"%08x"}\n', cpu.state["CURPC"].value, space:read_u32(0xc00090), space:read_u32(0xc00094)))

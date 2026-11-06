@@ -4,6 +4,29 @@
 > Echo $1234
 0x1234
 [eot, 0 ms emulated]
+> ChipCheck
+Chip check: quick state of the board (details: the long tests)
+Part             Result  Detail
+Work RAM         OK
+Palette RAM      OK
+VRAM slow        OK
+VRAM fast        OK
+LSPC2 registers  OK      VRAMMOD read-back
+NEO-C1 ports     OK      P1, P2, STATUS_B, SOUND/STATUS_A driven
+VBLANK IRQ       OK      level 1
+Timer IRQ        OK      level 2
+Z80              CHECK   no answer: no cartridge? Else Z80, M1, Z80 RAM, latches. Next: TestZ80
+NEO-D0 outputs:
+  68KCLK 12 MHz  OK      ~12.0 MHz (BricoNeo 1 ms reference, +-5%)
+  24 MHz > LSPC2 OK      202752 cycles/frame (202752), ~59.3 Hz
+  6 MHz pixel    OK      2.00 CPU cycles per pixel (2.00)
+  Z80 control    --      not shown (no Z80 answer)
+  YM2610 I/F, 12 MHz > cartridge, memory card bank, joypad outputs:
+                 --      not visible from the 68000
+=> Test inconclusive: everything else OK, the Z80 did not answer
+Not covered: video output (TestDAC), watchdog (TestWatchdog), sound (TestAudio).
+
+[eot, 731 ms emulated]
 > TestWRAM
 Work RAM (WRAM) test
 > Data bus walking 1/0 Test Success
@@ -90,7 +113,7 @@ Video timing test (LSPC line counter, $3C0006)
 > Auto-animation counter: 8/8 frame steps OK
 => Test success
 
-[eot, 551 ms emulated]
+[eot, 906 ms emulated]
 > TestZ80
 Z80 handshake test (ACTIVE: stops any sound)
 Needs a standard SM1/M1 sound driver.
@@ -184,7 +207,7 @@ again to read the result (commands sent meanwhile are lost).
 > Delay 2000
 > TestWatchdog
 Watchdog test result:
-> The watchdog reset the 68000 after ~133 ms (44569 loops of 3 us)
+> The watchdog reset the 68000 after ~133 ms (44561 loops of 3 us)
   MAME MVS: 135 ms. Real boards: about 0.13 s.
 => Test success (run again to re-arm)
 

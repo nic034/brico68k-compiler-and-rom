@@ -48,6 +48,12 @@
 #define HOST_WORDS    2048                   /* Brico16Bits input buffer */
 #define WDOG_CYCLES   1622015u               /* 3244030 ticks of 24 MHz */
 #define Z80_DELAY     (CPU_HZ / 500u)        /* 2 ms answer delay */
+/* Interrupts, as MAME neogeo.cpp: IRQ1 VBLANK at line $F0 + 58 mclk, IRQ2 = LSPC timer (32-bit down
+ * counter on the 6 MHz pixel clock = 2 CPU cycles per tick, period = load + 1 ticks), IRQ3 pending from
+ * power-on until acknowledged. Timer reload on the VBLANK line + 1146 mclk when REG_LSPCMODE bit 6. */
+#define VBSTART       0xF0u
+#define VBL_IRQ_AT    (VBSTART * LINE_CYCLES + 29u)   /* 58 mclk */
+#define TMR_RELOAD_AT (VBSTART * LINE_CYCLES + 573u)  /* 1146 mclk */
 
 static uint8_t  bios[0x20000];               /* big-endian, as the 68000 sees it */
 static uint8_t  wram[0x10000];
@@ -56,6 +62,11 @@ static uint16_t vram[0x10000];
 static uint16_t vram_offset, vram_read_buffer, vram_modulo;
 static uint8_t  latch[8];                    /* system latch HC259 outputs */
 static uint8_t  anim_speed, anim_disabled, anim_frame_counter, anim_counter;
+static uint8_t  irq_vbl, irq_tmr, irq3, tmr_ctrl;
+static uint32_t tmr_load;
+static uint64_t tmr_next;                    /* CPU cycle when the timer reaches 0 (0 = stopped) */
+static void update_irq(void);
+static void tmr_arm(uint64_t t);
 static uint64_t now_base;                    /* cycles before the running slice */
 static uint64_t wdog_kick;
 static int      wdog_enabled;
@@ -134,7 +145,10 @@ static uint16_t frame_lines[VIS_LINES];
 static uint32_t frames;
 static uint32_t last_line;                   /* absolute line index of the last line event */
 
-static uint64_t now(void) { return now_base + (uint64_t)m68k_cycles_run(); }
+static int      in_exec;                     /* inside m68k_execute: m68k_cycles_run() is valid */
+/* Musashi keeps returning the last slice's count after m68k_execute() returns, so outside a slice
+ * the time is now_base alone (counting it twice put the host's 1 ms clear ~0.6 ms early). */
+static uint64_t now(void) { return now_base + (in_exec ? (uint64_t)m68k_cycles_run() : 0); }
 static unsigned pal_bank(void) { return latch[7] ? 0x1000 : 0; }
 /* palette cell index (13 bits: bank + 12-bit word address) after address faults */
 static unsigned pal_index(unsigned a) { return fault_addr(1, pal_bank() | ((a >> 1) & 0xFFF), 1) & 0x1FFF; }
@@ -317,8 +331,17 @@ static void write16(unsigned a, unsigned d, unsigned mask)  /* mask: 0xFF00 / 0x
 		case 0: vram_set_offset((uint16_t)d); break;
 		case 1: vram_write((uint16_t)d); break;
 		case 2: vram_modulo = (uint16_t)d; break;
-		case 3: anim_speed = (uint8_t)(d >> 8); anim_disabled = (uint8_t)((d >> 3) & 1); break;
-		default: break;                                     /* timer / IRQ ack: no interrupts modelled */
+		case 3: anim_speed = (uint8_t)(d >> 8); anim_disabled = (uint8_t)((d >> 3) & 1);
+		        tmr_ctrl = (uint8_t)(d & 0xF0); break;
+		case 4: tmr_load = (tmr_load & 0x0000FFFFu) | ((uint32_t)(d & 0xFFFF) << 16); break;
+		case 5: tmr_load = (tmr_load & 0xFFFF0000u) | (d & 0xFFFF);
+		        if (tmr_ctrl & 0x20) tmr_arm(now());
+		        break;
+		case 6: if (d & 1) irq3 = 0;
+		        if (d & 2) irq_tmr = 0;
+		        if (d & 4) irq_vbl = 0;
+		        update_irq(); break;
+		default: break;                                     /* $3C000E timer stop (PAL MVS): not modelled */
 		}
 		return;
 	}
@@ -351,6 +374,19 @@ void m68k_write_memory_32(unsigned int a, unsigned int v) { write16(a, v >> 16, 
 unsigned int m68k_read_disassembler_8(unsigned int a) { return m68k_read_memory_8(a); }
 unsigned int m68k_read_disassembler_16(unsigned int a) { return m68k_read_memory_16(a); }
 unsigned int m68k_read_disassembler_32(unsigned int a) { return m68k_read_memory_32(a); }
+
+static void update_irq(void)
+{
+	m68k_set_irq(irq3 ? 3 : irq_tmr ? 2 : irq_vbl ? 1 : 0);
+}
+
+static void tmr_arm(uint64_t t) { tmr_next = t + 2ull * ((uint64_t)tmr_load + 1); }
+
+static uint64_t frame_event(uint64_t t, uint64_t at)    /* next time >= t at offset `at` of a frame */
+{
+	uint64_t f = t / FRAME_CYCLES * FRAME_CYCLES + at;
+	return f >= t ? f : f + FRAME_CYCLES;
+}
 
 static void reset_peripherals(void)
 {
@@ -416,8 +452,10 @@ EXPORT void neo_power_on(void)
 	m68k_set_cpu_type(M68K_CPU_TYPE_68000);
 	m68k_set_reset_instr_callback(neo_reset_instr);
 	now_base = 0; last_line = 0; frames = 0; wdog_resets = 0;
+	irq_vbl = irq_tmr = 0; irq3 = 1; tmr_ctrl = 0; tmr_load = 0; tmr_next = 0;
 	reset_peripherals();
 	m68k_pulse_reset();
+	update_irq();
 	wdog_kick = 0;
 }
 
@@ -427,6 +465,7 @@ EXPORT void neo_reset(void)                  /* console reset button: RAM kept *
 	h_state = H_IDLE;
 	if (h_clear_pending) { memset(&bios[0x90], 0, 16); h_clear_pending = 0; }
 	m68k_pulse_reset();
+	update_irq();
 	wdog_kick = now();
 }
 
@@ -443,8 +482,32 @@ EXPORT void neo_run(uint32_t cycles)
 	while (now_base < end) {
 		uint64_t next_line = ((now_base / LINE_CYCLES) + 1) * LINE_CYCLES;
 		uint64_t stop = next_line < end ? next_line : end;
+		uint64_t ev_vbl = frame_event(now_base, VBL_IRQ_AT), ev_rl = frame_event(now_base, TMR_RELOAD_AT);
+		if (ev_vbl == now_base) ev_vbl += FRAME_CYCLES;
+		if (ev_rl == now_base) ev_rl += FRAME_CYCLES;
+		if (ev_vbl < stop) stop = ev_vbl;
+		if (ev_rl < stop) stop = ev_rl;
+		if (tmr_next && tmr_next > now_base && tmr_next < stop) stop = tmr_next;
+		if (h_clear_pending && h_t0 + HOST_CLEAR > now_base && h_t0 + HOST_CLEAR < stop)
+			stop = h_t0 + HOST_CLEAR;           /* the host's 1 ms clear lands on time */
+		uint64_t before = now_base;
+		in_exec = 1;
 		int used = m68k_execute((int)(stop - now_base));
+		in_exec = 0;
 		now_base += (uint64_t)used;
+		/* interrupt sources whose time came during this slice (MAME timers) */
+		{
+			int changed = 0;
+			uint64_t v = frame_event(before + 1, VBL_IRQ_AT);
+			if (v <= now_base) { irq_vbl = 1; changed = 1; }
+			uint64_t r = frame_event(before + 1, TMR_RELOAD_AT);
+			if (r <= now_base && (tmr_ctrl & 0x40)) tmr_arm(r);
+			while (tmr_next && tmr_next <= now_base) {
+				if (tmr_ctrl & 0x10) { irq_tmr = 1; changed = 1; }
+				if (tmr_ctrl & 0x80) tmr_arm(tmr_next); else tmr_next = 0;
+			}
+			if (changed) update_irq();
+		}
 		while ((uint64_t)(last_line + 1) * LINE_CYCLES <= now_base) {
 			last_line++;
 			line_event(last_line);

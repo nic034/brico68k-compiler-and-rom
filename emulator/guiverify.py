@@ -89,8 +89,8 @@ pump(1.5)
 ext_rows = [i for g in tree.get_children() for i in tree.get_children(g)]
 groups = [tree.item(g, "text") for g in tree.get_children()]
 check("auto power on", st["core"] is not None and st["running"])
-check("23 extensions in the sidebar", len(ext_rows) == 23, str(len(ext_rows)))
-check("grouped by category", groups == ["Memory", "Video", "Sound", "Inputs and system", "Tools"], str(groups))
+check("24 extensions in the sidebar", len(ext_rows) == 24, str(len(ext_rows)))
+check("grouped by category", groups == ["Overview", "Memory", "Video", "Sound", "Inputs and system", "Tools"], str(groups))
 check("Tools group collapsed", not tree.item("cat_Tools", "open"))
 check("lamps", "running" in b["lamps"]["cpu"][1].cget("text") and "ready" in b["lamps"]["host"][1].cget("text"))
 check("all badges empty before a run", all(badge(n) == "" for n in ext_rows))
@@ -102,7 +102,7 @@ b["run_all"](); pump(0.2)
 check("Run all button shows progress", "Running" in str([w.cget("text") for w in b["key_widgets"][4:5]]))
 check("Run all finished", wait_idle(60))
 pump(0.3)
-expect = {"TestWRAM": "PASS", "TestBRAM": "N/A", "TestPRAM": "PASS", "TestVRAML": "PASS", "TestVRAMU": "PASS",
+expect = {"ChipCheck": "PASS", "TestWRAM": "PASS", "TestBRAM": "N/A", "TestPRAM": "PASS", "TestVRAML": "PASS", "TestVRAMU": "PASS",
           "MarchVRAML": "PASS", "MarchVRAMU": "PASS", "TestLSPC": "PASS", "TestTiming": "PASS", "TestDAC": "LOOK",
           "TestZ80": "PASS", "TestAudio": "PASS", "PlayEyeSnd": "N/A", "TestInp": "INFO", "TestStatusA": "INFO",
           "TestSystype": "INFO", "TestWatchdog": "PASS"}
@@ -110,8 +110,8 @@ for n, e in expect.items():
     check(f"Run all badge {n} = {e}", badge(n) == e, str(badge(n)))
 check("tools not run by Run all", all(badge(n) == "" for n in m.TOOLS))
 check("watchdog on by default", b["wd"].get() is True)
-check("summary line", b["summary"].get().startswith("11 pass") and "1 look" in b["summary"].get(), b["summary"].get())
-check("console 'Run all done' with summary", "Run all done: 11 pass" in console())
+check("summary line", b["summary"].get().startswith("12 pass") and "1 look" in b["summary"].get(), b["summary"].get())
+check("console 'Run all done' with summary", "Run all done: 12 pass" in console())
 check("TestDAC last: 16 colours on screen", len(set(st["colours"])) == 16, str(len(set(st["colours"]))))
 check("report shows the last test", "TestDAC" in report() and "LOOK" in b["verdict"].cget("text"))
 shot("02_runall.png")
@@ -170,7 +170,7 @@ check("WRAM byte write keeps the other byte", "0x0056" in console()[-40:], conso
 
 # built-ins, errors, history
 b["send"]("Help"); pump(0.2)
-check("Help lists the extensions", "23 extensions in this ROM" in console())
+check("Help lists the extensions", "24 extensions in this ROM" in console())
 b["send"]("Nope"); pump(0.2)
 check("unknown command message", "Unknown command: Nope" in console())
 b["cmd"].set(""); b["history"](-1)
@@ -186,6 +186,7 @@ check("Z80 lamp follows the setting", "no program" in b["lamps"]["z80"][1].cget(
 b["run_all"](); wait_idle(60); pump(0.2)
 check("no program: TestZ80 CHECK", badge("TestZ80") == "CHECK", str(badge("TestZ80")))
 check("no program: TestAudio FAIL", badge("TestAudio") == "FAIL", str(badge("TestAudio")))
+check("no program: ChipCheck CHECK (Z80 only)", badge("ChipCheck") == "CHECK", str(badge("ChipCheck")))
 tree.selection_set("TestAudio"); pump(0.1)
 check("no program: failure marked as expected", "Expected here" in b["verdict"].cget("text"))
 b["z80"].set("Test M1 (handshake only)"); pump(0.1)
@@ -194,7 +195,7 @@ b["z80"].set("Test M1 (handshake only)"); pump(0.1)
 b["wd"].set(False); pump(0.1)
 b["run_all"](); wait_idle(60); pump(0.2)
 check("watchdog off: TestWatchdog N/A", badge("TestWatchdog") == "N/A", str(badge("TestWatchdog")))
-check("watchdog off: 10 pass", b["summary"].get().startswith("10 pass"), b["summary"].get())
+check("watchdog off: 11 pass", b["summary"].get().startswith("11 pass"), b["summary"].get())
 tree.selection_set("TestWatchdog"); pump(0.1)
 check("watchdog off explained", "switched off in Settings" in b["verdict"].cget("text"), b["verdict"].cget("text"))
 b["wd"].set(True); pump(0.1)
@@ -218,6 +219,17 @@ check("report says RUNNING, not the old result", b["verdict"].cget("text").start
 shot("03_busy.png")
 wait_idle()
 check("busy indicator cleared", b["busy"].get() == "")
+seen_pct = set()
+b["send"]("ChipCheck")
+t_end = time.time() + 5
+while time.time() < t_end and st["host"].pending:
+    pump(0.02)
+    if "%" in b["busy"].get():
+        if not seen_pct:
+            shot("03b_chipcheck_progress.png")
+        seen_pct.add(b["busy"].get())
+check("ChipCheck shows a progress percentage", len(seen_pct) >= 2, str(sorted(seen_pct)))
+wait_idle()
 b["reset"](); pump(0.3)
 b["send"]("Echo 3"); wait_idle()
 check("works after Reset", "0x0003" in console()[-40:])
@@ -311,17 +323,17 @@ def wait_job(timeout):
 
 ct = b["compare_tree"]
 b["compare_open"](str(OUT / "fake_healthy.log"))
-check("compare: healthy log replayed", wait_job(120) and len(ct.get_children()) == 18, str(len(ct.get_children())))
+check("compare: healthy log replayed", wait_job(120) and len(ct.get_children()) == 19, str(len(ct.get_children())))
 check("compare: healthy log all same", all(ct.item(i, "values")[3] == "same" for i in ct.get_children()))
-check("compare: summary shown", "18 same" in b["compare_info"].get(), b["compare_info"].get())
+check("compare: summary shown", "19 same" in b["compare_info"].get(), b["compare_info"].get())
 b["compare_open"](str(OUT / "fake_wram.log"))
 wait_job(120)
 diffs = [ct.item(i, "values")[0] for i in ct.get_children() if ct.item(i, "values")[3] == "DIFFERENT"]
-check("compare: dead WRAM chip log -> 4 different", diffs == ["TestWRAM", "TestAudio", "TestWatchdog", "TestWatchdog"],
+check("compare: dead WRAM chip log -> 5 different", diffs == ["ChipCheck", "TestWRAM", "TestAudio", "TestWatchdog", "TestWatchdog"],
       str(diffs))
 pump(0.2)
 ctext = b["compare_text"].get("1.0", "end")
-check("compare: first difference shown as a diff", "TestWRAM" in ctext and "+=> Test Failure" in ctext, ctext[:200])
+check("compare: first difference shown as a diff", "ChipCheck" in ctext and "+Work RAM         FAIL" in ctext, ctext[:300])
 shot("08_compare.png")
 b["compare_diagnose"]()
 check("diagnosis finished", wait_job(600))
