@@ -648,7 +648,9 @@ FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4, "bios
 REGION_NAMES = {0: "WRAM", 1: "Palette RAM", 2: "VRAM lower (slow)", 3: "VRAM upper (fast)",
                 4: "LSPC line counter", 5: "BIOS socket (68000 -> BricoNeo)", 6: "Cartridge slot P bus"}
 FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2, "float": 3, "strobe": 2}
-STROBES = ["portwel", "portweu", "romoel", "romoeu"]
+# 0-3 strobes; 4-5 /PORTOE (P2 output enable); 6-9 the OE dead behind a 245 / NEO-G0 / NEO-BUF (bus hold)
+STROBES = ["portwel", "portweu", "romoel", "romoeu", "portoel", "portoeu",
+           "romoel245", "romoeu245", "portoel245", "portoeu245"]
 # the BIOS socket has no data faults: a bad D line stops the boot, nothing to test
 DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8, 5: -1, 6: 15}
 ADDR_RANGE = {0: (1, 15), 1: (1, 13), 2: (0, 14), 3: (0, 10), 5: (1, 16), 6: (1, 19)}
@@ -659,7 +661,8 @@ FAULT_HELP = ("Fault syntax: REGION:data:BIT:0|1 (data bit stuck), REGION:addr:L
               "address WRAM A1-A15, pal A1-A12 + 13 = bank select, vramlo 0-14, vramhi 0-10,\n"
               "bios A1-A16 (socket, 68000 -> BricoNeo; address faults only), cart A1-A19 (slot).\n"
               "Cartridge slot: cart:data:BIT:0|1, cart:addr:LINE:0|1, cart:float:BIT (D line unstable),\n"
-              "cart:strobe:portwel|portweu|romoel|romoeu (strobe dead). Needs --cart test or diag.\n"
+              "cart:strobe:portwel|portweu|romoel|romoeu|portoel|portoeu (strobe dead; the OE ones: the 68000 reads\n"
+              "its prefetched word), ...245 suffix (romoel245 ...): OE dead behind a 245, bus hold. Needs --cart test or diag.\n"
               "Example: --fault wram:data:5:1 --fault pal:addr:13:0 --fault bios:addr:15:1")
 
 
@@ -671,7 +674,7 @@ def parse_fault(spec):
     region, kind = FAULT_REGIONS[parts[0]], FAULT_KINDS[parts[1]]
     if kind == 2 and region == 6:
         if parts[1] != "strobe" or len(parts) != 3 or parts[2] not in STROBES:
-            raise ValueError("cartridge strobe: cart:strobe:portwel|portweu|romoel|romoeu")
+            raise ValueError("cartridge strobe: cart:strobe:" + "|".join(STROBES))
         return region, kind, 0, STROBES.index(parts[2])
     if kind == 3 and region == 6:
         if len(parts) != 3 or not parts[2].isdigit() or not 0 <= int(parts[2]) <= 15:

@@ -124,7 +124,7 @@ EXT_CHIP_CHECK:
 .bwLo:
 	PrintLn " (lower chip D0-D7)"
 .bwHint:
-	PrintLn "                 -> that chip's write strobe: NEO-C1 WWU/WWL, 68000 UDS/LDS. Next: TestWRAM"
+	PrintLn "     -> that chip's write strobe: NEO-C1 WWU/WWL, 68000 UDS/LDS. Next: TestWRAM"
 .bwEnd:
 	Progress 15
 
@@ -470,7 +470,7 @@ EXT_CHIP_CHECK:
 	move.l d5,d0
 	JsrA6 printDec
 	PrintLn " cycles/frame instead of 202752"
-	PrintLn "                 -> LSPC2-A2 line counter (stuck bit?) or 24 MHz path. Next: TestTiming"
+	PrintLn "     -> LSPC2-A2 line counter (stuck bit?) or 24 MHz path. Next: TestTiming"
 .frEnd:
 
 	; 6 MHz pixel clock: CPU cycles per timer tick (x100)
@@ -570,7 +570,7 @@ EXT_CHIP_CHECK:
 .v8:
 	PrintLn ""
 .notCovered:
-	PrintLn "Not covered: video output (TestDAC), watchdog (TestWatchdog), sound (TestAudio)."
+	PrintLn "Not covered: video (TestDAC), watchdog (TestWatchdog), sound (TestAudio)."
 	WriteEOT
 	jmp WAIT_FOR_COMMAND
 
@@ -790,34 +790,34 @@ memReport_JsrA6:
 	move.l a4,d0
 	and.w #$FF00,d0
 	beq .hwLower
-	PrintLn "                 -> both bytes: 68000 data bus, NEO-C1, both WRAM chips. Next: TestWRAM"
+	PrintLn "     -> both bytes: 68000 data bus, NEO-C1, both WRAM chips. Next: TestWRAM"
 	jmp (a5)
 .hwUpper:
-	PrintLn "                 -> D8-D15: upper WRAM chip, or NEO-C1 WRU/WWU. Next: TestWRAM"
+	PrintLn "     -> D8-D15: upper WRAM chip, or NEO-C1 WRU/WWU. Next: TestWRAM"
 	jmp (a5)
 .hwLower:
-	PrintLn "                 -> D0-D7: lower WRAM chip, or NEO-C1 WRL/WWL. Next: TestWRAM"
+	PrintLn "     -> D0-D7: lower WRAM chip, or NEO-C1 WRL/WWL. Next: TestWRAM"
 	jmp (a5)
 .hwAddr:
-	PrintLn "                 -> WRAM address pins, 68000 address bus. Next: TestWRAM"
+	PrintLn "     -> WRAM address pins, 68000 address bus. Next: TestWRAM"
 	jmp (a5)
 .hPal:
 	cmp.w #F_PAL,d5
 	bne .hSlow
 	tst.w d0
 	beq .hpAddr
-	PrintLn "                 -> palette RAM chip of those bits, NEO-G0 (data buffer, write enable). Next: TestPRAM, TestDAC"
+	PrintLn "     -> palette RAM chip of those bits, NEO-G0 (data buffer, write enable). Next: TestPRAM, TestDAC"
 	jmp (a5)
 .hpAddr:
-	PrintLn "                 -> palette RAM address (NEO-B1 address switch), bank: system latch. Next: TestPRAM"
+	PrintLn "     -> palette RAM address (NEO-B1 address switch), bank: system latch. Next: TestPRAM"
 	jmp (a5)
 .hSlow:
 	cmp.w #F_VRAML,d5
 	bne .hFast
-	PrintLn "                 -> slow VRAM chip of those bits/lines, LSPC2-A2 B/E bus. Next: MarchVRAML"
+	PrintLn "     -> slow VRAM chip of those bits/lines, LSPC2-A2 B/E bus. Next: MarchVRAML"
 	jmp (a5)
 .hFast:
-	PrintLn "                 -> fast VRAM chip of those bits/lines, LSPC2-A2 C/F bus. Next: MarchVRAMU"
+	PrintLn "     -> fast VRAM chip of those bits/lines, LSPC2-A2 C/F bus. Next: MarchVRAMU"
 	jmp (a5)
 
 ; ------------------------------------------------------------------------

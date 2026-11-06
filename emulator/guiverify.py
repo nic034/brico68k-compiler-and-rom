@@ -290,10 +290,10 @@ b["fault_clear"](); pump(0.1)
 b["cart"].set("diag"); pump(0.3)
 check("PROG board inserted (lamp)", "PROG board" in b["lamps"]["cart"][1].cget("text"))
 b["send"]("CartTest"); wait_idle()
-check("PROG board: CartTest PASS (write/read test)", badge("CartTest") == "PASS" and "Diagnostic PROG board" in console()[-1500:])
+check("PROG board: CartTest PASS (write/read test)", badge("CartTest") == "PASS" and "p-bus test (diag cart)" in console()[-1500:])
 kind.set("Strobe dead"); pump(0.05); lvl.set("ROMOEU"); add_form(); pump(0.1)
 b["send"]("CartTest"); wait_idle()
-check("PROG board, /ROMOEU dead -> FAIL on the P1 window", badge("CartTest") == "FAIL" and "P1 window (/ROMOE)" in console()[-400:], console()[-400:])
+check("PROG board, /ROMOEU dead -> FAIL on the output enable test", badge("CartTest") == "FAIL" and "P1 D8-D15: output dead" in console()[-400:], console()[-400:])
 b["fault_clear"](); pump(0.1)
 fs = os.environ.get("GV_FAKESETS")
 if fs:
@@ -385,7 +385,10 @@ b["compare_apply"](); pump(0.2)
 check("Apply to Faults adds the fault", any("upper (D8-D15) chip dead" in b["fault_list"].get(i)
                                           for i in range(b["fault_list"].size())))
 b["compare_open"](str(OUT / "fake_wram.log")); wait_job(120)
-check("with the fault applied the log matches", all(ct.item(i, "values")[3] == "same" for i in ct.get_children()))
+# TestAudio needs the stack in WRAM: with a dead WRAM chip the 68000 runs wild and what it prints depends on
+# the timing of the host's reads, so it is the one command that cannot be compared exactly
+check("with the fault applied the log matches", all(ct.item(i, "values")[3] == "same" for i in ct.get_children()
+                                                  if ct.item(i, "values")[0] != "TestAudio"))
 b["fault_clear"](); pump(0.1)
 
 # window sizes, every tab

@@ -455,7 +455,7 @@ RAM_ERROR:
 .st10:
 	cmp.b #10,d7
 	bne .st4
-	PrintLn "  Step     : bank 0 / bank 1 independence (bank select: system latch, palette RAM A12)"
+	PrintLn "  Step     : bank 0 / bank 1 independence (system latch, palette A12)"
 	bra .stEnd
 .st4:
 	Print "  Step     : March C- element M"
@@ -533,7 +533,7 @@ CHIP_REPORT:					; d6.w = bad bits (also reached from ADDR_ERROR)
 	cmp.b #2,d7
 	bne .hintPal
 	swap d7
-	PrintLn "  Hint     : write strobe of that chip (WRAM: NEO-C1 WWU/WWL, 68000 UDS/LDS)"
+	PrintLn "  Hint     : that chip's write strobe (WRAM: NEO-C1 WWU/WWL, UDS/LDS)"
 	bra .bank
 .hintPal:						; palette data error (not address, not bank select):
 	cmp.b #3,d7					; the data goes through NEO-G0, which also makes the
@@ -543,7 +543,7 @@ CHIP_REPORT:					; d6.w = bad bits (also reached from ADDR_ERROR)
 	swap d7
 	cmp.b #2,d7					; region: palette?
 	bne .bank
-	PrintLn "  Hint     : that chip, or NEO-G0 (palette data buffer, palette RAM write enable)"
+	PrintLn "  Hint     : that chip, or NEO-G0 (palette data buffer, write enable)"
 	bra .bank
 .hintEnd:
 	swap d7
@@ -587,15 +587,15 @@ ADDR_ERROR:
 	PrintLn ""
 	cmp.b #3,d7
 	bne.s .anotCart
-	PrintLn "  Cartridge slot address line: slot contact, cartridge edge or console trace."
+	PrintLn "  Cartridge slot address line: contact, edge or console trace."
 	jmp RAM_FAILED				; one 16-bit SRAM: no byte to name
 .anotCart:
 	cmp.b #2,d7
 	beq .apal
-	PrintLn "  Both chips: 68000 address bus or both chips' pins; one chip only: that chip's pin."
+	PrintLn "  Both chips: 68000 address bus or their pins; one chip only: its pin."
 	bra .aend
 .apal:
-	PrintLn "  Both chips: NEO-B1 palette address switch or both chips' pins; one chip: that chip's pin."
+	PrintLn "  Both chips: NEO-B1 address switch or their pins; one chip: its pin."
 .aend:
 	jmp CHIP_REPORT
 
@@ -637,9 +637,9 @@ RAM_END_OF_TEST:
 RAMT_TXT_WRAM:
 	dc.b "Work RAM (WRAM) test",10,0
 RAMT_TXT_BRAM:
-	dc.b "Backup RAM (BRAM) test - DESTRUCTIVE: erases the MVS backup RAM (bookkeeping, settings, scores)",10,0
+	dc.b "Backup RAM (BRAM) test - DESTRUCTIVE: erases the MVS backup RAM (settings, scores)",10,0
 RAMT_TXT_BRAM_AES:
-	dc.b "  N/A: AES detected (STATUS_B bit7=0) - the AES has no backup RAM ($D00000 unmapped, saves go to the memory card)",10
+	dc.b "  N/A: AES detected (STATUS_B bit7=0): no backup RAM, saves go to the memory card",10
 	dc.b "=> Test N/A (AES)",10,0
 RAMT_TXT_PRAM:
 	dc.b "Palette RAM (PRAM) test - both banks",10,0

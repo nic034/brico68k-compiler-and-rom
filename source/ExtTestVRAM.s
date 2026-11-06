@@ -400,7 +400,7 @@ EXT_TEST_VRAM:
 	cmp.w #16,d4
 	bne .eaL
 	PrintLn ""
-	PrintLn "  Shared by both chips: the bad bits below show which chip(s) see it."
+	PrintLn "  Both chips: the bad bits below show which chip(s) see it."
 
 .chips:							; d6 = bad bits, d5.w = zone
 	Print "  Chip     : "

@@ -61,7 +61,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.12"
+APP_VERSION = "1.13"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -1388,7 +1388,7 @@ def main_gui(rom_arg=None):
             cb_lvl.configure(values=[s.upper() for s in STROBES])
             if lvl_var.get().lower() not in STROBES:
                 lvl_var.set("ROMOEU")
-            range_var.set("Never asserted: its byte is not written (PORTWE) or floats high (ROMOE). Needs a cartridge."); return
+            range_var.set("Never asserted: byte not written (PORTWE), or not driven (OE: the 68000 reads its prefetch; 245: last write). Needs a cartridge."); return
         if k.startswith("Chip"):
             bit_lbl.configure(text="Chip"); sp_bit.grid_remove(); lvl_lbl.configure(text="Lane")
             cb_lvl.configure(values=["lower (D0-D7)", "upper (D8-D15)"])

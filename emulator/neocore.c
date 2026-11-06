@@ -121,7 +121,11 @@ static uint64_t h_done_cycles;
  *           writes lost, reads $FF (floating bus pulled up)
  *         3 BIOS socket line unstable (cut and floating, bad contact): a random
  *           level on each access; slot: data line D0-D15 unstable
- *         2 slot: strobe dead (value 0 /PORTWEL, 1 /PORTWEU, 2 /ROMOEL, 3 /ROMOEU)
+ *         2 slot: strobe dead (value 0 /PORTWEL, 1 /PORTWEU, 2 /ROMOEL, 3 /ROMOEU,
+ *           4 /PORTOEL, 5 /PORTOEU: the lane is not driven and the 68000 reads the
+ *           word it prefetched; 6-9 the same output (ROMOEL, ROMOEU, PORTOEL, PORTOEU)
+ *           behind a 245 / NEO-G0 / NEO-BUF: the lane gives back the last value
+ *           written to the cartridge side, as the diag BIOS assumes)
  * Address lines: WRAM A1-A15, palette A1-A12 + 13 = bank select (latch Q7),
  * VRAM lower 0-14, VRAM upper 0-10 (VRAM word address). Faults survive
  * power cycles, as a real hardware fault does. */
@@ -172,6 +176,9 @@ static unsigned socket_addr(unsigned o)
 }
 static unsigned bios_word(unsigned o) { return (bios[o] << 8) | bios[o + 1]; }
 
+static uint16_t open_bus(void);
+static unsigned cart_hold = 0xFFFF;          /* last word on the cartridge-side data lines (bus hold) */
+
 static int slot_strobe_dead(int s)
 {
 	for (int i = 0; i < nfaults; i++)
@@ -202,14 +209,20 @@ static unsigned cart_read(unsigned a)
 		w = (cart[o] << 8) | cart[o + 1];
 	} else
 		w = (cart[o] << 8) | cart[o + 1];
-	if (!p2 && slot_strobe_dead(2)) w |= 0x00FF;                   /* lane not driven: floats high */
-	if (!p2 && slot_strobe_dead(3)) w |= 0xFF00;
+	/* output enable dead: nothing drives the lane. Direct: the bus keeps the word the CPU
+	 * prefetched. Behind a 245: the cartridge side keeps the last value written to it. */
+	int oe = p2 ? 4 : 2, h = p2 ? 8 : 6;
+	if (slot_strobe_dead(oe))     w = (w & 0xFF00) | (open_bus() & 0x00FF);
+	if (slot_strobe_dead(oe + 1)) w = (w & 0x00FF) | (open_bus() & 0xFF00);
+	if (slot_strobe_dead(h))      w = (w & 0xFF00) | (cart_hold & 0x00FF);
+	if (slot_strobe_dead(h + 1))  w = (w & 0x00FF) | (cart_hold & 0xFF00);
 	return slot_data(w);
 }
 
 static void cart_write(unsigned a, unsigned d, unsigned mask)     /* a in $200000-$2FFFFF */
 {
 	cart_writes++;
+	cart_hold = (cart_hold & ~mask) | (d & mask);
 	if (mask & 0x00FF) {                                           /* /PORTWEL: a game cart latches its bank */
 		cart_latch_writes++;
 		if (cart_mode == 1 && cart_banks) cart_bank = (slot_data(d) & 7) % cart_banks;
@@ -415,6 +428,7 @@ static unsigned read16(unsigned a, int lsb_only)
 static void write16(unsigned a, unsigned d, unsigned mask)  /* mask: 0xFF00 / 0x00FF / 0xFFFF */
 {
 	a &= 0xFFFFFE;
+	if (a < 0x100000) { cart_hold = (cart_hold & ~mask) | (d & mask); return; }   /* P1: no strobe, the lines still move */
 	if (a >= 0x100000 && a < 0x200000) {
 		unsigned o = wram_index(a);
 		if ((mask & 0xFF00) && !lane_dead(1)) wram[o] = (uint8_t)(d >> 8);
@@ -681,6 +695,7 @@ EXPORT int neo_cart_load(int mode, const uint8_t *data, int len)
 	cart_banks = mode == 1 ? (cart_size - 0x100000) / 0x100000 : 0;
 	cart_bank = 0;
 	cart_writes = cart_latch_writes = 0;
+	cart_hold = 0xFFFF;
 	return 0;
 }
 EXPORT int neo_cart_bank(void) { return (int)cart_bank; }
@@ -694,7 +709,7 @@ EXPORT int neo_fault_add(int region, int kind, int bit, int value)
 	static const int data_bits[7] = { 15, 15, 15, 15, 8, -1, 15 };
 	static const int addr_lo[7] = { 1, 1, 0, 0, -1, 1, 1 }, addr_hi[7] = { 15, 13, 14, 10, -1, 16, 19 };
 	if (kind < 0 || kind > 3 || nfaults >= MAX_FAULTS || region < 0 || region > 6) return -1;
-	if (value < 0 || value > ((region == 6 && kind == 2) ? 3 : 1)) return -1;
+	if (value < 0 || value > ((region == 6 && kind == 2) ? 9 : 1)) return -1;
 	if (kind == 0 && (bit < 0 || bit > data_bits[region])) return -1;
 	if (kind == 1 && (addr_lo[region] < 0 || bit < addr_lo[region] || bit > addr_hi[region])) return -1;
 	if (kind == 2 && region != 0 && region != 6) return -1;

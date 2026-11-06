@@ -161,7 +161,7 @@ EXT_TEST_STATUSA:
 
 	jmp .data
 .lblTitle:
-	dc.b "STATUS_A breakdown ($320001) - AES/MVS-aware (bits per MAME neogeo.cpp)", 10, 0
+	dc.b "STATUS_A breakdown ($320001), AES/MVS-aware (MAME neogeo.cpp)", 10, 0
 .lbl0;
 	dc.b "0", 0
 .lbl1;

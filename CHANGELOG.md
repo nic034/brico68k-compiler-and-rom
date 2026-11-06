@@ -4,6 +4,46 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-06 - p-bus test (diag cart): output enable tests (fork 1.35-nic034-03, Emulator 1.13)
+
+ROM SHA-256 `1f8ad9602bfef06a5f003f5942c4deae6bce68e7eb2b5220e4727240457d6ec0` (fork
+**1.35-nic034-03**, header 1.35, 25 extensions), rebuilt from `source/` to the same checksum with
+the Compiler, `build.py` and CMake. The code is 32758 bytes, 4 under the `$7FFA` limit: the next
+addition needs room first.
+
+ROM:
+- CartTest on the jwestfall69 diagnostic PROG board, now named **"p-bus test (diag cart)"** on
+  the console, with the board's address (<https://github.com/jwestfall69/neogeo-diag-aes-prog>).
+- Two tests added before the RAM suite, after the method of the diag BIOS P bus tests (own code,
+  that repository has no licence): **output enable (prefetch)** (a byte read three times, each
+  followed by another opcode, compared with that opcode's byte on the same lane; dead if all
+  agree, 50 rounds) and **output behind a 245 (bus hold)** (`$5555` at +4 and `$AAAA` at +8, each
+  followed by a read at +0 under the lane mask; dead only if it gives back both). P1 D0-D7,
+  P1 D8-D15, P2 D0-D7, P2 D8-D15, in the BIOS order. This was the gap of the previous release:
+  a dead /ROMOE or /PORTOE was only seen by the P1 read-back, and a dead /PORTOE not at all.
+- Texts shortened elsewhere to make room (ChipCheck hints, extension descriptions, BRAM and
+  SYSTYPE / STATUS_A headings): no test changed.
+
+Emulator 1.13:
+- Slot faults `cart:strobe:portoel`, `portoeu` (P2 output enable) and the `...245` variants
+  (`romoel245`, `romoeu245`, `portoel245`, `portoeu245`): without a 245 a dead output enable
+  gives the word the 68000 prefetched; behind a 245 it gives the last value written to the
+  cartridge side (P1 writes included). Before, a dead /ROMOE read as `$FF` (floating high),
+  which the new test would not have seen.
+- `guiverify.py`: the PROG board checks follow the new output; the "log matches with the fault
+  applied" check skips TestAudio (it needs the stack in WRAM, so with a dead WRAM chip the 68000
+  runs wild and what it prints depends on the timing of the host's reads; it matched before by
+  luck of timing, I did not prove it).
+- `bench/expected_healthy_aes*.txt` regenerated.
+
+Checks: all ten strobe faults run on the PROG board and found by the right test, window and
+lane, healthy board passes; 46/46 identical to MAME with the test cartridge and 46/46 without;
+faults 24/25 and 27/28 (the known palette artifact); TestBus screen 7/7; GUI 187/187.
+
+Not validated: the PROG board has not run this ROM; MAME models neither the prefetched word nor
+the bus hold, so these two tests are checked against the BIOS's assumption in the emulator only.
+The BIOS's LOWER/UPPER labels look inverted from the 68000 lanes; not confirmed.
+
 ## 2026-11-06 - CartTest, CartCRC, cartridges in the emulator (fork 1.35-nic034-02, Emulator 1.12)
 
 ROM SHA-256 `2f39023ed427e36035236b03480a176a152720d0120a56d10a82e07f0e2d1c55` (fork

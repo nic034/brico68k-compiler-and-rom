@@ -102,7 +102,7 @@ EXT_TEST_SYSTYPE:
 
 	jmp .data
 .lblTitle:
-	dc.b "SYSTYPE breakdown ($300080/$300081) - AES/MVS-aware (bits per MAME neogeo.cpp)", 10, 0
+	dc.b "SYSTYPE breakdown ($300080/$300081), AES/MVS-aware (MAME neogeo.cpp)", 10, 0
 .lblPressed:
 	dc.b "PRESSED", 0
 .lblReleased:

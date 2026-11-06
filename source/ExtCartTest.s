@@ -262,12 +262,12 @@ EXT_CART_TEST:
 	bne	.p1Some				; also high: wrong both ways
 	btst d7,d6					; ever read 1 where 1 expected?
 	bne	.p1Some
-	PrintLn " reads 0 in every word expecting 1: stuck at 0 or open"
+	PrintLn " reads 0 for every 1 expected: stuck at 0 or open"
 	bra	.p1Next
 .p1NotLow:
 	btst d1,d6					; ever read 0 where 0 expected?
 	bne.s .p1Some
-	PrintLn " reads 1 in every word expecting 0: stuck at 1 or open"
+	PrintLn " reads 1 for every 0 expected: stuck at 1 or open"
 	bra.s .p1Next
 .p1Some:
 	PrintLn " wrong in some words: bad contact, or short to another line"
@@ -329,15 +329,15 @@ EXT_CART_TEST:
 	beq.s .vNone
 	cmp.l d0,d5
 	beq.s .vNone
-	PrintLn "=> Test failure: P2 answers, P1 does not: /ROMOE, the P1 chip, or several lines"
+	PrintLn "=> Test failure: P2 answers, P1 not: /ROMOE, P1 chip or lines"
 	bra .end
 .vNone:
-	PrintLn "=> CHECK: no cartridge seen. Clean the edge, try another cartridge"
+	PrintLn "=> CHECK: no cartridge seen. Clean the edge, try another one"
 	bra .end
 .vAnswers:
 	cmp.l #-2,d0
 	bne .vP1
-	PrintLn "=> Test failure: P1 answers but reads wrong: lines above, slot A1-A19,"
+	PrintLn "=> Test failure: P1 reads wrong: lines above, slot A1-A19,"
 	PrintLn "   /ROMOEU-L or P1 chip (the diag PROG board tests A1-A19)"
 	bra .end
 .vP1:
@@ -345,7 +345,7 @@ EXT_CART_TEST:
 	bne .vP1Bad
 	tst.w d5
 	bne.s .vP2Only
-	PrintLn "=> Test success: P1 security code exact, P2 lines all active or not tested"
+	PrintLn "=> Test success: P1 security code exact, P2 lines active or untested"
 	bra .end
 .vP2Only:
 	cmp.l #-1,d5
@@ -448,16 +448,147 @@ PACT:
 	jmp (a1)
 
 ; ------------------------------------------------------------------------
+; OE_DEAD: a chip that never drives the bus leaves the CPU reading the word
+; it prefetched, the opcode after the move. The byte read three times, each
+; time followed by another opcode and compared with that opcode's byte of the
+; same lane: dead if all three are equal, on any of 50 rounds.
+; In: a0 = address, d0 = 1 odd byte (D0-D7) / 0 even byte (D8-D15), a1 = return.
+; Out: d0 = 0 pass / -1 dead. Destroys d1-d2, a0.
+; ------------------------------------------------------------------------
+OE_DEAD:
+	adda.w d0,a0
+	moveq #49,d2
+.again:
+	move.b (a0),d1
+.c1:
+	cmp.b .c1(pc,d0.w),d1
+	bne.s .live
+	move.b (a0),d1
+.c2:
+	nop
+	cmp.b .c2(pc,d0.w),d1
+	bne.s .live
+	move.b (a0),d1
+.c3:
+	tst.w d2
+	cmp.b .c3(pc,d0.w),d1
+.live:
+	dbeq d2,.again
+	seq d0
+	jmp (a1)
+
+; ------------------------------------------------------------------------
+; OE_HOLD245: behind a transceiver the dead output reads back the last value
+; written. $5555 at +4 then $AAAA at +8, each followed by a read of +0 under
+; the lane mask: dead if the read equals the written value both times.
+; In: a0 = address, d0 = 1 odd byte / 0 even byte, a1 = return.
+; Out: d0 = 0 pass / -1 dead. Destroys d1-d3.
+; ------------------------------------------------------------------------
+OE_HOLD245:
+	move.w #$00FF,d3
+	tst.b d0
+	bne.s .mask
+	move.w #$FF00,d3
+.mask:
+	move.w #$5555,4(a0)
+	move.w (a0),d1
+	and.w d3,d1
+	move.w #$5555,d2
+	and.w d3,d2
+	cmp.w d1,d2
+	bne.s .live
+	move.w #$AAAA,8(a0)
+	move.w (a0),d1
+	and.w d3,d1
+	move.w #$AAAA,d2
+	and.w d3,d2
+	cmp.w d1,d2
+	bne.s .live
+	moveq #-1,d0
+	jmp (a1)
+.live:
+	moveq #0,d0
+	jmp (a1)
+
+; ------------------------------------------------------------------------
 ; CART_BOARD: diagnostic PROG board (jwestfall69 neogeo-diag-aes-prog: one
 ; 1 MiB 16-bit SRAM, A0-A18 = slot A1-A19, D0-D15 = slot D0-D15, read by
 ; /ROMOE and /PORTOE, written by /PORTWEU and /PORTWEL). Destroys its content.
+; Console name: "p-bus test (diag cart)", with the board's GitHub address.
+;   0. output enable, the method of the diag BIOS (own code): OE_DEAD
+;      (prefetch) then OE_HOLD245 (bus hold), P1 D0-D7, P1 D8-D15, P2 D0-D7,
+;      P2 D8-D15;
 ;   1. RAM_SUITE (ExtTestBWPRAM.s, type 3) at $200000: data lines walking
 ;      1/0, byte lanes (PORTWEU / PORTWEL), A1-A19, March C- on 64 KiB;
 ;   2. P1 window: 32 words written through P2 ($200200, walking 1 then
 ;      walking 0) read back through P1 ($000200): /ROMOEU, /ROMOEL.
 ; ------------------------------------------------------------------------
 CART_BOARD:
-	PrintLn "Diagnostic PROG board: SRAM at $200000 (write/read test, erases it)"
+	PrintLn "p-bus test (diag cart): SRAM $200000, ERASED"
+	PrintLn "https://github.com/jwestfall69/neogeo-diag-aes-prog"
+
+	; --- output enable, as the diag BIOS does first (docs/tests/68k/p_rom_output.md):
+	; pass 0: the byte read must not be the prefetched opcode (OE_DEAD);
+	; pass 1: behind a 245/NEO-G0/NEO-BUF the dead output gives back the last
+	; write (HOLD_245). Windows and lanes in the BIOS order: P1 D0-D7, P1 D8-D15,
+	; P2 D0-D7, P2 D8-D15 (index d5: bit 1 = P2, bit 0 = D8-D15).
+	moveq #0,d4
+.oePass:
+	tst.b d4
+	bne.s .t245
+	Print "> Output enable (prefetch) Test "
+	bra.s .tTitle
+.t245:
+	Print "> Output behind a 245 (hold) Test "
+.tTitle:
+	moveq #0,d5
+.oeNext:
+	movea.l #$000200,a0			; the same SRAM words in both windows
+	btst #1,d5
+	beq.s .win
+	movea.l #P2_START,a0
+.win:
+	moveq #1,d0					; D0-D7: odd byte
+	btst #0,d5
+	beq.s .lane
+	moveq #0,d0					; D8-D15: even byte
+.lane:
+	lea .oeBack(pc),a1
+	tst.b d4
+	bne OE_HOLD245
+	jmp OE_DEAD
+.oeBack:
+	tst.b d0
+	bne.s .oeDead
+	addq.b #1,d5
+	cmp.b #4,d5
+	bne.s .oeNext
+	PrintLn "Success"
+	addq.b #1,d4
+	cmp.b #2,d4
+	bne .oePass
+	bra .ramTests
+.oeDead:
+	PrintLn "Failure"
+	Print "  P"
+	moveq #1,d0
+	btst #1,d5
+	beq.s .p1w
+	moveq #2,d0
+.p1w:
+	JsrA6 printDec				; keeps d4-d7
+	btst #0,d5
+	bne.s .hi
+	Print " D0-D7"
+	bra.s .sig
+.hi:
+	Print " D8-D15"
+.sig:
+	PrintLn ": output dead (/ROMOE or /PORTOE)"
+	PrintLn "=> Test failure: P bus output enable"
+	jmp CART_END
+
+.ramTests:
 	moveq #3,d7					; RAM_SUITE region type 3: cartridge P bus
 	movea.l #P2_START,a5
 	movea.l #P2_START+$10000,a4
@@ -504,7 +635,7 @@ CART_BOARD:
 	or.w d5,d0
 	bne.s .p1Bad
 	PrintLn "Success"
-	PrintLn "=> Test success: P bus D0-D15, A1-A19, /PORTWEU /PORTWEL, /PORTOE, /ROMOE"
+	PrintLn "=> Test success: P bus D0-D15, A1-A19, strobes, /PORTOE, /ROMOE"
 	jmp CART_END
 .p1Bad:
 	PrintLn "Failure"
