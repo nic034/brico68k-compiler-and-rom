@@ -236,7 +236,7 @@ One line per part, what to suspect when it fails, and the test to run next. Abou
 |---|---|---|
 | Work RAM | Walking 1/0 on both bytes, then each address line A1-A15 (stuck at 0 and at 1) | The bits (D3, D8-D15...) or lines (A9) named; upper/lower chip or NEO-C1 WRU/WRL/WWU/WWL |
 | WRAM byte writes | Each byte written alone must change only its own chip | That chip's write strobe: NEO-C1 WWU/WWL, 68000 UDS/LDS |
-| Palette RAM | Same on both banks (A1-A12), plus bank select | Palette RAM chip or latch, NEO-B1 bus switch; bank: system latch |
+| Palette RAM | Same on both banks (A1-A12), plus bank select | Data bits: that palette RAM chip, or NEO-G0 (palette data buffer and write enable); address lines: NEO-B1 address switch; bank: system latch |
 | VRAM slow / fast | Same through the LSPC2 (A0-A14 / A0-A10), with the LSPC access delays | The VRAM chip, LSPC2-A2 B/E or C/F bus |
 | LSPC2 registers | `REG_VRAMMOD` write and read-back | LSPC2-A2, NEO-C1 LSPOE/LSPWE |
 | NEO-C1 ports | P1, P2, STATUS_B, SOUND/STATUS_A each read from two places followed by different opcodes: a port nobody drives returns the open bus (the next opcode) | NEO-C1 input buffers |
@@ -286,7 +286,7 @@ together: the test cannot tell them apart.
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `5859d6b` (2026-10-22, "Fixed remote keyboard detection"). Compatible **without modification**. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | announces BricoNeo **1.35**, 21 extensions, SHA-256 `c69eb140111ee70c75d9651e4470c8a81a1f66fc21ba23653294fa7f805f5ad1` |
+| This ROM | announces BricoNeo **1.35**, 21 extensions, SHA-256 `0b406cc34a85815a57d3a2a7214c784c4b59c9d33afd5e571b7c999b3e9fe3da` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 

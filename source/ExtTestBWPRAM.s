@@ -522,11 +522,21 @@ CHIP_REPORT:					; d6.w = bad bits (also reached from ADDR_ERROR)
 .lowerOnly:
 	PrintLn "lower chip (D0-D7)"
 .hint:
-	swap d7
+	swap d7						; step id in d7.b
 	cmp.b #2,d7
-	bne .hintEnd
+	bne .hintPal
 	swap d7
 	PrintLn "  Hint     : write strobe of that chip (WRAM: NEO-C1 WWU/WWL, 68000 UDS/LDS)"
+	bra .bank
+.hintPal:						; palette data error (not address, not bank select):
+	cmp.b #3,d7					; the data goes through NEO-G0, which also makes the
+	beq .hintEnd				; palette RAM write enable (neogeodev wiki, "NEO-G0")
+	cmp.b #10,d7
+	beq .hintEnd
+	swap d7
+	cmp.b #2,d7					; region: palette?
+	bne .bank
+	PrintLn "  Hint     : that chip, or NEO-G0 (palette data buffer, palette RAM write enable)"
 	bra .bank
 .hintEnd:
 	swap d7

@@ -859,10 +859,10 @@ memReport_JsrA6:
 	bne .hSlow
 	tst.w d0
 	beq .hpAddr
-	PrintLn "                 -> palette RAM chip/latch of those bits, NEO-B1 bus switch. Next: TestPRAM, TestDAC"
+	PrintLn "                 -> palette RAM chip of those bits, NEO-G0 (palette data buffer, write enable). Next: TestPRAM, TestDAC"
 	jmp (a5)
 .hpAddr:
-	PrintLn "                 -> palette RAM address (NEO-B1), bank: system latch. Next: TestPRAM"
+	PrintLn "                 -> palette RAM address (NEO-B1 address switch), bank: system latch. Next: TestPRAM"
 	jmp (a5)
 .hSlow:
 	cmp.w #F_VRAML,d5

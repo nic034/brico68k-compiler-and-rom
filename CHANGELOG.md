@@ -4,6 +4,18 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-06 - Palette diagnosis names NEO-G0
+
+ROM SHA-256 `0b406cc34a85815a57d3a2a7214c784c4b59c9d33afd5e571b7c999b3e9fe3da`.
+
+- Palette RAM data errors (ChipCheck and TestPRAM) now point to the chip of the bad bits or
+  NEO-G0, which buffers the palette data and makes the palette RAM write enable on the AES
+  (neogeodev wiki, "NEO-G0"). They used to blame the NEO-B1 bus switch, which only handles
+  the palette address. Address errors still name the NEO-B1, bank errors the system latch.
+- Every other diagnostic text checked against the wiki (NEO-C1 selects, LSPC2 VRAM buses and
+  IP0/IP1, NEO-D0 clocks): unchanged.
+- Checks: 30/30 identical to MAME, 22/23 with faults (known bench palette artifact).
+
 ## 2026-11-06 - Merged RAM and VRAM tests, hardened LSPC2 tests, Emulator 1.10
 
 ROM SHA-256 `c69eb140111ee70c75d9651e4470c8a81a1f66fc21ba23653294fa7f805f5ad1` (BricoNeo 1.35,
