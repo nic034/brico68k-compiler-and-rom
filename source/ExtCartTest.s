@@ -83,9 +83,8 @@ EXT_CART_TEST:
 	Print " $"
 	move.w ($000106).l,d0
 	JsrA6 printWord
-	PrintLn ""
+	NlPrintLn "  (diag PROG board: use CartDiag)"
 
-	PrintLn "  (diag PROG board: use CartDiag)"
 	; no header: nothing is written here (the diagnostic PROG board has its own
 	; command, CartDiag)
 
@@ -547,7 +546,7 @@ CART_BOARD:
 	movea.l #P2_START,a5
 	movea.l #P2_START+$10000,a4
 	lea .p1(pc),a3				; RAM_SUITE returns through a3
-	jmp RAM_SUITE
+	jmp RAM_SUITE(pc)
 .p1:
 	Print "> P1 window (/ROMOE) read back Test "
 	movea.l #P2_START+$200,a0	; write: walking 1, then walking 0
@@ -621,8 +620,7 @@ CART_BOARD:
 	PrintLn "  P2 fine: /ROMOEU (D8-D15), /ROMOEL (D0-D7): slot or board U2"
 	PrintLn "=> Test failure: P1 window (/ROMOE)"
 CART_END:
-	WriteEOT
-	jmp WAIT_FOR_COMMAND
+	jmp EOT_AND_WAIT(pc)
 
 ; ------------------------------------------------------------------------
 ; secCmp: compares the 61 words at a0 with the security code.

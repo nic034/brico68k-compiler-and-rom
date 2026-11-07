@@ -322,15 +322,13 @@ EXT_TEST_VRAM:
 
 ; --- errors -----------------------------------------------------------------
 .errWalk:						; expected d1, read d0
-	move.w d1,d1
 	bra.s .errData
 .errWalk2:
 	move.w d2,d1
 .errData:
 	move.w d7,d4				; failing word = base
 .errMarch:						; d4 = address, d1 = expected, d0 = read
-	movea.l #0,a4
-	move.w d4,a4				; address (zero-extended: movea.w would sign-extend)
+	movea.w d4,a4				; address (sign-extended: only its low word is printed)
 	move.w d0,d7				; read      (d6/d7 no longer needed: printDec/printWord keep them)
 	move.w d1,d6				; expected
 	PrintLn "=> Test failure"
@@ -352,12 +350,10 @@ EXT_TEST_VRAM:
 	Print "  Address  : $"
 	move.l a4,d0
 	JsrA6 printWord
-	PrintLn ""
-	Print "  Expected : $"
+	NlPrint "  Expected : $"
 	move.w d6,d0
 	JsrA6 printWord
-	PrintLn ""
-	Print "  Read     : $"
+	NlPrint "  Read     : $"
 	move.w d7,d0
 	JsrA6 printWord
 	PrintLn ""
@@ -399,8 +395,7 @@ EXT_TEST_VRAM:
 	addq.w #1,d4
 	cmp.w #16,d4
 	bne .eaL
-	PrintLn ""
-	PrintLn "  Both chips: the bad bits below show which chip(s) see it."
+	NlPrintLn "  Both chips: the bad bits below show which chip(s) see it."
 
 .chips:							; d6 = bad bits, d5.w = zone
 	Print "  Chip     : "
@@ -427,8 +422,7 @@ EXT_TEST_VRAM:
 
 .done:
 	move.w #1,(REG_VRAMMOD).l
-	WriteEOT
-	jmp WAIT_FOR_COMMAND
+	jmp EOT_AND_WAIT(pc)
 
 	even
 VRAM_ZONES:						; base, words, zone id, address lines

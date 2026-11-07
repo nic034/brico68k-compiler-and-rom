@@ -25,10 +25,9 @@ EXT_WRITE:
 .done:
 
     ; End of transmission
-    WriteEOT
+    jmp EOT_AND_WAIT(pc)
 
     ; Jump back to the command loop
-    jmp WAIT_FOR_COMMAND
 
 ; WriteB (upstream 1.35): writes the low byte of P1 at P2, even or odd
 ; address. Write already handles odd addresses; WriteB is the only way to
@@ -37,5 +36,4 @@ EXT_WRITE_B:
     move.l (BRICO_COMMAND_PARAM_1).l,d0
     move.l (BRICO_COMMAND_PARAM_2).l,a0
     move.b d0,(a0)
-    WriteEOT
-    jmp WAIT_FOR_COMMAND
+    jmp EOT_AND_WAIT(pc)

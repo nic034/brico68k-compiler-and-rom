@@ -20,197 +20,72 @@ EXT_TEST_INPUTS:
 	move.b REG_STATUS_B,d7
 	btst #7,d7
 	bne .dipIsReal
-	Print "  (AES: no DIP bank - bits below are open bus, not real switches)"
-	PrintLn ""
+	PrintLn "  (AES: no DIP bank - bits below are open bus, not real switches)"
 .dipIsReal:
-	move.l #.lblDipSwitches,a1
-    PrintA1
+	; Bits are printed 7 to 0, "1" for a line at 0 (active low: pressed,
+	; switch on), as before. printBits: d1 = value, d2 = highest bit,
+	; d3 = character for a bit at 1. printButtons: one line per bit from
+	; bit 0, label list in a1 (see Tools.s).
+	moveq #'0',d3
+	lea .lblDipSwitches(pc),a1
+	PrintA1
 	move.w REG_P1CNT_REG_DIPSW,d1
-	; Loop on data bits
-	move.w #7,d2
-.loopDip:
-	btst d2, d1
-	beq .showDip1
-	move.l #.lbl0, a1
-    PrintA1
-	jmp .endShowDip
-.showDip1
-	move.l #.lbl1, a1
-    PrintA1
-.endShowDip
-	dbra d2, .loopDip
+	moveq #7,d2
+	JsrA6 printBits
 
 	; Player 1 controls
-	move.l #.lblP1Controls,a1
-    PrintA1
+	lea .lblP1Controls(pc),a1
+	PrintA1
 	move.b REG_P1CNT_REG_DIPSW,d1
-	; Loop on data bits
-	move.w #7,d2
-.loopP1Controls:
-	btst d2, d1
-	beq .showP1Controls1
-	move.l #.lbl0, a1
-    PrintA1
-	jmp .endShowP1Controls
-.showP1Controls1
-	move.l #.lbl1, a1
-    PrintA1
-.endShowP1Controls
-	dbra d2, .loopP1Controls
+	moveq #7,d2
+	JsrA6 printBits
 	PrintLn ""
 
 	; Player 1 controls - clear breakdown
 	move.b REG_P1CNT_REG_DIPSW,d1
-	Print "  Up      : "
-	move.w #0,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Down    : "
-	move.w #1,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Left    : "
-	move.w #2,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Right   : "
-	move.w #3,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Button A: "
-	move.w #4,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Button B: "
-	move.w #5,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Button C: "
-	move.w #6,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Button D: "
-	move.w #7,d2
-	JsrA6 getButtonStateStr
-	PrintA1
+	lea .lblButtons(pc),a1
+	JsrA6 printButtons
 
 	; Player 2 controls
-	move.l #.lblP2Controls,a1
-    PrintA1
+	lea .lblP2Controls(pc),a1
+	PrintA1
 	move.b REG_P2CNT,d1
-	; Loop on data bits
-	move.w #7,d2
-.loopP2Controls:
-	btst d2, d1
-	beq .showP2Controls1
-	move.l #.lbl0, a1
-    PrintA1
-	jmp .endShowP2Controls
-.showP2Controls1
-	move.l #.lbl1, a1
-    PrintA1
-.endShowP2Controls
-	dbra d2, .loopP2Controls
+	moveq #7,d2
+	JsrA6 printBits
 	PrintLn ""
 
 	; Player 2 controls - clear breakdown
 	move.b REG_P2CNT,d1
-	Print "  Up      : "
-	move.w #0,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Down    : "
-	move.w #1,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Left    : "
-	move.w #2,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Right   : "
-	move.w #3,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Button A: "
-	move.w #4,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Button B: "
-	move.w #5,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Button C: "
-	move.w #6,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Button D: "
-	move.w #7,d2
-	JsrA6 getButtonStateStr
-	PrintA1
+	lea .lblButtons(pc),a1
+	JsrA6 printButtons
 
 	; StartSelect
-	move.l #.lblStartSelect,a1
-    PrintA1
+	lea .lblStartSelect(pc),a1
+	PrintA1
 	move.b REG_STATUS_B,d1
-	; Loop on data bits
-	move.w #3,d2
-.loopStartSelect:
-	btst d2, d1
-	beq .showStartSelect1
-	move.l #.lbl0, a1
-    PrintA1
-	jmp .endShowStartSelect
-.showStartSelect1
-	move.l #.lbl1, a1
-    PrintA1
-.endShowStartSelect
-	dbra d2, .loopStartSelect
+	moveq #3,d2
+	JsrA6 printBits
 	PrintLn ""
 
 	; Start / Select - clear breakdown, per player
 	move.b REG_STATUS_B,d1
-	Print "  P1 Start : "
-	move.w #0,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  P1 Select: "
-	move.w #1,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  P2 Start : "
-	move.w #2,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  P2 Select: "
-	move.w #3,d2
-	JsrA6 getButtonStateStr
-	PrintA1
+	lea .lblStartSel(pc),a1
+	JsrA6 printButtons
 
 	; CoinsService - bits printed 2,1,0 = Service, Coin 2, Coin 1 (the
 	; header used to list them in the opposite order). Not inputs at all
 	; on AES (MAME "AUDIO" port: unused, no coin slots): flagged instead
 	; of showing "111" as if every coin switch were pressed.
-	move.l #.lblCoinsService,a1
-    PrintA1
+	lea .lblCoinsService(pc),a1
+	PrintA1
 	btst #7,d7
 	bne.s .coinsAreReal
-	move.l #.lblCoinsAES,a1
-    PrintA1
+	lea .lblCoinsAES(pc),a1
+	PrintA1
 .coinsAreReal:
 	move.b REG_STATUS_A,d1
-	; Loop on data bits
-	move.w #2,d2
-.loopCoinsService:
-	btst d2, d1
-	beq .showCoinsService1
-	move.l #.lbl0, a1
-    PrintA1
-	jmp .endShowCoinsService
-.showCoinsService1
-	move.l #.lbl1, a1
-    PrintA1
-.endShowCoinsService
-	dbra d2, .loopCoinsService
+	moveq #2,d2
+	JsrA6 printBits
 
 	; Memory card / hardware mode (STATUS_B = high byte of the 16-bit
 	; "SYSTEM" port at $380000/$380001, per MAME's neogeo.cpp:
@@ -227,26 +102,18 @@ EXT_TEST_INPUTS:
 	; card. An earlier version of this test read it as bits 5-4 (2-bit
 	; status) plus a standalone bit 6 "write protect" - both wrong;
 	; corrected here against the MAME source directly.
-	move.l #.lblMemCard,a1
-    PrintA1
+	lea .lblMemCard(pc),a1
+	PrintA1
 	move.b REG_STATUS_B,d1
 
-	; Raw high nibble in binary, bit 7 down to bit 4
+	; Raw high nibble in binary, bit 7 down to bit 4 ("1" for a bit at 1)
 	Print "  Bits 7654 (raw)           : "
-	move.w #7,d3
-	move.w #3,d2
-.loopMcBits:
-	btst d3,d1
-	beq .showMcBit0
-	move.l #.lbl1,a1
-    PrintA1
-	jmp .endShowMcBit
-.showMcBit0:
-	move.l #.lbl0,a1
-    PrintA1
-.endShowMcBit:
-	sub.w #1,d3
-	dbra d2,.loopMcBits
+	move.b d1,d6				; kept: the bits are shifted down for printBits
+	lsr.b #4,d1
+	moveq #'1',d3
+	moveq #3,d2
+	JsrA6 printBits
+	move.b d6,d1
 	PrintLn ""
 
 	; Bits 6-4 (corrected): bit 4 = CD1, bit 5 = CD2 (card detect, both 0
@@ -260,53 +127,48 @@ EXT_TEST_INPUTS:
 	; possible signal issue": a false fault indication.
 	; CD1 != CD2 is the real diagnostic case: card half inserted, or a
 	; bad contact on one end of the card connector.
+	Print "  Memory card (CD1 bit4, CD2 bit5) : "
 	move.b d1,d3
 	lsr.b #4,d3
 	andi.b #3,d3			; d3 = CD2:CD1, flags set
 	beq.s .mcInserted
+	lea .lblMcNoCard(pc),a1
 	cmpi.b #3,d3
-	beq.s .mcNoCard
+	beq.s .mcPrint
+	lea .lblMcOnlyCD1(pc),a1
 	btst #4,d1
-	bne.s .mcOnlyCD2
-	move.l #.lblMcOnlyCD1,a1
-    PrintA1
-	jmp .hwMode
-.mcOnlyCD2:
-	move.l #.lblMcOnlyCD2,a1
-    PrintA1
-	jmp .hwMode
-.mcNoCard:
-	move.l #.lblMcNoCard,a1
-    PrintA1
-	jmp .hwMode
+	beq.s .mcPrint
+	lea .lblMcOnlyCD2(pc),a1
+.mcPrint:
+	PrintA1
+	bra.s .hwMode
 .mcInserted:
-	move.l #.lblMcOk,a1
-    PrintA1
+	lea .lblMcOk(pc),a1
+	PrintA1
+	Print "  Write protect (WP bit6)          : "
+	lea .lblMcWE(pc),a1
 	btst #6,d1
-	beq.s .mcWriteEnabled
-	move.l #.lblMcWP,a1
-    PrintA1
-	jmp .hwMode
-.mcWriteEnabled:
-	move.l #.lblMcWE,a1
-    PrintA1
+	beq.s .mcWP
+	lea .lblMcWP(pc),a1
+.mcWP:
+	PrintA1
 
 .hwMode:
 	; Bit 7: hardware mode, 0 = AES, 1 = MVS
+	Print "  Hardware mode             : "
 	btst #7,d1
-	bne .hwMVS
-	move.l #.lblHwAES,a1
-    PrintA1
-	jmp .endOfTest
+	bne.s .hwMVS
+	PrintLn "AES"
+	jmp EOT_AND_WAIT(pc)
 .hwMVS:
-	move.l #.lblHwMVS,a1
-    PrintA1
+	PrintLn "MVS"
+	jmp EOT_AND_WAIT(pc)
 
-.endOfTest:
-    ; End of transmission
-    WriteEOT
-
-	jmp .data
+.lblButtons:					; P1 and P2, bits 0-7
+	dc.b "  Up      : ",0,"  Down    : ",0,"  Left    : ",0,"  Right   : ",0
+	dc.b "  Button A: ",0,"  Button B: ",0,"  Button C: ",0,"  Button D: ",0,0
+.lblStartSel:					; STATUS_B bits 0-3
+	dc.b "  P1 Start : ",0,"  P1 Select: ",0,"  P2 Start : ",0,"  P2 Select: ",0,0
 .lblDipSwitches:
 	dc.b "87654321 DIP Switches (NEO-F0)", 10, 0
 .lblP1Controls:
@@ -322,27 +184,15 @@ EXT_TEST_INPUTS:
 .lblMemCard:
 	dc.b 10, 10, "Memory card / Hardware mode (STATUS_B $380000)", 10, 0
 .lblMcOk:
-	dc.b "  Memory card (CD1 bit4, CD2 bit5) : inserted correctly (CD1=0, CD2=0)", 10, 0
+	dc.b "inserted correctly (CD1=0, CD2=0)", 10, 0
 .lblMcNoCard:
-	dc.b "  Memory card (CD1 bit4, CD2 bit5) : no card (CD1=1, CD2=1)", 10, 0
+	dc.b "no card (CD1=1, CD2=1)", 10, 0
 .lblMcOnlyCD1:
-	dc.b "  Memory card (CD1 bit4, CD2 bit5) : ONLY CD1 detected (CD1=0, CD2=1) - card not fully inserted or bad CD2 contact", 10, 0
+	dc.b "ONLY CD1 detected (CD1=0, CD2=1) - card not fully inserted or bad CD2 contact", 10, 0
 .lblMcOnlyCD2:
-	dc.b "  Memory card (CD1 bit4, CD2 bit5) : ONLY CD2 detected (CD1=1, CD2=0) - card not fully inserted or bad CD1 contact", 10, 0
+	dc.b "ONLY CD2 detected (CD1=1, CD2=0) - card not fully inserted or bad CD1 contact", 10, 0
 .lblMcWP:
-	dc.b "  Write protect (WP bit6)          : card WRITE PROTECTED", 10, 0
+	dc.b "card WRITE PROTECTED", 10, 0
 .lblMcWE:
-	dc.b "  Write protect (WP bit6)          : write enabled", 10, 0
-.lblHwAES:
-	dc.b "  Hardware mode             : AES", 10, 0
-.lblHwMVS:
-	dc.b "  Hardware mode             : MVS", 10, 0
-.lbl0;
-	dc.b "0", 0
-.lbl1;
-	dc.b "1", 0
+	dc.b "write enabled", 10, 0
 	even
-.data
-
-    ; Jump back to the command loop
-    jmp WAIT_FOR_COMMAND

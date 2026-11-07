@@ -474,16 +474,13 @@ RAM_ERROR:
 	JsrA6 printWord
 	move.l a4,d0
 	JsrA6 printWord
-	PrintLn ""
-	Print "  Expected : $"
+	NlPrint "  Expected : $"
 	move.w d5,d0
 	JsrA6 printWord
-	PrintLn ""
-	Print "  Read     : $"
+	NlPrint "  Read     : $"
 	move.w d6,d0
 	JsrA6 printWord
-	PrintLn ""
-	Print "  Bad bits : $"
+	NlPrint "  Bad bits : $"
 	move.w d5,d1
 	eor.l d6,d1					; d1.w = bad bits (eor.l: see SIMULATOR NOTE)
 	move.w d1,d0
@@ -630,9 +627,8 @@ RAM_END_OF_TEST:
 	move.b d0,REG_SRAMLOCK				; protect backup RAM (data ignored)
 	move.b d0,REG_PALBANK0				; palette bank 0, as after the PRAM test
     ; End of transmission
-    WriteEOT
+    jmp EOT_AND_WAIT(pc)
     ; Jump back to the command loop
-	jmp WAIT_FOR_COMMAND
 
 RAMT_TXT_WRAM:
 	dc.b "Work RAM (WRAM) test",10,0

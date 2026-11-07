@@ -571,8 +571,7 @@ EXT_CHIP_CHECK:
 	PrintLn ""
 .notCovered:
 	PrintLn "Not covered: video (TestDAC), watchdog (TestWatchdog), sound (TestAudio)."
-	WriteEOT
-	jmp WAIT_FOR_COMMAND
+	jmp EOT_AND_WAIT(pc)
 
 	even
 .ports:
@@ -814,10 +813,10 @@ memReport_JsrA6:
 .hSlow:
 	cmp.w #F_VRAML,d5
 	bne .hFast
-	PrintLn "     -> slow VRAM chip of those bits/lines, LSPC2-A2 B/E bus. Next: MarchVRAML"
+	PrintLn "     -> slow VRAM chip of those bits/lines, LSPC2-A2 B/E bus. Next: TestVRAM"
 	jmp (a5)
 .hFast:
-	PrintLn "     -> fast VRAM chip of those bits/lines, LSPC2-A2 C/F bus. Next: MarchVRAMU"
+	PrintLn "     -> fast VRAM chip of those bits/lines, LSPC2-A2 C/F bus. Next: TestVRAM"
 	jmp (a5)
 
 ; ------------------------------------------------------------------------

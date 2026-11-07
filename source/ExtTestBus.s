@@ -3,6 +3,9 @@
 	global EXT_TEST_BUS
 	global busCheck_JsrA6
 	global BUS_SCREEN
+	global screenBlank_JsrA6		; also used by TestDAC
+	global busBand_JsrA6
+	global bandColour_JsrA6
 
 	section text
 
@@ -48,8 +51,7 @@ EXT_TEST_BUS:
 	beq .layoutOk
 	PrintLn "=> CHECK: no mirror bytes: image loaded without the NeoDiag"
 	PrintLn "   layout (header flag $0004), or several lines bad"
-	WriteEOT
-	jmp WAIT_FOR_COMMAND
+	jmp EOT_AND_WAIT(pc)
 .layoutOk:
 	; A15 / A16
 	moveq #14,d7
@@ -110,7 +112,7 @@ EXT_TEST_BUS:
 	PrintLn "Screen: 16 bands, A1 at the top, groups of 4. Green OK, red reads 0,"
 	PrintLn "blue reads 1, orange unstable, yellow CRC error. *TestBus repeats."
 	WriteEOT
-	jmp BUS_SCREEN
+	jmp BUS_SCREEN(pc)
 
 ; ------------------------------------------------------------------------
 ; busCheck: reads the 4 mirror bytes once.
@@ -228,22 +230,7 @@ BUS_CRC_NIBBLES:				; CRC-32 (reflected $EDB88320), one nibble
 	endm
 
 BUS_SCREEN:
-	move.b d0,(REG_PALBANK0).l
-	move.w #VRAM_SCB3,(REG_VRAMADD).l
-	move.w #1,(REG_VRAMMOD).l
-	lea (REG_VRAMRW).l,a1
-	moveq #0,d0
-	move.w #512-1,d1
-.clrSprites:
-	move.w d0,(a1)
-	dbra d1,.clrSprites
-	move.w #VRAM_FIXMAP,(REG_VRAMADD).l
-	move.w #$0020,d0
-	move.w #40*32-1,d1
-.clrFix:
-	move.w d0,(a1)
-	dbra d1,.clrFix
-	WatchDog
+	JsrA6 screenBlank
 	move.w #BUS_LINE_MASK,d3
 	moveq #0,d2					; 1 once BRICO_COMMAND_IN was seen at 0
 .frame:
@@ -322,8 +309,31 @@ BUS_SCREEN:
 	BandColour
 	bra .frame
 
-; waits for line field d6 (polling for the next command, which it runs),
-; then sets backdrop + palette 0 colours 1-15 to d1. Destroys d0, a1.
+; screenBlank: palette bank 0, every sprite hidden (SCB3 Y/height = 0), every
+; fix tile = $20 (blank in the usual fonts) on palette 0. Destroys d0, d1, a0.
+screenBlank_JsrA6:
+	move.b d0,(REG_PALBANK0).l
+	move.w #VRAM_SCB3,(REG_VRAMADD).l
+	move.w #1,(REG_VRAMMOD).l
+	lea (REG_VRAMRW).l,a0
+	moveq #0,d0
+	move.w #512-1,d1
+.clrSprites:
+	move.w d0,(a0)
+	dbra d1,.clrSprites
+	move.w #VRAM_FIXMAP,(REG_VRAMADD).l
+	move.w #$0020,d0
+	move.w #40*32-1,d1
+.clrFix:
+	move.w d0,(a0)
+	dbra d1,.clrFix
+	WatchDog
+	RtsA6
+
+; busBand: waits for line field d6 (d3 = line mask; polling for the next
+; command, which it runs: d2 = 1 once BRICO_COMMAND_IN was seen at 0), then
+; sets backdrop + palette 0 colours 1-15 to d1. Destroys d0, a1.
+; bandColour: the colour part only.
 busBand_JsrA6:
 	WatchDog
 	move.l (BRICO_COMMAND_IN).l,d0
@@ -331,6 +341,9 @@ busBand_JsrA6:
 	tst.w d2
 	bne.s .command
 	bra.s .poll
+.command:
+	move.l (BRICO_COMMAND_IN).l,d0
+	jmp DISPATCH_COMMAND(pc)
 .clear:
 	moveq #1,d2
 .poll:
@@ -338,15 +351,13 @@ busBand_JsrA6:
 	and.w d3,d0
 	cmp.w d6,d0
 	bne.s busBand_JsrA6
+bandColour_JsrA6:
 	move.w d1,(PALETTE_BACKDROP).l
 	lea (PALETTE_0+2).l,a1
 	rept 15
 	move.w d1,(a1)+
 	endr
 	RtsA6
-.command:
-	move.l (BRICO_COMMAND_IN).l,d0
-	jmp DISPATCH_COMMAND
 
 	even
 BUS_COLOURS:

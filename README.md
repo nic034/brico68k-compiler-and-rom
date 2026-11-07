@@ -219,6 +219,16 @@ build is reproducible: the same sources give the same core checksums.
 It fetches Musashi and the Z80 core at pinned commits.
 The build is reproducible: it gives the same binaries.
 
+ROM regression check, for a source change meant to keep every output (a size or speed change):
+`python3 emulator/regress_rom.py run OLD.BIO old.json`, the same for the new ROM, then
+`python3 emulator/regress_rom.py compare old.json new.json`. 501 scenarios (no cartridge, test
+cartridge, PROG board, every single fault the core models, every slot fault), each command's
+output words, screen lines, Z80 commands and cartridge writes; about 1 minute on 2 cores.
+`python3 emulator/build_test_core.py` (Linux, gcc) builds a test-only core with settable joypad,
+DIP, STATUS_A/B and SYSTYPE ports and an MVS backup RAM: with
+`CORE=emulator/build/libneocore_test.so` the check adds 10 input sets (MVS, buttons, memory
+card states), which the shipped AES core never reaches.
+
 ## ROM contents: 25 extensions
 
 Commands are typed on the Brico16Bits console. "No WRAM" means the test never relies on
@@ -227,7 +237,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | Command | No WRAM | What it does |
 |---|:-:|---|
 | **ChipCheck** | partly | Quick state of the board, one line per part, < 1 s (see below) |
-| **Version** | yes | The only place with the fork version: says it is the Nic034 fork, `1.35-nic034-05`, the upstream base and the source. Also in the `?` list. |
+| **Version** | yes | The only place with the fork version: says it is the Nic034 fork, `1.35-nic034-06`, the upstream base and the source. Also in the `?` list. |
 | **TestBus** | yes | BIOS socket, 68000 -> BricoNeo, as NeoDiag does it: A15/A16 from the mirror bytes, A1-A14/D0-D15 by CRC32; text and 16 screen bands (see below). Also run at boot. |
 | Echo, Read, Write, WriteB, Dump | yes | Link check and raw memory access. Odd addresses are handled. Dump: at most 2045 words (BricoNeo buffer: 2048 words, address included). |
 | TestInp | yes | Controllers, memory card detect, AES/MVS mode |
@@ -247,8 +257,9 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 
 Bold entries are new in this repository.
 
-The code now fills the 32 KB below `$7FFA` (14 bytes free): a new extension needs room made
-elsewhere first (shorter texts, shared code).
+The code ends 2552 bytes under `$7FFA` (fork 1.35-nic034-06, after a size review that kept every
+output word for word: shared end of command, shared print routines, PC-relative jumps). The 32 KB
+limit is the NeoDiag layout (header flag `$0004`), not the BricoNeo.
 
 ### CartTest and CartDiag: the cartridge P bus
 
@@ -441,7 +452,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `5859d6b` (2026-10-22, "Fixed remote keyboard detection"). Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-05** (Version command only); the header announces **1.35**, the upstream base; 25 extensions, flags `$0007`, SHA-256 `26f517773add88740cce238eebbe3421dc6b037ec505d8091d33a118b95dceb4` |
+| This ROM | fork version **1.35-nic034-06** (Version command only); the header announces **1.35**, the upstream base; 25 extensions, flags `$0007`, SHA-256 `01b128ee3fb64ebe246d98ac2a58d6c0f315236e8349fa9b2f794019d29fa99b` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 

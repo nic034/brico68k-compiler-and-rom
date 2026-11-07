@@ -23,25 +23,9 @@ BAND_LINES equ 14				; 16 bands x 14 = 224 visible lines
 
 EXT_TEST_DAC:
 	move.l (BRICO_COMMAND_PARAM_1).l,d7	; read P1 at once (host clears it)
-	move.b d0,(REG_PALBANK0).l			; CPU and display on palette bank 0
-
-	; hide every sprite: SCB3 (Y / height) = 0
-	move.w #VRAM_SCB3,(REG_VRAMADD).l
-	move.w #1,(REG_VRAMMOD).l
-	lea (REG_VRAMRW).l,a0
-	moveq #0,d0
-	move.w #512-1,d1
-.clrSprites:
-	move.w d0,(a0)
-	dbra d1,.clrSprites
-	; fix map: tile $20 (blank in the usual fonts), palette 0
-	move.w #VRAM_FIXMAP,(REG_VRAMADD).l
-	move.w #$0020,d0
-	move.w #40*32-1,d1
-.clrFix:
-	move.w d0,(a0)
-	dbra d1,.clrFix
-	WatchDog
+	; CPU and display on palette bank 0, sprites hidden, fix map = tile $20 on
+	; palette 0 (ExtTestBus.s, shared with the TestBus screen)
+	JsrA6 screenBlank
 
 	; d6 = $8000 when the dark bit is requested
 	moveq #0,d6
@@ -73,44 +57,23 @@ EXT_TEST_DAC:
 	PrintLn "Shown until the next command."
 	WriteEOT
 
+	move.w d6,d7				; d7 = dark bit (P1 no longer needed)
 	move.w #LINE_MASK,d3
 	moveq #0,d2					; d2 = 1 once BRICO_COMMAND_IN was seen at 0:
 .frame:							; the command that started TestDAC is still
 								; there until the host clears it
 	lea BAND_COLOURS(pc),a2
-	move.w #(FIRST_LINE-1)<<7,d4	; colour set during the line before
+	move.w #(FIRST_LINE-1)<<7,d6	; colour set during the line before
 	moveq #16-1,d5
 .band:
-	; wait for line d4, polling for the next command
-.wait:
-	WatchDog
-	move.l (BRICO_COMMAND_IN).l,d1
-	beq .cmdClear
-	tst.w d2
-	bne .command				; a NEW command: run it
-	bra .noCmd
-.cmdClear:
-	moveq #1,d2
-.noCmd:
-	move.w (REG_LSPCMODE).l,d0
-	and.w d3,d0
-	cmp.w d4,d0
-	bne .wait
-	; set backdrop + palette 0 colours 1-15 to the band colour (~17 us)
-	move.w (a2)+,d0
-	or.w d6,d0
-	move.w d0,(PALETTE_BACKDROP).l
-	lea (PALETTE_0+2).l,a1
-	rept 15
-	move.w d0,(a1)+
-	endr
-	add.w #BAND_LINES<<7,d4
+	move.w (a2)+,d1
+	or.w d7,d1
+	; wait for line d6, polling for the next command (a NEW one: run it),
+	; then backdrop + palette 0 colours 1-15 = d1 (~17 us). ExtTestBus.s.
+	JsrA6 busBand
+	add.w #BAND_LINES<<7,d6
 	dbra d5,.band
 	bra .frame
-
-.command:
-	move.l d1,d0
-	jmp DISPATCH_COMMAND
 
 .fullDark:
 	move.w #$8000,d6
@@ -119,14 +82,10 @@ EXT_TEST_DAC:
 	and.w #$000F,d0
 	add.w d0,d0
 	lea BAND_COLOURS(pc),a2
-	move.w (a2,d0.w),d0
-	or.w d6,d0
-	move.w d0,(PALETTE_BACKDROP).l
-	lea (PALETTE_0+2).l,a1
-	rept 15
-	move.w d0,(a1)+
-	endr
-	move.w d0,d5					; keep the colour for the message
+	move.w (a2,d0.w),d1
+	or.w d6,d1
+	JsrA6 bandColour				; backdrop + palette 0 colours 1-15 (ExtTestBus.s)
+	move.w d1,d5					; keep the colour for the message
 	Print "Full screen, band "
 	move.l d7,d0
 	and.l #$F,d0
@@ -134,10 +93,8 @@ EXT_TEST_DAC:
 	Print ", colour word $"
 	move.w d5,d0
 	JsrA6 printWord
-	PrintLn ""
-	PrintLn "Measure R, G and B at the video output (scope / multimeter)."
-	WriteEOT
-	jmp WAIT_FOR_COMMAND
+	NlPrintLn "Measure R, G and B at the video output (scope / multimeter)."
+	jmp EOT_AND_WAIT(pc)
 
 	even
 BAND_COLOURS:

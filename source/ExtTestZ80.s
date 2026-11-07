@@ -80,5 +80,4 @@ EXT_TEST_Z80:
 .cleanupWait:
 	WatchDog
 	dbra d4,.cleanupWait
-	WriteEOT
-	jmp WAIT_FOR_COMMAND
+	jmp EOT_AND_WAIT(pc)

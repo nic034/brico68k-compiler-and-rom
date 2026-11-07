@@ -4,6 +4,56 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-07 - Code review: 1884 bytes freed, same outputs (fork 1.35-nic034-06)
+
+ROM SHA-256 `01b128ee3fb64ebe246d98ac2a58d6c0f315236e8349fa9b2f794019d29fa99b` (fork
+**1.35-nic034-06**, header 1.35, 25 extensions), built with the Compiler.
+
+Code 32094 -> 30210 bytes: it now ends **2552 bytes** under `$7FFA` (NeoDiag layout limit).
+Correction: the previous entry gave 712 bytes for 1.35-nic034-05; it was 668 (code end `$7D5E`).
+
+What changed, every output kept word for word unless listed below:
+- One end of command, `EOT_AND_WAIT` in Brico68k.s (EOT, then the command loop):
+  `jmp EOT_AND_WAIT(pc)` replaces `WriteEOT` + `jmp WAIT_FOR_COMMAND` (4 bytes instead of 12).
+- Jumps to `WAIT_FOR_COMMAND`, `DISPATCH_COMMAND`, `RAM_SUITE` and `BUS_SCREEN` from other files
+  are PC-relative (4 bytes instead of 6), as `JsrA6` already was: the code is under 32 KB.
+- A line feed printed alone next to another print joins it: `PrintLn ""` + `Print "x"` is now
+  `NlPrint "x"` (new `NlPrint` / `NlPrintLn` macros), `Print "x"` + `PrintLn ""` is `PrintLn "x"`.
+- Exception report: its six port writes are called (`PortWriteD0`) instead of inlined.
+- TestInp, TestStatusA, TestSystype: shared `printBits` / `printButtons` (Tools.s, replacing
+  `getButtonStateStr`) and a `PrintBit` macro; the P1 and P2 button labels are stored once; the
+  memory card, write protect and hardware mode prefixes are printed once. The ports are read at
+  the same points as before.
+- TestDAC uses the TestBus screen routines (`screenBlank`, `busBand`, `bandColour`): same VRAM and
+  palette writes; the band colour is now computed before the line wait, so it is written 12 CPU
+  cycles earlier, still during the line before the band.
+- TestLSPC: the 4 VRAMMOD patterns in one loop. TestVRAM: a no-op instruction removed.
+
+Output changes:
+- ChipCheck: the VRAM hints said "Next: MarchVRAML" / "MarchVRAMU", commands that TestVRAM
+  replaced: they now say "Next: TestVRAM".
+- Version: 1.35-nic034-06.
+
+Left alone on purpose: every loop whose timing matters (VRAM access margins of TestVRAM and
+ChipCheck, the cycle-counting loops of TestTiming and ChipCheck, the CartDiag prefetch and bus hold
+tests, the TestWatchdog starve loop) and Trace.s (upstream). Durations are unchanged (TestInp -4 %,
+TestStatusA -3 %). TestVRAM stays the longest, 1.77 s of the host's 3 s, set by those margins.
+
+New tools: `emulator/regress_rom.py` (record every scenario with one ROM, then compare two ROMs)
+and `emulator/build_test_core.py` (test-only core with settable input ports and an MVS backup RAM,
+never packaged in the emulator).
+
+Checks: old ROM against new ROM, 511 scenarios, 1890 commands, with the test core: 119
+differences, all intended (116 ChipCheck VRAM hint lines, 3 Version). TestWatchdog counts a few
+loops less (44572 -> 44562, 133 ms both). Not compared, chaotic by construction: BIOS socket A1-A14
+stuck or any socket line unstable (the 68000 reads its own code wrong) and, with a WRAM fault, the
+commands from TestAudio on (stack in the bad WRAM); what happens there depends on where each code
+byte is, and 5 of them already differ between two runs of the same ROM. Compiler image checks OK;
+bench logs regenerated.
+
+Not checked here: MAME (not installed in this session), `guiverify.py` (no Tk), `build.py` and
+CMake (in the local firmware repository), real hardware.
+
 ## 2026-11-07 - Two commands: CartTest and CartDiag (fork 1.35-nic034-05, Emulator 1.15)
 
 ROM SHA-256 `26f517773add88740cce238eebbe3421dc6b037ec505d8091d33a118b95dceb4` (fork

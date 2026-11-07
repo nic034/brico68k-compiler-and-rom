@@ -13,7 +13,6 @@ EXT_ECHO:
     PortWriteD0
 
     ; End of transmission
-    WriteEOT
+    jmp EOT_AND_WAIT(pc)
 
     ; Jump back to the command loop
-    jmp WAIT_FOR_COMMAND

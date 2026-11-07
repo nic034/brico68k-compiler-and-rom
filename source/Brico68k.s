@@ -60,6 +60,9 @@
 	global BRICO_COMMAND_PARAM_3
 	; Used to return after the execution of a extension function
 	global  WAIT_FOR_COMMAND
+	; Same, after sending the EOT: "jmp EOT_AND_WAIT(pc)" (4 bytes) replaces
+	; "WriteEOT" + "jmp WAIT_FOR_COMMAND" (12 bytes)
+	global  EOT_AND_WAIT
 	; Entry for extensions that keep running until the next command arrives
 	; (e.g. TestDAC): jump here with d0 = a non-zero BRICO_COMMAND_IN read
 	global  DISPATCH_COMMAND
@@ -138,8 +141,10 @@ START:
 	JsrA6 busCheck
 	tst.l d5
 	beq.s WAIT_FOR_COMMAND
-	jmp BUS_SCREEN
+	jmp BUS_SCREEN(pc)
 
+EOT_AND_WAIT:
+	WriteEOT
 WAIT_FOR_COMMAND:
 	; Wait for the command to be 0 again
 	DisableInterrupts ; Interrupts are disabled in extensions by default as the work RAM might not work
@@ -227,21 +232,20 @@ EXC_COMMON:
 	lea EXC_CMD(pc),a1
 	PrintA1						; "EXCPT", one word per letter
 	move.w d7,d0
-	InlinePortWriteD0
+	PortWriteD0					; called, not inlined: 96 bytes less, same words
 	move.w d5,d0
-	InlinePortWriteD0
+	PortWriteD0
 	move.l d4,d0
 	swap d0
-	InlinePortWriteD0
+	PortWriteD0
 	move.w d4,d0
-	InlinePortWriteD0
+	PortWriteD0
 	move.l d6,d0
 	swap d0
-	InlinePortWriteD0
+	PortWriteD0
 	move.w d6,d0
-	InlinePortWriteD0
-	WriteEOT
-	jmp WAIT_FOR_COMMAND
+	PortWriteD0
+	bra EOT_AND_WAIT
 
 EXC_CMD:	dc.b "EXCPT",0
 	even

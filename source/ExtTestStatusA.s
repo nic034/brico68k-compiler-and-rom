@@ -47,7 +47,7 @@
 ; =====================================================================
 
 EXT_TEST_STATUSA:
-	move.l #.lblTitle,a1
+	lea .lblTitle(pc),a1
 	PrintA1
 	move.b REG_STATUS_A,d1
 
@@ -55,18 +55,9 @@ EXT_TEST_STATUSA:
 	; AES/MVS verdict below, so nothing is hidden if you want to
 	; cross-check by hand.
 	Print "  Raw bits 76543210: "
-	move.w #7,d2
-.loopRaw:
-	btst d2,d1
-	beq .showRaw0
-	move.l #.lbl1,a1
-	PrintA1
-	jmp .endShowRaw
-.showRaw0:
-	move.l #.lbl0,a1
-	PrintA1
-.endShowRaw:
-	dbra d2,.loopRaw
+	moveq #'1',d3				; printBits (Tools.s): "1" for a bit at 1
+	moveq #7,d2
+	JsrA6 printBits
 	PrintLn ""
 
 	; Hardware type (reliable on both platforms - see ExtTestInputs.s)
@@ -75,99 +66,40 @@ EXT_TEST_STATUSA:
 	bne .isMVS
 
 	; --- AES: per MAME's "AUDIO" port, none of these are coin/RTC bits ---
-	Print "  Hardware detected : AES (STATUS_B bit7=0)"
-	PrintLn ""
-	Print "  Bits 0-2: N/A on AES (no coin slots - home console, not arcade)"
-	PrintLn ""
-	Print "  Bits 3-4: hw-detect bits, exact meaning undocumented even in"
-	PrintLn ""
-	Print "            MAME ('what is this?' - UniBIOS uses them for"
-	PrintLn ""
-	Print "            AES/MVS sensing). Raw value above, no verdict guessed."
-	PrintLn ""
-	Print "  Bits 5-7: N/A on AES (no uPD4990A RTC chip on this board)"
-	PrintLn ""
-	jmp .endOfTest
+	PrintLn "  Hardware detected : AES (STATUS_B bit7=0)"
+	PrintLn "  Bits 0-2: N/A on AES (no coin slots - home console, not arcade)"
+	PrintLn "  Bits 3-4: hw-detect bits, exact meaning undocumented even in"
+	PrintLn "            MAME ('what is this?' - UniBIOS uses them for"
+	PrintLn "            AES/MVS sensing). Raw value above, no verdict guessed."
+	PrintLn "  Bits 5-7: N/A on AES (no uPD4990A RTC chip on this board)"
+	bra .endOfTest
 
 .isMVS:
 	; --- MVS/arcade: the real AUDIO_COIN decode ---
-	Print "  Hardware detected : MVS (STATUS_B bit7=1)"
-	PrintLn ""
+	PrintLn "  Hardware detected : MVS (STATUS_B bit7=1)"
 
-	Print "  Coin 1         : "
-	move.w #0,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Coin 2         : "
-	move.w #1,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Service button : "
-	move.w #2,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-
+	; Bits 0-4, one line each, PRESSED for a bit at 0 (printButtons, Tools.s).
 	; Bits 3-4: MAME's generic "AUDIO_COIN" port marks them unused, but its
 	; neogeo_mvs input set (real MVS boards) maps them as COIN3/COIN4
 	; ("P1 coin 2 / P2 coin 2, separate coin chutes"), active low.
-	Print "  Coin 3 (P1 coin 2): "
-	move.w #3,d2
-	JsrA6 getButtonStateStr
-	PrintA1
-	Print "  Coin 4 (P2 coin 2): "
-	move.w #4,d2
-	JsrA6 getButtonStateStr
-	PrintA1
+	lea .lblCoins(pc),a1
+	JsrA6 printButtons
 
-.slotTypeNoLn:
 	Print "  Slot-count sense (bit5, raw; neogeodev: 0 = 4-slot, 1 = 6-slot): "
-	btst #5,d1
-	beq .slot0
-	move.l #.lbl1,a1
-	PrintA1
-	jmp .rtcBits
-.slot0:
-	move.l #.lbl0,a1
-	PrintA1
-
-.rtcBits:
-	PrintLn ""
-	Print "  RTC time pulse (bit6, raw) : "
-	btst #6,d1
-	beq .pulse0
-	move.l #.lbl1,a1
-	PrintA1
-	jmp .rtcData
-.pulse0:
-	move.l #.lbl0,a1
-	PrintA1
-.rtcData:
-	PrintLn ""
-	Print "  RTC data bit (bit7, raw)   : "
-	btst #7,d1
-	beq .data0
-	move.l #.lbl1,a1
-	PrintA1
-	jmp .endOfTest
-.data0:
-	move.l #.lbl0,a1
-	PrintA1
+	PrintBit 5
+	NlPrint "  RTC time pulse (bit6, raw) : "
+	PrintBit 6
+	NlPrint "  RTC data bit (bit7, raw)   : "
+	PrintBit 7
 
 .endOfTest:
 	PrintLn ""
 
 	; End of transmission
-	WriteEOT
-
-	jmp .data
+	jmp EOT_AND_WAIT(pc)
 .lblTitle:
 	dc.b "STATUS_A breakdown ($320001), AES/MVS-aware (MAME neogeo.cpp)", 10, 0
-.lbl0;
-	dc.b "0", 0
-.lbl1;
-	dc.b "1", 0
+.lblCoins:						; bits 0-4
+	dc.b "  Coin 1         : ",0,"  Coin 2         : ",0,"  Service button : ",0
+	dc.b "  Coin 3 (P1 coin 2): ",0,"  Coin 4 (P2 coin 2): ",0,0
 	even
-.data
-
-	; Jump back to the command loop
-	jmp WAIT_FOR_COMMAND

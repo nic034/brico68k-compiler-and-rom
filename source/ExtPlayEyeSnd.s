@@ -15,10 +15,9 @@ EXT_EYE_SND:
     JsrA6 wait_for_z80
 
     ; End of transmission
-    WriteEOT
+    jmp EOT_AND_WAIT(pc)
 
     ; Jump back to the command loop
-    jmp WAIT_FOR_COMMAND
 
 wait_for_z80_JsrA6:
     move.w #400,d0

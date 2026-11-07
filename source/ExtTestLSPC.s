@@ -22,26 +22,14 @@ EXT_TEST_LSPC:
     ; =============================================
     WatchDog
     Print "> REG_VRAMMOD   "
-    move.w #$0000, d5
+    moveq #0, d5                ; $0000, $5555, $AAAA, $FFFF: + $5555 each time
+.modLoop:
     move.w d5, REG_VRAMMOD
     move.w REG_VRAMMOD, d1
     cmp.w d5, d1
     bne .failVRAMMOD
-    move.w #$5555, d5
-    move.w d5, REG_VRAMMOD
-    move.w REG_VRAMMOD, d1
-    cmp.w d5, d1
-    bne .failVRAMMOD
-    move.w #$AAAA, d5
-    move.w d5, REG_VRAMMOD
-    move.w REG_VRAMMOD, d1
-    cmp.w d5, d1
-    bne .failVRAMMOD
-    move.w #$FFFF, d5
-    move.w d5, REG_VRAMMOD
-    move.w REG_VRAMMOD, d1
-    cmp.w d5, d1
-    bne .failVRAMMOD
+    add.w #$5555, d5
+    bcc.s .modLoop              ; $FFFF + $5555 carries: the 4 patterns are done
     PrintLn "OK"
     jmp .testVRAMADD
 .failVRAMMOD:
@@ -53,8 +41,7 @@ EXT_TEST_LSPC:
     Print " read=0x"
     move.l d1, d0
     JsrA6 printWord
-    move.l #.lblNl, a1
-    PrintA1
+    PrintLn ""
 
     ; =============================================
     ; REG_VRAMADD + REG_VRAMRW round-trip
@@ -85,8 +72,7 @@ EXT_TEST_LSPC:
     Print "  expected=0xA5A5 read=0x"
     move.l d1, d0
     JsrA6 printWord
-    move.l #.lblNl, a1
-    PrintA1
+    PrintLn ""
 
     ; =============================================
     ; VRAM auto-increment behavioral test
@@ -122,8 +108,7 @@ EXT_TEST_LSPC:
     Print "  read=0x"
     move.l d1, d0
     JsrA6 printWord
-    move.l #.lblNl, a1
-    PrintA1
+    PrintLn ""
 
     ; =============================================
     ; Restore safe state and print final result
@@ -131,7 +116,7 @@ EXT_TEST_LSPC:
 .allDone:
     move.w #$0000, REG_VRAMADD
     move.w #1, REG_VRAMMOD
-    cmp.w #0, d7
+    tst.w d7
     bne .globalFail
     PrintLn "=> Test success"
     jmp .done
@@ -139,10 +124,5 @@ EXT_TEST_LSPC:
     PrintLn "=> Test failure"
     jmp .done
 
-.lblNl:
-    dc.b "",10,0
-    even
-
 .done:
-    WriteEOT
-    jmp WAIT_FOR_COMMAND
+    jmp EOT_AND_WAIT(pc)

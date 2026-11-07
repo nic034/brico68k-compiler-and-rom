@@ -41,8 +41,7 @@ EXT_TEST_TIMING:
 	Print "=> FAIL: line counter frozen, raw $"
 	move.w (REG_LSPCMODE).l,d0
 	JsrA6 printWord
-	PrintLn ""
-	PrintLn "Check LSPC2-A2, its clocks (24M/6M from the clock chain) and sync."
+	NlPrintLn "Check LSPC2-A2, its clocks (24M/6M from the clock chain) and sync."
 	bra .end
 
 .isAlive:
@@ -78,8 +77,7 @@ EXT_TEST_TIMING:
 	and.w #LINE_MASK,d0
 	lsr.w #7,d0
 	JsrA6 printWord
-	PrintLn ""
-	PrintLn "  (line counter bit stuck at 0: LSPC2-A2 or its clock)"
+	NlPrintLn "  (line counter bit stuck at 0: LSPC2-A2 or its clock)"
 	bra .end
 .atTop:
 	move.w #2000,d7
@@ -272,8 +270,7 @@ EXT_TEST_TIMING:
 	move.w a4,d0
 	lsr.w #7,d0
 	JsrA6 printWord
-	PrintLn ""
-	Print "> Counter bits always 1: $"
+	NlPrint "> Counter bits always 1: $"
 	move.l d5,d0
 	swap d0
 	lsr.w #7,d0
@@ -285,8 +282,7 @@ EXT_TEST_TIMING:
 	and.w #LINE_MASK,d0
 	lsr.w #7,d0
 	JsrA6 printWord
-	PrintLn ""
-	PrintLn "  (stuck or shorted line counter bit: LSPC2-A2)"
+	NlPrintLn "  (stuck or shorted line counter bit: LSPC2-A2)"
 
 .cycles:
 	tst.w d7
@@ -340,5 +336,4 @@ EXT_TEST_TIMING:
 	PrintLn "=> Test FAIL"
 
 .end:
-	WriteEOT
-	jmp WAIT_FOR_COMMAND
+	jmp EOT_AND_WAIT(pc)

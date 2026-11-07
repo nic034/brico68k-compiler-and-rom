@@ -34,7 +34,7 @@
 ; =====================================================================
 
 EXT_TEST_SYSTYPE:
-	move.l #.lblTitle,a1
+	lea .lblTitle(pc),a1
 	PrintA1
 
 	; Hardware type first (reliable on both AES and MVS - see
@@ -46,48 +46,31 @@ EXT_TEST_SYSTYPE:
 	; --- MVS: the TEST/JAMMA bits are real, decode them ---
 	move.w REG_SYSTYPE,d1
 
-	Print "  Hardware detected          : MVS (STATUS_B bit7=1) - TEST/JAMMA bits below are real"
-	PrintLn ""
+	PrintLn "  Hardware detected          : MVS (STATUS_B bit7=1) - TEST/JAMMA bits below are real"
 
 	Print "  Raw word at $300080: 0x"
 	move.l d1,d0
 	JsrA6 printWord
-	PrintLn ""
+	NlPrint "  TEST button (bit7, active low)      : "
 
-	Print "  TEST button (bit7, active low)      : "
+	lea .lblReleased(pc),a1
 	btst #7,d1
-	beq .testPressed
-	move.l #.lblReleased,a1
+	bne.s .test
+	lea .lblPressed(pc),a1
+.test:
 	PrintA1
-	jmp .jammaSense
-.testPressed:
-	move.l #.lblPressed,a1
-	PrintA1
-
-.jammaSense:
-	PrintLn ""
-	Print "  JAMMA sense (bit6, active high)     : "
-	btst #6,d1
-	beq .jamma0
-	move.l #.lbl1,a1
-	PrintA1
-	jmp .endOfTest
-.jamma0:
-	move.l #.lbl0,a1
-	PrintA1
-	jmp .endOfTest
+	NlPrint "  JAMMA sense (bit6, active high)     : "
+	PrintBit 6
+	bra .endOfTest
 
 .isAES:
 	; --- AES: $300080 is unmapped per MAME's aes_main_map. Still show
 	; the raw value (might help spot an always-same floating-bus
 	; pattern), but make the "don't trust this" caveat impossible to
 	; miss instead of printing a confident wrong verdict.
-	Print "  Hardware detected          : AES (STATUS_B bit7=0)"
-	PrintLn ""
-	Print "  $300080 is NOT a real register on AES (unmapped in MAME's"
-	PrintLn ""
-	Print "  aes_main_map - no TEST switch / no JAMMA harness on AES)."
-	PrintLn ""
+	PrintLn "  Hardware detected          : AES (STATUS_B bit7=0)"
+	PrintLn "  $300080 is NOT a real register on AES (unmapped in MAME's"
+	PrintLn "  aes_main_map - no TEST switch / no JAMMA harness on AES)."
 	Print "  Raw word below is open-bus/undefined, NOT a TEST/JAMMA value: 0x"
 	move.w REG_SYSTYPE,d1
 	move.l d1,d0
@@ -98,21 +81,11 @@ EXT_TEST_SYSTYPE:
 	PrintLn ""
 
 	; End of transmission
-	WriteEOT
-
-	jmp .data
+	jmp EOT_AND_WAIT(pc)
 .lblTitle:
 	dc.b "SYSTYPE breakdown ($300080/$300081), AES/MVS-aware (MAME neogeo.cpp)", 10, 0
 .lblPressed:
 	dc.b "PRESSED", 0
 .lblReleased:
 	dc.b "released", 0
-.lbl0;
-	dc.b "0", 0
-.lbl1;
-	dc.b "1", 0
 	even
-.data
-
-	; Jump back to the command loop
-	jmp WAIT_FOR_COMMAND

@@ -99,7 +99,7 @@ REG_STATUS_B equ $380000
 	; Brico16Bits shows "Found BricoNeo ROM version 1.35". build.py and the
 	; Compiler check that the header equals the base of this string.
 	macro FORK_VERSION
-		dc.b "1.35-nic034-05"
+		dc.b "1.35-nic034-06"
 	endm
 
 	macro BRICONEO_VERSION
@@ -158,20 +158,33 @@ REG_STATUS_B equ $380000
 	endm
 
 	macro Print							; String constant passed as a parameter
-		PrintHandleCRLF \1,0
+		PrintHandleCRLF \1,0,0
 	endm
 
 	macro PrintLn						; String constant passed as a parameter
-		PrintHandleCRLF \1,1
+		PrintHandleCRLF \1,1,0
 	endm
 
-	macro PrintHandleCRLF				; P1 is string constant, P2 is either 0 or 1 depending on LF ending
+	; A line feed first, then the string: the same words as PrintLn "" followed
+	; by Print / PrintLn, in one call (saves the 10 bytes of the PrintLn "").
+	macro NlPrint
+		PrintHandleCRLF \1,0,1
+	endm
+
+	macro NlPrintLn
+		PrintHandleCRLF \1,1,1
+	endm
+
+	macro PrintHandleCRLF				; P1 string constant, P2 = 1: LF after it, P3 = 1: LF before it
 		; The string follows the call: printInline prints it and returns
-		; after it (10 bytes of code per Print, was 18). Destroys d0, a0, a6
+		; after it (8 bytes of code per Print, was 18). Destroys d0, a0, a6
 		; (a6 was already destroyed by the JsrA6 of the previous version).
 		lea .\@StringAddress(pc),a6
 		jmp printInline_JsrA6(pc)
 	.\@StringAddress:
+		ifc "\3","1"
+		dc.b 10
+		endc
 		dc.b \1
 		ifc "\2","1"
 		dc.b 10
@@ -194,6 +207,15 @@ REG_STATUS_B equ $380000
 		InlinePortWriteD0
 		bra.s .\@lbl0000PrintStart
 	.\@lbl0000PrintEnd:
+	endm
+
+	macro PrintBit						; \1 = bit number: "0" or "1" for that bit of d1
+		moveq #'0',d0					; destroys d0, a0, a6 (d0 is not 0 after it)
+		btst #\1,d1
+		beq.s .\@
+		moveq #'1',d0
+.\@:
+		PortWriteD0
 	endm
 
 	macro EnableInterrupts

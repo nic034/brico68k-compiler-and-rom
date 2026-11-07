@@ -3,7 +3,8 @@
     global port_write_d0_JsrA6
     global print_a1_JsrA6
     global printWord_JsrA6
-    global getButtonStateStr_JsrA6
+    global printBits_JsrA6
+    global printButtons_JsrA6
     global printDec_JsrA6
     global printInline_JsrA6
 
@@ -55,15 +56,42 @@ printWord_JsrA6:
 .hexDigits:
     dc.b "0123456789ABCDEF"
 
-getButtonStateStr_JsrA6:
-; input:  d1 = byte holding the button/switch bits, d2 = bit index to test
-; output: a1 = address of "PRESSED"/"released" string (0-terminated)
+printBits_JsrA6:
+; input:  d1 = value, d2.w = highest bit to print, d3.b = character for a
+;         bit at 1 ('0' for active-low inputs, '1' to print the raw bit)
+; output: bits d2 down to 0, one character each. Destroys d0, d2 (-1), a0.
+.loop:
+    moveq #0,d0
+    move.b d3,d0
     btst d2,d1
-    beq .buttonIsPressed
-    lea .lblReleased(pc),a1
+    bne.s .print
+    eori.b #1,d0                ; '0' <-> '1'
+.print:
+    InlinePortWriteD0
+    dbra d2,.loop
     RtsA6
-.buttonIsPressed:
+
+printButtons_JsrA6:
+; input:  d1 = byte holding the button/switch bits (active low), a1 = labels,
+;         0-terminated strings back to back, an empty one ends the list
+; output: for bit 0, 1, 2...: the label, then "PRESSED" (bit at 0) or
+;         "released" (bit at 1) and a line feed. Destroys d0, d2, a0-a2.
+    moveq #0,d2
+.next:
+    tst.b (a1)
+    beq.s .end
+    InlinePrintA1               ; the label: a1 -> the next one
+    movea.l a1,a2
+    lea .lblReleased(pc),a1
+    btst d2,d1
+    bne.s .state
     lea .lblPressed(pc),a1
+.state:
+    InlinePrintA1
+    movea.l a2,a1
+    addq.w #1,d2
+    bra.s .next
+.end:
     RtsA6
 
 .lblPressed:
