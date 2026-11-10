@@ -46,6 +46,13 @@ class ValidateRecordsTests(unittest.TestCase):
     def test_valid_bios_address_line_scenario(self):
         validate_records({"fault/bios:addr:14": [{"cmd": "TestBus", "status": "eot"}]}, "old")
 
+    def test_bios_address_line_rejects_out_of_range_and_huge_values(self):
+        # compare() calls int() on this field; huge decimals can exceed Python's
+        # integer conversion limit and abort comparison unexpectedly.
+        for number in ("0", "24", "999", "9" * 5000, "١٤"):
+            with self.subTest(number=number[:20]), self.assertRaisesRegex(ValueError, "BIOS address-line"):
+                validate_records({f"fault/bios:addr:{number}": [{"cmd": "TestBus", "status": "eot"}]}, "old")
+
     def test_malformed_bios_address_line_scenario(self):
         for name in ("fault/bios:addr:", "fault/bios:addr:x", "fault/bios:addr:1:extra"):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "BIOS address-line"):
