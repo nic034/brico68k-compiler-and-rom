@@ -237,7 +237,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | Command | No WRAM | What it does |
 |---|:-:|---|
 | **TestChip** | partly | Quick state of the board, one line per part, < 1 s (see below) |
-| **Version** | yes | The only place with the fork version: says it is the Nic034 fork, `1.35-nic034-07`, the upstream base and the source. Also in the `?` list. |
+| **Version** | yes | The only place with the fork version: says it is the Nic034 fork, `1.35-nic034-08`, the upstream base and the source. Also in the `?` list. |
 | **TestBus** | yes | BIOS socket, 68000 -> BricoNeo, as NeoDiag does it: A15/A16 from the mirror bytes, A1-A14/D0-D15 by CRC32; text and 16 screen bands (see below). Also run at boot. |
 | Echo, Read, Write, WriteB, Dump | yes | Link check and raw memory access. Odd addresses are handled. Dump: at most 2045 words (BricoNeo buffer: 2048 words, address included). |
 | TestInp | yes | Controllers, memory card detect, AES/MVS mode |
@@ -255,11 +255,11 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | **CartTest** | yes | Game cartridge P bus D0-D15, read only (never writes): P1 by the security code (names stuck / open lines), P2 activity |
 | **CartDiag** | yes | "p-bus test (diag cart)" on the jwestfall69 PROG board, **writes** its SRAM: /ROMOE and /PORTOE (prefetch, bus hold), write/read test of D0-D15, both byte lanes, A1-A19 (see below) |
 | **TestVectors** | yes | Vector table switch `$000000-$00007F`, system ROM / cartridge (`REG_SWPBIOS`, `REG_SWPROM`): compares the 32 vectors with `$C00000` in both positions and back. Read only |
-| **TestGfx** | yes | Test screen for the fix layer and the sprites, with the cartridge tiles (first C tile = P1): labels, fix tiles `$00-$FF`, flips, 8 x 4 tiles, H and V shrink. Read on the screen (see below) |
+| **TestGfx** | yes | Test screen for the fix layer and the sprites, with the cartridge tiles (first C tile = P1): labels, fix tiles `$00-$FF`, flips, 8 x 4 tiles, H and V shrink. P2 = 1: the whole screen in tiles. Read on the screen (see below) |
 
 Bold entries are new in this repository.
 
-The code ends 150 bytes under `$7FFA` (fork 1.35-nic034-07): a new extension needs room made
+The code ends 30 bytes under `$7FFA` (fork 1.35-nic034-08): a new extension needs room made
 elsewhere first. The 32 KB limit is the NeoDiag layout (header flag `$0004`), not the BricoNeo.
 
 `ChipCheck` was renamed **TestChip** in 1.35-nic034-07 (same test, same output).
@@ -284,6 +284,9 @@ tile, mirrored / upside down / both), `SPRITES 8X4` (32 tiles in reading order),
 (16 down to 1 pixel wide), `V SHRINK FF-3F` (a column of 16 tiles squeezed through the L0 ROM
 table: 4 to 16 tiles show), and the fix tiles `$00-$FF`, 16 per row. Blank tiles: try another P1.
 The screen stays until TestDAC or TestBus. Uses sprites 1-35, palettes 0 and 1.
+`TestGfx <tile> 1` fills the whole screen instead: 20 sprites of 14 tiles (320 x 224), no label.
+The zones only cover parts of the screen; a fault that depends on the position (a line buffer
+bit, a column of pixels) shows wherever it is in this mode.
 
 ### CartTest and CartDiag: the cartridge P bus
 
@@ -476,7 +479,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `84f7840` (2026-11-09; since `5859d6b` only the byte-swap detection changed, it now also accepts reset vectors above the first 64 KB: no effect here, ours is `$00C0xxxx`). Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-07** (Version command only); the header announces **1.35**, the upstream base; 27 extensions, flags `$0007`, SHA-256 `99e0853f9716f851e1957617119a31332e43a3b0c348b722f24ef6554e0dd8f4` |
+| This ROM | fork version **1.35-nic034-08** (Version command only); the header announces **1.35**, the upstream base; 27 extensions, flags `$0007`, SHA-256 `7c63dc6c5c539ca9797273d82b7c944d532bafde45d73438d142e945c3ecbf92` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
@@ -554,7 +557,7 @@ each well under the 3 s host limit.
   and bus hold tests exist nowhere else: MAME and the emulator cannot check them). No console log
   was compared word for word, and no board with a known fault has been tested yet: that the tests
   name a real fault correctly is still shown in simulation only. MAME stays the reference.
-  **1.35-nic034-07 (TestVectors, TestGfx) has not run on real hardware yet.** TestGfx was never
+  **1.35-nic034-07 and -08 (TestVectors, TestGfx) have not run on real hardware yet.** TestGfx was never
   drawn by an emulator either: the core draws no tile and MAME was not available; its VRAM and
   palette words were checked, and a picture drawn from them by a small reference renderer.
 - **CartTest / CartDiag**: MAME has no PROG board (the bench plays it with a shadow RAM) and no

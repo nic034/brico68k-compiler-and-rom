@@ -4,6 +4,25 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-10 - TestGfx: whole-screen mode (fork 1.35-nic034-08)
+
+ROM SHA-256 `7c63dc6c5c539ca9797273d82b7c944d532bafde45d73438d142e945c3ecbf92` (fork **1.35-nic034-08**, header 1.35, 27 extensions). The code ends
+30 bytes under `$7FFA`: the ROM is full.
+
+- `TestGfx <tile> 1` (P2 = 1): 20 sprites of 14 tiles cover the 320 x 224 screen, tile = P1 +
+  column + 20 x row, no label. The test zones only cover parts of the screen; a fault that depends
+  on the position (line buffer bit, a column of pixels) shows wherever it is.
+- The sprite writes are one routine (`gfxSprite`) for both modes; the report is shorter.
+
+Why this and not an animation or a colour gradient: an AES ROM in the BIOS socket has no tile of
+its own, so it cannot draw shapes; a still, full screen is easier to read for a fault than moving
+sprites, and a gradient would repeat TestDAC.
+
+Checks, emulator only: -07 against -08 over 517 scenarios: only the TestGfx text and Version
+differ; in the zones mode the VRAM and palette words are identical to -07 (same checksum). The
+whole-screen mode was checked on its VRAM words and on a picture drawn from them with synthetic
+tiles. Not run on real hardware.
+
 ## 2026-11-10 - TestChip (renamed), TestVectors, TestGfx (fork 1.35-nic034-07)
 
 ROM SHA-256 `99e0853f9716f851e1957617119a31332e43a3b0c348b722f24ef6554e0dd8f4` (fork **1.35-nic034-07**, header 1.35, 27 extensions), built with the

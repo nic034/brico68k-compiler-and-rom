@@ -2,7 +2,7 @@
 ; Paste the whole file into the serial terminal (PuTTY, Tera Term...). Lines starting with ; are ignored.
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
 > Version
-Brico68k 1.35-nic034-07 - Nic034 fork (Nicolas), not an Aurelien34 release
+Brico68k 1.35-nic034-08 - Nic034 fork (Nicolas), not an Aurelien34 release
 Based on Aurelien34/Brico68k 1.35 (52c1c92): the BricoNeo shows 1.35
 Source: github.com/nic034/brico68k-compiler-and-rom
 
@@ -229,12 +229,13 @@ P2       activity $200000-$002FDFFF, 65024 words
 > TestGfx
 Graphics test screen: fix layer and sprites (cartridge tiles)
 No NEO-GEO header at $100: no cartridge = no tiles to show.
-Fix (S ROM): labels, tiles $00-$FF. Sprites (C ROMs) from tile $00000000 (P1):
-  flips, 8 x 4 tiles, H shrink $F-$0, V shrink $FF-$3F (L0 ROM)
-Look for missing, shifted or wrong tiles, vertical bars, no flip, no shrink.
-Blank tiles: try another P1. TestDAC or TestBus clear the screen.
+Sprites (C ROMs) from tile $00000000 (P1). P2=1: whole screen, 20 x 14 tiles.
+Zones: flips, 8 x 4 tiles, H shrink $F-$0, V shrink $FF-$3F (L0 ROM),
+fix tiles $00-$FF (S ROM). Look for missing, shifted or wrong tiles,
+vertical bars, no flip, no shrink. Blank tiles: try another P1.
+TestDAC or TestBus clear the screen.
 
-[eot, 11 ms emulated]
+[eot, 12 ms emulated]
 ; TestGfx: labels, fix tiles and sprites (flips, 8x4 tiles, H and V shrink) from the cartridge tiles
 > Delay 5000
 > TestDAC

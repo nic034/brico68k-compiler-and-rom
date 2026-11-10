@@ -26,6 +26,9 @@
 ;   SCB4 $8400 + sprite: x << 7
 ; Sprites 1-35 are used. V shrink: the 16 tiles of the column are squeezed
 ; by the L0 ROM table into a 4-tile window, so at $3F all 16 show.
+; P2 = 1: the whole screen instead, 20 sprites of 14 tiles (320 x 224), no
+; label: a fault that depends on the position (line buffer, a column of
+; pixels) shows wherever it is; the test zones only cover parts of the screen.
 ; The screen stays (nothing is animated): TestDAC and TestBus clear it.
 ; No WRAM: registers, ROM tables, VRAM and palette RAM.
 ; ------------------------------------------------------------------------
@@ -42,6 +45,7 @@ GFX_FIX_ROW  equ 12					; and first row (y = 80)
 EXT_TEST_GFX:
 	move.l (BRICO_COMMAND_PARAM_1).l,d7	; read P1 at once (host clears it)
 	and.l #$000FFFFF,d7					; first C ROM tile, 20 bits
+	move.l (BRICO_COMMAND_PARAM_2).l,d5	; 1 = whole screen
 	; palette bank 0, sprites hidden, fix map = tile $20 on palette 0;
 	; leaves a0 = REG_VRAMRW and REG_VRAMMOD = 1 (ExtTestBus.s)
 	JsrA6 screenBlank
@@ -60,6 +64,9 @@ EXT_TEST_GFX:
 .colours:
 	move.w (a2)+,(a1)+
 	dbra d1,.colours
+
+	tst.l d5
+	bne .full
 
 	; --- fix layer: labels (left to right: + 32 per character) -----------
 	move.w #32,(REG_VRAMMOD).l
@@ -100,23 +107,77 @@ EXT_TEST_GFX:
 	cmp.w #16,d2
 	bne.s .fixCol
 
-	; --- sprites ---------------------------------------------------------
+	; --- sprites: the test zones, from the table -------------------------
 	lea GFX_SPRITES(pc),a2
 	moveq #1,d6						; sprite number
+	moveq #8,d5						; tile step down a column
 .sprite:
+	move.w (a2)+,d3					; x
+	movea.w (a2)+,a4				; y
+	movea.w (a2)+,a3				; shrink
+	moveq #0,d0
+	move.b (a2)+,d0
+	movea.w d0,a1					; height
+	move.b (a2)+,d0
+	move.w d0,d2
+	lsr.w #4,d0						; first tile, 0-7
+	and.w #3,d2						; flips
+	move.l d7,d4
+	add.l d0,d4
+	JsrA6 gfxSprite
+	cmp.w #GFX_COUNT+1,d6
+	bne.s .sprite
+	bra.s .report
+
+	; --- sprites: the whole screen, 20 columns of 14 tiles ---------------
+.full:
+	moveq #1,d6
+	moveq #20,d5					; tile = P1 + column + 20 * row
+	moveq #0,d3						; x
+	moveq #0,d2						; no flip
+	suba.l a4,a4					; y = 0
+	movea.w #$0FFF,a3				; full size
+	movea.w #14,a1
+.fullSprite:
+	move.l d7,d4
+	add.l d6,d4
+	subq.l #1,d4
+	JsrA6 gfxSprite
+	add.w #16,d3
+	cmp.w #20+1,d6
+	bne.s .fullSprite
+
+	; --- report ----------------------------------------------------------
+.report:
+	WatchDog
+	PrintLn "Graphics test screen: fix layer and sprites (cartridge tiles)"
+	cmp.l #$4E454F2D,($000100).l	; "NEO-"
+	beq.s .hasCart
+	PrintLn "No NEO-GEO header at $100: no cartridge = no tiles to show."
+.hasCart:
+	Print "Sprites (C ROMs) from tile $"
+	move.l d7,d0
+	swap d0
+	JsrA6 printWord
+	move.l d7,d0
+	JsrA6 printWord
+	PrintLn " (P1). P2=1: whole screen, 20 x 14 tiles."
+	PrintLn "Zones: flips, 8 x 4 tiles, H shrink $F-$0, V shrink $FF-$3F (L0 ROM),"
+	PrintLn "fix tiles $00-$FF (S ROM). Look for missing, shifted or wrong tiles,"
+	PrintLn "vertical bars, no flip, no shrink. Blank tiles: try another P1."
+	PrintLn "TestDAC or TestBus clear the screen."
+	jmp EOT_AND_WAIT(pc)
+
+; gfxSprite: writes sprite d6 and adds 1 to d6. d3 = x, a4 = y (visible
+; area), a3 = SCB2 shrink word, a1 = height in tiles, d2 = flips, d4 = first
+; tile (20 bits), d5 = tile step down the column, a0 = REG_VRAMRW,
+; REG_VRAMMOD = 1. Destroys d0, d1, d4.
+gfxSprite_JsrA6:
 	; SCB1: the whole 16-tile column (only "height" tiles are in the
-	; window; V shrink brings the others in). Tile = P1 + first + 8 * n.
+	; window; V shrink brings the others in)
 	move.w d6,d0
 	lsl.w #6,d0
 	move.w d0,(REG_VRAMADD).l
-	moveq #0,d3
-	move.b 7(a2),d3
-	move.w d3,d2
-	lsr.w #4,d3						; first tile, 0-7
-	and.w #3,d2						; flips
-	or.w #$0100,d2					; palette 1
-	move.l d7,d4
-	add.l d3,d4
 	moveq #16-1,d1
 .tile:
 	move.w d4,(a0)					; tile bits 15-0
@@ -125,19 +186,20 @@ EXT_TEST_GFX:
 	and.w #$000F,d0					; tile bits 19-16
 	lsl.w #4,d0
 	or.w d2,d0
+	or.w #$0100,d0					; palette 1
 	move.w d0,(a0)
-	addq.l #8,d4
+	add.l d5,d4
 	dbra d1,.tile
 	; SCB2: shrink
 	move.w d6,d0
 	add.w #VRAM_SCB2,d0
 	move.w d0,(REG_VRAMADD).l
-	move.w 4(a2),(a0)
+	move.w a3,(a0)
 	; SCB4: x
 	move.w d6,d0
 	add.w #VRAM_SCB4,d0
 	move.w d0,(REG_VRAMADD).l
-	move.w (a2),d0
+	move.w d3,d0
 	lsl.w #7,d0
 	move.w d0,(a0)
 	; SCB3 last (it makes the sprite visible): y and height
@@ -145,35 +207,13 @@ EXT_TEST_GFX:
 	add.w #VRAM_SCB3,d0
 	move.w d0,(REG_VRAMADD).l
 	move.w #496,d0
-	sub.w 2(a2),d0
+	sub.w a4,d0
 	lsl.w #7,d0
-	moveq #0,d1
-	move.b 6(a2),d1
+	move.w a1,d1
 	or.w d1,d0
 	move.w d0,(a0)
-	addq.l #8,a2
 	addq.w #1,d6
-	cmp.w #GFX_COUNT+1,d6
-	bne .sprite
-	WatchDog
-
-	; --- report ----------------------------------------------------------
-	PrintLn "Graphics test screen: fix layer and sprites (cartridge tiles)"
-	cmp.l #$4E454F2D,($000100).l	; "NEO-"
-	beq.s .hasCart
-	PrintLn "No NEO-GEO header at $100: no cartridge = no tiles to show."
-.hasCart:
-	Print "Fix (S ROM): labels, tiles $00-$FF. Sprites (C ROMs) from tile $"
-	move.l d7,d0
-	swap d0
-	JsrA6 printWord
-	move.l d7,d0
-	JsrA6 printWord
-	PrintLn " (P1):"
-	PrintLn "  flips, 8 x 4 tiles, H shrink $F-$0, V shrink $FF-$3F (L0 ROM)"
-	PrintLn "Look for missing, shifted or wrong tiles, vertical bars, no flip, no shrink."
-	PrintLn "Blank tiles: try another P1. TestDAC or TestBus clear the screen."
-	jmp EOT_AND_WAIT(pc)
+	RtsA6
 
 	even
 GFX_COLOURS:						; palette 1, colours 1-15 ($0RGB, 4 bits each)

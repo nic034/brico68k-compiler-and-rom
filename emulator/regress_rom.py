@@ -43,7 +43,8 @@ HEALTHY = ["Echo $1234", "Read $320001", "Read $380000", "Read $300000", "Read $
            "PlayEyeSnd", "TestAudio", "Echo $88",
            "TestWatchdog", "Echo $99", "TestWatchdog", "Echo $9A", "TestWatchdog", "TestWatchdog",
            "Dump $C00000 16", "Read $400000", "CartTest", "CartTest 1", "Dump $100 8", "TestWRAM",
-           "TestVectors", "TestGfx", "Echo $31", "TestGfx $12345", "TestDAC $15", "TestVectors"]
+           "TestVectors", "TestGfx", "Echo $31", "TestGfx $12345", "TestDAC $15", "TestVectors",
+           "TestGfx $12345 1", "TestGfx 0 1", "TestDAC $12"]
 SCREEN = {"testdac", "testbus"}
 
 
