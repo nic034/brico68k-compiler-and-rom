@@ -34,5 +34,14 @@ class ValidateRecordsTests(unittest.TestCase):
             validate_records([], "old")
 
 
+    def test_blank_scenario(self):
+        with self.assertRaisesRegex(ValueError, "scenario entry"):
+            validate_records({"  ": []}, "old")
+
+    def test_blank_status(self):
+        with self.assertRaisesRegex(ValueError, "status"):
+            validate_records({"healthy/none": [{"cmd": "Echo 1", "status": "  "}]}, "new")
+
+
 if __name__ == "__main__":
     unittest.main()
