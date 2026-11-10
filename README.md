@@ -525,7 +525,11 @@ each well under the 3 s host limit.
 
 ### Known limits (read before trusting a result)
 
-- **Nothing here has been validated on real hardware yet.** MAME is the reference used.
+- **Real hardware**: fork 1.35-nic034-06 was run on a real AES by Nicolas (2026-11-10): reported
+  working, and **CartDiag** passes on the jwestfall69 PROG board (its /ROMOE and /PORTOE prefetch
+  and bus hold tests exist nowhere else: MAME and the emulator cannot check them). No console log
+  was compared word for word, and no board with a known fault has been tested yet: that the tests
+  name a real fault correctly is still shown in simulation only. MAME stays the reference.
 - **CartTest / CartDiag**: MAME has no PROG board (the bench plays it with a shadow RAM) and no
   slot address faults on a ROM. The test cartridge's softlist entry needs `<feature name="slot"
   value="rom"/>`: without it MAME 0.264 maps `$000100-$000103` to a protection handler that reads

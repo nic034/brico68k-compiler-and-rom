@@ -4,6 +4,13 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-10 - First run on a real AES (fork 1.35-nic034-06)
+
+No ROM change. Nicolas ran 1.35-nic034-06 on a real AES: reported working, and CartDiag passes on
+the jwestfall69 PROG board. First real-hardware validation of this ROM, and of the size review of
+2026-11-07. Not done yet: a console log compared word for word with
+`bench/expected_healthy_aes.txt`, and a board with a known fault.
+
 ## 2026-11-07 - Code review: 1884 bytes freed, same outputs (fork 1.35-nic034-06)
 
 ROM SHA-256 `01b128ee3fb64ebe246d98ac2a58d6c0f315236e8349fa9b2f794019d29fa99b` (fork
