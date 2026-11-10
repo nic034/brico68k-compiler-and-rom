@@ -68,6 +68,24 @@ class InventoryRegressionTests(unittest.TestCase):
         differences, _ = check({scenario: [record()]}, {scenario: []})
         self.assertGreater(differences, 0)
 
+    def test_mismatched_audio_keeps_wram_tail_chaotic(self):
+        scenario = "fault/wram:data:0:0"
+        old = [record("TestAudio"), record("Echo 3")]
+        new = [record("Echo 2"), record("Echo 3")]
+        new[1]["words"] = [999]
+        differences, output = check({scenario: old}, {scenario: new})
+        self.assertEqual(differences, 1)
+        self.assertIn("DIFF command", output)
+        self.assertNotIn(":: Echo 3 ::", output)
+
+    def test_mismatched_audio_on_new_side_keeps_wram_tail_chaotic(self):
+        scenario = "fault/wram:data:0:0"
+        old = [record("Echo 2"), record("Echo 3")]
+        new = [record("TestAudio"), record("Echo 3")]
+        new[1]["words"] = [999]
+        differences, _ = check({scenario: old}, {scenario: new})
+        self.assertEqual(differences, 1)
+
     def test_random_cart_scenario_still_checks_inventory(self):
         scenario = "fault/test/cart:float:0"
         differences, _ = check({scenario: [record()]}, {scenario: []})
