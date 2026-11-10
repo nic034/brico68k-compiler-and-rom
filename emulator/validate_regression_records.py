@@ -7,6 +7,11 @@ def validate_records(results, label):
     for scenario, records in results.items():
         if not isinstance(scenario, str) or not scenario.strip() or not isinstance(records, list):
             raise ValueError(f"{label}: invalid scenario entry {scenario!r}")
+        # compare() parses this field as an integer for BIOS address-line faults.
+        if scenario.startswith("fault/bios:addr:"):
+            parts = scenario.split(":")
+            if len(parts) != 3 or not parts[2].isdecimal():
+                raise ValueError(f"{label}: invalid BIOS address-line scenario {scenario!r}")
         for index, record in enumerate(records):
             where = f"{label}/{scenario}[{index}]"
             if not isinstance(record, dict):
