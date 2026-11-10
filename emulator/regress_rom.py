@@ -177,6 +177,10 @@ def compare(a, b):
             continue
         wild = False
         for ra, rb in zip(a[sc], b[sc]):
+            # Command inventory mismatches are already reported above. Do not
+            # compare outputs belonging to different commands.
+            if ra["cmd"] != rb["cmd"]:
+                continue
             name = ra["cmd"].split()[0]
             # Chaotic by construction, compared apart: the 68000 runs garbage, so what it does
             # depends on where each byte of the code is. BIOS socket A1-A14 stuck or any socket
