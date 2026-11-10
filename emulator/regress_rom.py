@@ -180,6 +180,12 @@ def compare(a, b):
             # Command inventory mismatches are already reported above. Do not
             # compare outputs belonging to different commands.
             if ra["cmd"] != rb["cmd"]:
+                # A mismatched TestAudio still starts the chaotic WRAM tail.
+                if sc.startswith("fault/wram") and (
+                    ra["cmd"].split()[0] == "TestAudio" or
+                    rb["cmd"].split()[0] == "TestAudio"
+                ):
+                    wild = True
                 continue
             name = ra["cmd"].split()[0]
             # Chaotic by construction, compared apart: the 68000 runs garbage, so what it does
