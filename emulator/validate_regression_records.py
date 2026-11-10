@@ -10,7 +10,8 @@ def validate_records(results, label):
         # compare() parses this field as an integer for BIOS address-line faults.
         if scenario.startswith("fault/bios:addr:"):
             parts = scenario.split(":")
-            if len(parts) != 3 or not parts[2].isdecimal():
+            if (len(parts) != 3 or not parts[2].isascii() or not parts[2].isdecimal()
+                    or len(parts[2]) > 2 or not 1 <= int(parts[2]) <= 23):
                 raise ValueError(f"{label}: invalid BIOS address-line scenario {scenario!r}")
         for index, record in enumerate(records):
             where = f"{label}/{scenario}[{index}]"
