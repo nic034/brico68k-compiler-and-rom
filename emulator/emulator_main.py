@@ -558,18 +558,19 @@ def main_cli(argv):
 # Diagnostic catalogue: how the tests are grouped, run and judged
 # ---------------------------------------------------------------------------
 CATEGORIES = [
-    ("Overview", ["ChipCheck", "TestBus"]),
+    ("Overview", ["TestChip", "TestBus"]),
     ("Memory", ["TestWRAM", "TestBRAM", "TestPRAM"]),
-    ("Video", ["TestVRAM", "TestLSPC", "TestTiming", "TestDAC"]),
+    ("Video", ["TestVRAM", "TestLSPC", "TestTiming", "TestGfx", "TestDAC"]),
     ("Sound", ["TestZ80", "TestAudio", "PlayEyeSnd"]),
-    ("Inputs and system", ["TestInp", "TestStatusA", "TestSystype", "TestWatchdog"]),
+    ("Inputs and system", ["TestInp", "TestStatusA", "TestSystype", "TestVectors", "TestWatchdog"]),
     ("Cartridge", ["CartTest", "CartDiag"]),
     ("Tools", ["Version", "Echo", "Read", "Write", "WriteB", "Dump", "Color"]),
 ]
 TOOLS = set(CATEGORIES[-1][1])
-CHK_PROGRESS, CHK_PROG_MAGIC = 0x10FFF0, 0x10FFF2   # ChipCheck progress word and its magic ($C4EC)
+CHK_PROGRESS, CHK_PROG_MAGIC = 0x10FFF0, 0x10FFF2   # TestChip progress word and its magic ($C4EC)
 # what the emulator cannot judge by itself
 LOOK = {"TestDAC": "Look at the screen: 16 bands, one colour bit each (a black band = dead bit).",
+        "TestGfx": "Sprites and fix tiles are not drawn by the emulator (backdrop only): look at the real screen.",
         "PlayEyeSnd": "Sound is not emulated: the eyecatcher music cannot be heard here."}
 STATUS_STYLE = {   # status -> (label, foreground, background)
     "PASS": ("PASS", "#1a7f37", "#dafbe1"), "FAIL": ("FAIL", "#cf222e", "#ffebe9"),
@@ -1200,8 +1201,8 @@ def main_gui(rom_arg=None):
 
     def record(name, line, stt, text, secs, forced=None):
         s, v = forced or classify(name, stt, text)
-        if name in ("TestZ80", "TestAudio", "ChipCheck") and s in ("FAIL", "WARN") and z80_var.get().startswith("No") \
-                and (name != "ChipCheck" or "Z80" in v):
+        if name in ("TestZ80", "TestAudio", "TestChip") and s in ("FAIL", "WARN") and z80_var.get().startswith("No") \
+                and (name != "TestChip" or "Z80" in v):
             v += "  Expected here: Settings > Z80 program is 'No program' (AES without cartridge)."
         st["results"][name] = {"status": s, "verdict": v, "text": text, "secs": secs, "line": line,
                                "when": time.strftime("%H:%M:%S")}

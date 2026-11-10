@@ -9,7 +9,9 @@ status, the raw output words, emulated time, Z80 commands, cartridge writes, and
 backdrop lines after the screen commands (TestDAC, TestBus). About 1 minute on 2 cores.
 With CORE=emulator/build/libneocore_test.so (emulator/build_test_core.py) it also runs
 10 input sets (joypads, DIP, STATUS_A/B, SYSTYPE, MVS with a backup RAM): the stock core is
-an AES with nothing pressed, so it never reaches the MVS / button / memory card branches.
+an AES with nothing pressed, so it never reaches the MVS / button / memory card branches. It
+also holds the vector table switch (latch Q1) at 0 and at 1 for TestVectors, and records a
+checksum of the VRAM and palette words that TestGfx leaves (the core draws no tile).
 
 "compare" must print 0 differences for a change that is meant to keep the outputs. Apart:
 - unstable cartridge lines (cart:float): random per access, status only;
@@ -20,7 +22,7 @@ an AES with nothing pressed, so it never reaches the MVS / button / memory card 
 - Dump / Read of the ROM itself, and the TestWatchdog loop count (a few loops: it depends on
   the cycles spent before the starve loop), shown as MEASURED.
 """
-import sys, os, json, re, difflib, importlib.util
+import sys, os, json, re, zlib, ctypes, difflib, importlib.util
 from collections import defaultdict
 from multiprocessing import Pool
 from pathlib import Path
@@ -34,13 +36,14 @@ HEALTHY = ["Echo $1234", "Read $320001", "Read $380000", "Read $300000", "Read $
            "Write $5A $100001", "Write $1234 $100000", "WriteB $A5 $100000", "Read $100000",
            "Dump $100000 8", "Dump $100001 4", "Dump $C00000 3000",
            "TestInp", "TestWRAM", "TestBRAM", "TestPRAM", "TestVRAM", "TestLSPC", "Color $7FFF",
-           "TestStatusA", "TestSystype", "TestZ80", "TestTiming", "ChipCheck",
+           "TestStatusA", "TestSystype", "TestZ80", "TestTiming", "TestChip",
            "TestDAC", "Echo $77", "TestDAC 1", "Echo $78", "TestDAC $10", "TestDAC $17", "TestDAC $1F",
            "TestDAC $30", "TestDAC $35", "TestDAC 5", "Echo $79",
            "TestBus", "Echo $66", "Version", "@0xC00001", "Echo $55", "@0xC00000", "Echo $56",
            "PlayEyeSnd", "TestAudio", "Echo $88",
            "TestWatchdog", "Echo $99", "TestWatchdog", "Echo $9A", "TestWatchdog", "TestWatchdog",
-           "Dump $C00000 16", "Read $400000", "CartTest", "CartTest 1", "Dump $100 8", "TestWRAM"]
+           "Dump $C00000 16", "Read $400000", "CartTest", "CartTest 1", "Dump $100 8", "TestWRAM",
+           "TestVectors", "TestGfx", "Echo $31", "TestGfx $12345", "TestDAC $15", "TestVectors"]
 SCREEN = {"testdac", "testbus"}
 
 
@@ -74,6 +77,12 @@ def run_cmd(c, h, line):
     rec["words"] = vals
     rec["text"] = "".join(chr(v) if v == 10 or 32 <= v < 127 else f"<{v:04X}>" for v in vals)
     rec["overflow"] = int(c.lib.neo_host_overflow())
+    if line.split()[0].lower() == "testgfx" and st == "eot" and hasattr(c.lib, "neo_test_vram"):
+        buf = (ctypes.c_uint16 * 0x10000)()            # test core only: what the screen is made of
+        c.lib.neo_test_vram(buf)
+        pal = [c.lib.neo_peek16(0x400000 + 2 * i) for i in range(32)] + [c.lib.neo_peek16(0x401FFE)]
+        rec["gfx"] = zlib.crc32(bytes(str((list(buf[0x0000:0x0900]), list(buf[0x7000:0x7500]),
+                                           list(buf[0x8000:0x8600]), pal)), "ascii"))
     if line.split()[0].lower() in SCREEN and st == "eot":
         for _ in range(4):
             c.lib.neo_run_frame()
@@ -103,6 +112,8 @@ def scenario(args):
     E.apply_faults(c, [E.parse_fault(f) for f in faults])
     for _ in range(60):
         c.lib.neo_run_frame()
+    if len(args) > 7:
+        c.lib.neo_test_latch(*args[7])                 # after the boot: a held system latch output
     h = E.Host(c, rom)
     out = []
     for line in cmds:
@@ -114,12 +125,12 @@ def scenarios(rom):
     sc = []
     for cart in ("none", "test", "diag"):
         sc.append((f"healthy/{cart}", rom, cart, 1, [], HEALTHY + (["CartDiag", "TestWRAM", "CartDiag"] if cart == "diag" else [])))
-    sc.append(("healthy/none/nowd", rom, "none", 0, [], ["TestWatchdog", "Echo 1", "TestWatchdog", "ChipCheck"]))
-    sc.append(("healthy/test/z80none", rom, "test", 1, [], ["TestZ80", "ChipCheck", "TestAudio", "Echo 2"]))
-    tests = {"wram": ["TestWRAM", "ChipCheck", "TestAudio", "Echo 3", "TestWatchdog", "TestWatchdog"],
-             "pal": ["TestPRAM", "ChipCheck", "TestDAC", "Echo 3"],
-             "vramlo": ["TestVRAM", "ChipCheck", "TestLSPC"], "vramhi": ["TestVRAM", "ChipCheck", "TestLSPC"],
-             "line": ["TestTiming", "ChipCheck", "TestDAC", "Echo 4", "TestBus", "Echo 5"],
+    sc.append(("healthy/none/nowd", rom, "none", 0, [], ["TestWatchdog", "Echo 1", "TestWatchdog", "TestChip"]))
+    sc.append(("healthy/test/z80none", rom, "test", 1, [], ["TestZ80", "TestChip", "TestAudio", "Echo 2"]))
+    tests = {"wram": ["TestWRAM", "TestChip", "TestAudio", "Echo 3", "TestWatchdog", "TestWatchdog"],
+             "pal": ["TestPRAM", "TestChip", "TestDAC", "Echo 3"],
+             "vramlo": ["TestVRAM", "TestChip", "TestLSPC"], "vramhi": ["TestVRAM", "TestChip", "TestLSPC"],
+             "line": ["TestTiming", "TestChip", "TestDAC", "Echo 4", "TestBus", "Echo 5"],
              "bios": ["TestBus", "Echo 6", "Version", "Dump $C07FF0 16"]}
     for f in E.all_single_faults():
         spec_ = E.fault_spec(f)
@@ -136,7 +147,7 @@ def scenarios(rom):
         sc.append((f"fault/test/{cf}", rom, "test", 1, [cf], ["CartTest", "CartTest 1"]))
         sc.append((f"fault/diag/{cf}", rom, "diag", 1, [cf], ["CartDiag", "CartTest"]))
     if CORE:
-        cmds = ["TestInp", "TestStatusA", "TestSystype", "TestBRAM", "ChipCheck", "TestWRAM"]
+        cmds = ["TestInp", "TestStatusA", "TestSystype", "TestBRAM", "TestChip", "TestWRAM"]
         # p1, dip, p2, status_a, status_b, systype word, MVS backup RAM
         for i, inp in enumerate([
                 (0xFF, 0x00, 0xFF, 0x00, 0x7F, 0xFF00, 0), (0x00, 0xFF, 0x00, 0xFF, 0x0F, 0x0000, 0),
@@ -145,6 +156,10 @@ def scenarios(rom):
                 (0x6E, 0x33, 0x99, 0x40, 0xC6, 0x007F, 1), (0x81, 0xCC, 0x66, 0x9F, 0x23, 0x1234, 0),
                 (0x33, 0x0F, 0xF0, 0x5A, 0x41, 0x00BF, 0), (0xCC, 0xF0, 0x0F, 0xA5, 0xB9, 0x0000, 1)]):
             sc.append((f"inputs/{i}", rom, "none", 1, [], cmds, inp))
+        idle = (0xFF, 0x00, 0xFF, 0x00, 0x7F, 0xFF00, 0)
+        for cart in ("none", "test", "diag"):
+            for v in (0, 1):                           # vector table switch (latch Q1) held
+                sc.append((f"latch/q1={v}/{cart}", rom, cart, 1, [], ["TestVectors", "Echo $41", "TestVectors"], idle, (1, v)))
     return sc
 
 
@@ -179,17 +194,17 @@ def compare(a, b):
                 continue
             if ra["cmd"].startswith(("Dump $C0", "Read $C0")):     # reads the ROM itself: layout changes
                 continue
-            keys = ("status", "words", "lines", "z80", "cartw", "latchw", "overflow")
+            keys = ("status", "words", "lines", "gfx", "z80", "cartw", "latchw", "overflow")
             bad = [k for k in keys if ra.get(k) != rb.get(k)]
-            if bad == ["words"] and MEASURED.sub("", ra["text"]) == MEASURED.sub("", rb["text"]):
-                g = lambda r: " | ".join(l.strip() for l in r["text"].splitlines() if "after ~" in l)
+            if bad == ["words"] and MEASURED.sub("", ra.get("text", "")) == MEASURED.sub("", rb.get("text", "")):
+                g = lambda r: " | ".join(l.strip() for l in r.get("text", "").splitlines() if "after ~" in l)
                 print(f"MEASURED {sc} {ra['cmd']}: {g(ra)}  ->  {g(rb)}")
                 bad = []
             if bad:
                 diffs += 1
                 print(f"DIFF {sc} :: {ra['cmd']} :: {bad}")
                 if "words" in bad:
-                    for l in list(difflib.unified_diff(ra["text"].splitlines(), rb["text"].splitlines(),
+                    for l in list(difflib.unified_diff(ra.get("text", "").splitlines(), rb.get("text", "").splitlines(),
                                                        "old", "new", lineterm="", n=0))[:14]:
                         print("    " + l)
                 for k in bad:

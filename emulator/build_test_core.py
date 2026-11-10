@@ -4,7 +4,9 @@
 The shipped core is an AES with nothing pressed and no memory card, so the ROM's MVS, button,
 DIP and memory card branches never run in it. This copy of neocore.c adds one function,
 neo_test_inputs(p1, dip, p2, status_a, status_b, systype, mvs), that sets those ports, and a
-64 KB backup RAM at $D00000 when mvs = 1. Everything else is the shipped core: with the default
+64 KB backup RAM at $D00000 when mvs = 1; neo_test_latch(q, v) holds system latch output q at v
+(q = -1: free), e.g. q = 1 for the vector table switch; neo_test_vram(out) copies the 64 K VRAM
+words (the core renders no sprite and no fix tile). Everything else is the shipped core: with the default
 values it gives the same results word for word.
 Never packaged into Brico68k_Emulator.py. Linux, gcc. Reuses the Musashi / z80 clones of
 build_core.py (same pinned commits) or clones them.
@@ -27,6 +29,12 @@ def patch(c):
          "static uint8_t t_bram[0x10000];\n"
          "EXPORT void neo_test_inputs(int p1, int dip, int p2, int sa, int sb, int sys, int mvs)\n"
          "{ t_p1 = p1; t_dip = dip; t_p2 = p2; t_sa = sa; t_sb = sb; t_sys = sys; t_mvs = mvs; }\n"
+         "static int t_lq = -1, t_lv;\n"
+         "static uint8_t latch[8];\n"
+         "EXPORT void neo_test_latch(int q, int v) { t_lq = q; t_lv = v; if (q >= 0) latch[q] = (uint8_t)v; }\n"
+         "static uint16_t vram[0x10000];\n"
+         "static unsigned vram_phys(unsigned v);\n"
+         "EXPORT void neo_test_vram(uint16_t *out) { for (unsigned v = 0; v < 0x10000; v++) out[v] = vram[vram_phys(v)]; }\n"
          "static unsigned read16(unsigned a, int lsb_only)\n{"),
         ("if (a < 0x320000) return 0xFF00;                        /* P1: nothing pressed */",
          "if (a < 0x320000) return (a == 0x300080) ? t_sys : ((t_p1 << 8) | t_dip);"),
@@ -38,6 +46,9 @@ def patch(c):
          "if (a < 0x3A0000) return (t_sb << 8) | 0xFF;"),
         ("return open_bus();                                      /* AES: no backup RAM */",
          "if (t_mvs && a < 0xD10000) return (t_bram[a & 0xFFFE] << 8) | t_bram[(a & 0xFFFE) + 1];\n\treturn open_bus();"),
+        ("\t\tif (mask & 0x00FF) { unsigned off = (a >> 1) & 0xF; latch[off & 7] = (uint8_t)((off & 8) >> 3); }",
+         "\t\tif (mask & 0x00FF) { unsigned off = (a >> 1) & 0xF; latch[off & 7] = (uint8_t)((off & 8) >> 3);\n"
+         "\t\t\tif (t_lq >= 0) latch[t_lq] = (uint8_t)t_lv; }"),
         ("\t/* ROM, cartridge, memory card, unmapped: ignored */",
          "\tif (t_mvs && a >= 0xD00000 && a < 0xD10000) {\n"
          "\t\tif (mask & 0xFF00) t_bram[a & 0xFFFE] = (uint8_t)(d >> 8);\n"

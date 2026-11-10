@@ -46,9 +46,9 @@ PALETTE_0   equ $400000		; palette 0, colours 0-15 (colour 0 = transparent)
 ; above the stack: SP starts at $10F300 and grows down)
 WDOG_MAGIC  equ $10FFE0		; 4 words
 WDOG_COUNT  equ $10FFE8
-; ChipCheck (BIOS work RAM area, above the stack)
+; TestChip (BIOS work RAM area, above the stack)
 CHK_PROGRESS   equ $10FFF0	; word 0-100, read by the emulator
-CHK_PROG_MAGIC equ $10FFF2	; word $C4EC while ChipCheck runs
+CHK_PROG_MAGIC equ $10FFF2	; word $C4EC while TestChip runs
 CHK_VBL_COUNT  equ $10FFF4	; word, IRQ1 count
 CHK_TMR_COUNT  equ $10FFF6	; word, IRQ2 count
 CHK_IRQ_MAGIC  equ $10FFF8	; long: the IRQ handlers count only when it holds CHK_IRQ_MAGIC_VAL
@@ -99,7 +99,7 @@ REG_STATUS_B equ $380000
 	; Brico16Bits shows "Found BricoNeo ROM version 1.35". build.py and the
 	; Compiler check that the header equals the base of this string.
 	macro FORK_VERSION
-		dc.b "1.35-nic034-06"
+		dc.b "1.35-nic034-07"
 	endm
 
 	macro BRICONEO_VERSION

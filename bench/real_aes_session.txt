@@ -3,7 +3,7 @@
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
 Version
 Echo $1234
-ChipCheck
+TestChip
 TestBus
 ; TestBus: 16 bands on screen until the next command, A1 at the top, all green = OK
 TestWRAM
@@ -19,6 +19,7 @@ Delay 4000
 TestInp
 TestStatusA
 TestSystype
+TestVectors
 TestWatchdog
 ; first pass starves the watchdog: wait for the reset, then read the result
 Delay 2000
@@ -26,5 +27,8 @@ TestWatchdog
 ; cartridge P bus: security code (P1), activity (P2); read only
 CartTest
 ; diagnostic PROG board only (it WRITES its SRAM, never on a game cartridge): CartDiag
+TestGfx
+; TestGfx: labels, fix tiles and sprites (flips, 8x4 tiles, H and V shrink) from the cartridge tiles
+Delay 5000
 TestDAC
 ; TestDAC leaves 16 colour bands on screen: one band per colour bit, a black band = dead bit

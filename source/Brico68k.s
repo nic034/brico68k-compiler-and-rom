@@ -45,8 +45,8 @@
 	dc.l	EXC_OTHER			; 22 (reserved)
 	dc.l	EXC_OTHER			; 23 (reserved)
 	dc.l	EXC_INTERRUPT		; 24 spurious interrupt
-	dc.l	IRQ1_HANDLER		; 25 level 1 (VBLANK) - masked (SR=$2700) except during ChipCheck
-	dc.l	IRQ2_HANDLER		; 26 level 2 (timer) - masked except during ChipCheck
+	dc.l	IRQ1_HANDLER		; 25 level 1 (VBLANK) - masked (SR=$2700) except during TestChip
+	dc.l	IRQ2_HANDLER		; 26 level 2 (timer) - masked except during TestChip
 	dc.l	EXC_INTERRUPT		; 27 level 3 - masked
 	dc.l	EXC_INTERRUPT		; 28 level 4 - masked
 	dc.l	EXC_INTERRUPT		; 29 level 5 - masked
@@ -66,7 +66,7 @@
 	; Entry for extensions that keep running until the next command arrives
 	; (e.g. TestDAC): jump here with d0 = a non-zero BRICO_COMMAND_IN read
 	global  DISPATCH_COMMAND
-	; Unexpected interrupt report, also used by the ChipCheck IRQ handlers
+	; Unexpected interrupt report, also used by the TestChip IRQ handlers
 	global  EXC_INTERRUPT
 
 	section	text,code
@@ -110,11 +110,13 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_TEST_DAC,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestDAC",			"RGB DAC: 16 bands, one colour bit each. P1=1: dark bit. P1=$10+n: band n full screen. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_TIMING,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestTiming",		"LSPC line counter (steps, range, lines/frame, NTSC/PAL), auto-animation, CPU cycles per frame. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_WATCHDOG,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestWatchdog",		"Run 1 stops kicking the watchdog (reset ~0.13 s), run 2 reports it. Uses WRAM $10FFE0."
-	DECLARE_EXTENSION EXT_CHIP_CHECK,		BRICO_EXT_OUTPUT_TYPE_STRING,	"ChipCheck",		"One line per part, < 1 s: WRAM, palette, VRAM, LSPC2, NEO-C1, IRQs, Z80, NEO-D0 clocks. IRQs need WRAM."
+	DECLARE_EXTENSION EXT_TEST_CHIP,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestChip",		"One line per part, < 1 s: WRAM, palette, VRAM, LSPC2, NEO-C1, IRQs, Z80, NEO-D0 clocks. IRQs need WRAM."
 	DECLARE_EXTENSION EXT_TEST_SYSTYPE,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestSystype",		"SYSTYPE: TEST button, JAMMA sense (MVS). No WRAM."
 	DECLARE_EXTENSION EXT_TEST_BUS,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBus",			"BIOS socket 68000 -> BricoNeo: A15/A16 (NeoDiag mirrors), A1-A14/D0-D15 (CRC32); 16 bands. Run at boot. No WRAM."
 	DECLARE_EXTENSION EXT_CART_TEST,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartTest",			"Game cartridge P bus, read only: P1 security code names stuck/open lines, P2 activity (P1=1 forces it). Never writes. No WRAM."
 	DECLARE_EXTENSION EXT_CART_DIAG,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartDiag",			"p-bus test (diag cart), github.com/jwestfall69/neogeo-diag-aes-prog. WRITES the SRAM: /ROMOE, /PORTOE, D0-D15, lanes, A1-A19. No WRAM."
+	DECLARE_EXTENSION EXT_TEST_VECTORS,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestVectors",		"Vector table switch, system ROM / cartridge (REG_SWPBIOS / REG_SWPROM). No WRAM."
+	DECLARE_EXTENSION EXT_TEST_GFX,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestGfx",			"Screen: fix tiles, sprites (flips, 8x4 tiles, H/V shrink), cartridge tiles from P1. No WRAM."
 	; Version: written by hand (not DECLARE_EXTENSION) so that the description
 	; takes the fork version from FORK_VERSION, its only definition
 	dc.l EXT_VERSION

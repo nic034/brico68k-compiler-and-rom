@@ -1,13 +1,13 @@
 	include "inc/define.inc"
 
-	global EXT_CHIP_CHECK
+	global EXT_TEST_CHIP
 	global IRQ1_HANDLER
 	global IRQ2_HANDLER
 
 	section text
 
 ; ------------------------------------------------------------------------
-; ChipCheck - quick state of the board, one line per part (< 1 s).
+; TestChip - quick state of the board, one line per part (< 1 s).
 ; Each probe is short; the long tests (TestWRAM, March..., TestTiming...)
 ; stay the reference when a line fails.
 ;
@@ -53,7 +53,7 @@ LINE_TOP    equ $FF80
 		move.w #\1,(CHK_PROGRESS).l
 	endm
 
-EXT_CHIP_CHECK:
+EXT_TEST_CHIP:
 	moveq #0,d7
 	move.w #$C4EC,(CHK_PROG_MAGIC).l
 	Progress 5
@@ -820,7 +820,7 @@ memReport_JsrA6:
 	jmp (a5)
 
 ; ------------------------------------------------------------------------
-; Level 1 / level 2 autovectors. Count only during ChipCheck (magic set),
+; Level 1 / level 2 autovectors. Count only during TestChip (magic set),
 ; otherwise behave as before (EXC_INTERRUPT: report and abort).
 ; ------------------------------------------------------------------------
 IRQ1_HANDLER:

@@ -102,8 +102,8 @@ b["run_all"](); pump(0.2)
 check("Run all button shows progress", "Running" in str([w.cget("text") for w in b["key_widgets"][4:5]]))
 check("Run all finished", wait_idle(60))
 pump(0.3)
-expect = {"ChipCheck": "PASS", "TestBus": "PASS", "TestWRAM": "PASS", "TestBRAM": "N/A", "TestPRAM": "PASS", "TestVRAM": "PASS",
-          "TestLSPC": "PASS", "TestTiming": "PASS", "TestDAC": "LOOK",
+expect = {"TestChip": "PASS", "TestBus": "PASS", "TestWRAM": "PASS", "TestBRAM": "N/A", "TestPRAM": "PASS", "TestVRAM": "PASS",
+          "TestLSPC": "PASS", "TestTiming": "PASS", "TestGfx": "LOOK", "TestDAC": "LOOK", "TestVectors": "PASS",
           "TestZ80": "PASS", "TestAudio": "PASS", "PlayEyeSnd": "N/A", "TestInp": "INFO", "TestStatusA": "INFO",
           "TestSystype": "INFO", "TestWatchdog": "PASS"}
 for n, e in expect.items():
@@ -184,7 +184,7 @@ check("Z80 lamp follows the setting", "no program" in b["lamps"]["z80"][1].cget(
 b["run_all"](); wait_idle(60); pump(0.2)
 check("no program: TestZ80 CHECK", badge("TestZ80") == "CHECK", str(badge("TestZ80")))
 check("no program: TestAudio FAIL", badge("TestAudio") == "FAIL", str(badge("TestAudio")))
-check("no program: ChipCheck CHECK (Z80 only)", badge("ChipCheck") == "CHECK", str(badge("ChipCheck")))
+check("no program: TestChip CHECK (Z80 only)", badge("TestChip") == "CHECK", str(badge("TestChip")))
 tree.selection_set("TestAudio"); pump(0.1)
 check("no program: failure marked as expected", "Expected here" in b["verdict"].cget("text"))
 b["z80"].set("Test M1 (handshake only)"); pump(0.1)
@@ -218,7 +218,7 @@ shot("03_busy.png")
 wait_idle()
 check("busy indicator cleared", b["busy"].get() == "")
 seen_pct = set()
-b["send"]("ChipCheck")
+b["send"]("TestChip")
 t_end = time.time() + 5
 while time.time() < t_end and st["host"].pending:
     pump(0.02)
@@ -226,7 +226,7 @@ while time.time() < t_end and st["host"].pending:
         if not seen_pct:
             shot("03b_chipcheck_progress.png")
         seen_pct.add(b["busy"].get())
-check("ChipCheck shows a progress percentage", len(seen_pct) >= 2, str(sorted(seen_pct)))
+check("TestChip shows a progress percentage", len(seen_pct) >= 2, str(sorted(seen_pct)))
 wait_idle()
 b["reset"](); pump(0.3)
 b["send"]("Echo 3"); wait_idle()
@@ -363,11 +363,11 @@ check("compare: summary shown", "19 same" in b["compare_info"].get(), b["compare
 b["compare_open"](str(OUT / "fake_wram.log"))
 wait_job(120)
 diffs = [ct.item(i, "values")[0] for i in ct.get_children() if ct.item(i, "values")[3] == "DIFFERENT"]
-check("compare: dead WRAM chip log -> 5 different", diffs == ["ChipCheck", "TestWRAM", "TestAudio", "TestWatchdog", "TestWatchdog"],
+check("compare: dead WRAM chip log -> 5 different", diffs == ["TestChip", "TestWRAM", "TestAudio", "TestWatchdog", "TestWatchdog"],
       str(diffs))
 pump(0.2)
 ctext = b["compare_text"].get("1.0", "end")
-check("compare: first difference shown as a diff", "ChipCheck" in ctext and "+Work RAM         FAIL" in ctext, ctext[:300])
+check("compare: first difference shown as a diff", "TestChip" in ctext and "+Work RAM         FAIL" in ctext, ctext[:300])
 shot("08_compare.png")
 b["compare_diagnose"]()
 check("diagnosis finished", wait_job(600))

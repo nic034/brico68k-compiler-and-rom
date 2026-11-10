@@ -10,17 +10,17 @@ import mame_bench
 R = sys.argv[1]
 rom = open(R, 'rb').read()
 CASES = [
-  ("wram:data:5:1",   {"BRICO_STUCK": "0x100000,0x10ffff,0x0020,0xFFFF"}, ["TestWRAM", "ChipCheck"]),
-  ("wram:data:12:0",  {"BRICO_STUCK": "0x100000,0x10ffff,0,0xEFFF"},     ["TestWRAM", "ChipCheck"]),
-  ("wram:lane:upper", {"BRICO_STUCK": "0x100000,0x10ffff,0xFF00,0xFFFF"}, ["TestWRAM", "ChipCheck"]),
-  ("wram:addr:7:0",   {"BRICO_ALIAS": "0x100000,0x10ffff,0xFFFF7F"},    ["TestWRAM", "ChipCheck"]),
-  ("wram:addr:12:0",  {"BRICO_ALIAS": "0x100000,0x10ffff,0xFFEFFF"},    ["TestWRAM", "ChipCheck"]),
-  ("pal:data:3:0",    {"BRICO_STUCK": "0x400000,0x401fff,0,0xFFF7"},    ["TestPRAM", "ChipCheck"]),
-  ("pal:data:15:1",   {"BRICO_STUCK": "0x400000,0x401fff,0x8000,0xFFFF"},["TestPRAM", "ChipCheck"]),
+  ("wram:data:5:1",   {"BRICO_STUCK": "0x100000,0x10ffff,0x0020,0xFFFF"}, ["TestWRAM", "TestChip"]),
+  ("wram:data:12:0",  {"BRICO_STUCK": "0x100000,0x10ffff,0,0xEFFF"},     ["TestWRAM", "TestChip"]),
+  ("wram:lane:upper", {"BRICO_STUCK": "0x100000,0x10ffff,0xFF00,0xFFFF"}, ["TestWRAM", "TestChip"]),
+  ("wram:addr:7:0",   {"BRICO_ALIAS": "0x100000,0x10ffff,0xFFFF7F"},    ["TestWRAM", "TestChip"]),
+  ("wram:addr:12:0",  {"BRICO_ALIAS": "0x100000,0x10ffff,0xFFEFFF"},    ["TestWRAM", "TestChip"]),
+  ("pal:data:3:0",    {"BRICO_STUCK": "0x400000,0x401fff,0,0xFFF7"},    ["TestPRAM", "TestChip"]),
+  ("pal:data:15:1",   {"BRICO_STUCK": "0x400000,0x401fff,0x8000,0xFFFF"},["TestPRAM", "TestChip"]),
   # the bench's shadow store is shared by both palette banks: MAME also reports a (false) bank-select fault
-  ("pal:addr:6:0",    {"BRICO_ALIAS": "0x400000,0x401fff,0xFFFFBF"},    ["TestPRAM", "ChipCheck"]),
-  ("line:data:3:1",   {"BRICO_STUCK": "0x3c0006,0x3c0007,0x0400,0xFFFF"},["TestTiming", "ChipCheck"]),
-  ("line:data:0:0",   {"BRICO_STUCK": "0x3c0006,0x3c0007,0,0xFF7F"},    ["TestTiming", "ChipCheck"]),
+  ("pal:addr:6:0",    {"BRICO_ALIAS": "0x400000,0x401fff,0xFFFFBF"},    ["TestPRAM", "TestChip"]),
+  ("line:data:3:1",   {"BRICO_STUCK": "0x3c0006,0x3c0007,0x0400,0xFFFF"},["TestTiming", "TestChip"]),
+  ("line:data:0:0",   {"BRICO_STUCK": "0x3c0006,0x3c0007,0,0xFF7F"},    ["TestTiming", "TestChip"]),
 ]
 # cartridge slot (needs BRICO_CART = the tools/make_test_cart.py folder; the emulator inserts the
 # same test cartridge). MAME's fault covers $000080-$2FFFFF (WRAM too: CartTest does not use it).
@@ -39,7 +39,7 @@ DIAG_CASES = [
   ("diag+cart:addr:19:0", {"BRICO_ALIAS": "0x000080,0x2fffff,0xD7FFFF"}, ["CartDiag"]),
 ] if not os.environ.get("BRICO_CART") else []
 VRAM = [("vramlo:data:2:1", "vramhi:data:2:1", {"BRICO_STUCK": "0x3c0002,0x3c0003,0x0004,0xFFFF"},
-         ["TestVRAM", "TestLSPC", "ChipCheck"])]
+         ["TestVRAM", "TestLSPC", "TestChip"])]
 def emu_run(faults, jobs):
     c = Core(os.environ.get('CORE', str(HERE / 'build' / 'libneocore_zig.so'))); c.load(rom)
     if faults and faults[0] == "diag":
@@ -68,7 +68,7 @@ def mame_run(env, jobs):
         os.environ.clear(); os.environ.update(old)
     return [(r['status'], [int(x, 16) for x in r['hex'].split()] if r['hex'] else []) for r in res if 'name' in r]
 def measured_only(a, b):
-    """ChipCheck measures the 68000 clock against the host's 1 ms clear, which the MAME bench can only
+    """TestChip measures the 68000 clock against the host's 1 ms clear, which the MAME bench can only
     approximate (first command read after 1 ms of machine time): the last digit may differ."""
     import re
     f = lambda v: re.sub(r"~\d+\.\d (MHz|Hz)", r"~x \1", ''.join(chr(x) for x in v if x == 10 or 32 <= x < 127))

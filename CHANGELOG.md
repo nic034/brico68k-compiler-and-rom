@@ -4,6 +4,42 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-10 - TestChip (renamed), TestVectors, TestGfx (fork 1.35-nic034-07)
+
+ROM SHA-256 `99e0853f9716f851e1957617119a31332e43a3b0c348b722f24ef6554e0dd8f4` (fork **1.35-nic034-07**, header 1.35, 27 extensions), built with the
+Compiler. The code ends 150 bytes under `$7FFA`.
+
+- **ChipCheck is renamed TestChip**: same test, same output. Emulator, bench session, tools and
+  README follow (source file `ExtTestChip.s`).
+- **TestVectors** (new): the vector table switch `$000000-$00007F`, system ROM / cartridge
+  (`REG_SWPBIOS` / `REG_SWPROM`, system latch Q1). Read only, no WRAM, 3 ms.
+- **TestGfx** (new): test screen for the fix layer and the sprites with the cartridge tiles, first
+  C tile = P1: labels, fix tiles `$00-$FF`, flips, 8 x 4 tiles, H and V shrink. No WRAM, 11 ms; the
+  screen stays. VRAM writes keep the wiki "VRAM" rules (new address 16 cycles after a data write,
+  12 between data writes) with at least 8 cycles of margin.
+
+Brico16Bits: its source was read again at `84f7840` (2026-11-09) for both commands. Parameters
+read first, one EOT, output through the port only with interrupts masked, at most 461 words (ring
+of 2048), nothing runs after the EOT, exceptions through the common `EXCPT` report as every other
+extension. The port watcher compares the 16 address pins of each ROM access with the port
+(`$1FF02`) and the EOT trigger (`$1FF00`): the reads TestVectors adds (`$000000-$00007F`,
+`$C00000-$C0007F`) never match them. Upstream's only change since `5859d6b` (byte-swap detection)
+does not affect this ROM. Names up to 15 characters and descriptions up to 300 are respected.
+
+Checks, emulator only:
+- 1.35-nic034-06 against -07, 517 scenarios, 1926 commands (test core): 27 differences, all
+  intended (24 runs of the two new commands, 3 Version). Every other output is identical word for
+  word, TestChip included; durations unchanged.
+- TestVectors with latch Q1 held at 0 and at 1 (new `neo_test_latch` in the test core), without a
+  cartridge, with the test cartridge and with the PROG board: failure named in each case.
+- TestGfx: the core draws no tile, so the check is on the VRAM and palette words (checksum in
+  `regress_rom.py`, new `neo_test_vram`), and on a picture drawn from them with synthetic tiles.
+  TestDAC after it leaves no sprite and no fix tile.
+
+Not checked: real hardware (TestGfx is a screen: only a console can judge it), MAME (not
+installed in this session), `guiverify.py` (no Tk here; its expected badges are updated),
+`build.py` and CMake (local firmware repository).
+
 ## 2026-11-10 - First run on a real AES (fork 1.35-nic034-06)
 
 No ROM change. Nicolas ran 1.35-nic034-06 on a real AES: reported working, and CartDiag passes on
