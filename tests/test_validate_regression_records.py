@@ -43,5 +43,14 @@ class ValidateRecordsTests(unittest.TestCase):
             validate_records({"healthy/none": [{"cmd": "Echo 1", "status": "  "}]}, "new")
 
 
+    def test_valid_bios_address_line_scenario(self):
+        validate_records({"fault/bios:addr:14": [{"cmd": "TestBus", "status": "eot"}]}, "old")
+
+    def test_malformed_bios_address_line_scenario(self):
+        for name in ("fault/bios:addr:", "fault/bios:addr:x", "fault/bios:addr:1:extra"):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "BIOS address-line"):
+                validate_records({name: [{"cmd": "TestBus", "status": "eot"}]}, "old")
+
+
 if __name__ == "__main__":
     unittest.main()
