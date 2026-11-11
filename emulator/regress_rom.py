@@ -7,7 +7,9 @@
 or off, each single fault the core models, each cartridge slot fault) and every command:
 status, the raw output words, emulated time, Z80 commands, cartridge writes, and the 224
 backdrop lines after the screen commands (TestDAC, TestBus). About 1 minute on 2 cores.
-With CORE=emulator/build/libneocore_test.so (emulator/build_test_core.py) it also runs
+CORE=python runs the built-in Python core (the default when no C core is next to
+Brico68k_Emulator.py). With CORE=python or CORE=emulator/build/libneocore_test.so
+(emulator/build_test_core.py) it also runs
 10 input sets (joypads, DIP, STATUS_A/B, SYSTYPE, MVS with a backup RAM): the stock core is
 an AES with nothing pressed, so it never reaches the MVS / button / memory card branches.
 After TestGfx it records a checksum of the VRAM and palette words and of the picture drawn from
@@ -98,13 +100,13 @@ def run_cmd(c, h, line):
     return rec
 
 
-CORE = os.environ.get("CORE")       # test-only core with settable inputs (core/libneocore_test.so)
+CORE = os.environ.get("CORE")       # test-only core with settable inputs (core/libneocore_test.so), or "python"
 
 
 def scenario(args):
     name, rom_path, cart, wd, faults, cmds = args[:6]
     rom = open(rom_path, "rb").read()
-    c = E.Core(CORE or E.core_path())
+    c = E.Core(None if CORE == "python" else (CORE or E.core_path()))
     if len(args) > 6:
         c.lib.neo_test_inputs(*args[6])
     c.load(rom)

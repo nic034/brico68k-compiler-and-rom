@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Brico68k Emulator - test the Brico68k ROM without a BricoNeo / Brico16Bits.
 
-One file, no MAME: a Neo Geo AES model built around the Musashi 68000 core
-(C, embedded below as a Windows x64 DLL and a Linux x64 shared library) plus
-a Brico16Bits-like host. Type the same commands as on the Brico16Bits console
+One file, pure Python, no MAME, no DLL: a Neo Geo AES model built around a
+Python port of the Musashi 68000 core (same decode, cycle counts, bus access
+order and exceptions as the C Musashi, checked instruction by instruction)
+plus a Brico16Bits-like host. Optional: a C build of the same core
+(neocore.dll / libneocore.so next to this file, or BRICO68K_CORE=path) is used
+when present, for speed; the results are the same word for word. Type the same commands as on the Brico16Bits console
 (Help, Echo 1234, TestWRAM, TestDAC 1, Dump $100000 16...).
 
 Emulated (modelled on MAME snk/neogeo.cpp): 68000 @ 12 MHz with exact cycle
@@ -48,11 +51,7 @@ Python 3.8+, standard library only: nothing to install with pip. The window
 needs Tkinter, which comes with Python on Windows (python.org installer) and is
 the python3-tk package on Linux distributions that split it out.
 """
-import base64
-import ctypes
-import hashlib
 import json
-import lzma
 import os
 import platform
 import re
@@ -62,7 +61,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.16"
+APP_VERSION = "1.17"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -75,40 +74,34 @@ ROM_CANDIDATES = ["rom/ROM.BIO", "output/ROM.BIO", "ROM.BIO",
 # ---------------------------------------------------------------------------
 # Embedded core
 # ---------------------------------------------------------------------------
-def core_platform():
-    m = platform.machine().lower()
-    if IS_WIN and m in ("amd64", "x86_64", "arm64"):
-        return "windows-x86_64"
-    if sys.platform.startswith("linux") and m in ("x86_64", "amd64"):
-        return "linux-x86_64"
-    return None
+C_CORE_NAMES = ("neocore.dll",) if IS_WIN else ("libneocore.so", "libneocore.dylib")
 
 
 def core_path():
-    """Extracts the embedded core for this system (if needed). Returns its path, or raises."""
-    plat = core_platform()
-    cores = globals().get("EMBEDDED_CORES", {})
-    if plat not in cores:
-        raise RuntimeError(f"No embedded emulator core for this system ({platform.system()} {platform.machine()}): "
-                           "Windows x64 and Linux x64 are supported.")
-    name, sha, data = cores[plat]
-    stem, ext = os.path.splitext(name)
-    dest = WORK_DIR / f"{stem}-{sha[:12]}{ext}"
-    if not (dest.is_file() and hashlib.sha256(dest.read_bytes()).hexdigest() == sha):
-        raw = lzma.decompress(base64.b64decode(data))
-        if hashlib.sha256(raw).hexdigest() != sha:
-            raise RuntimeError("Embedded emulator core is corrupted (checksum): download the tool again.")
-        WORK_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_name(dest.name + ".tmp")
-        tmp.write_bytes(raw)
-        os.replace(tmp, dest)
-        for old in list(WORK_DIR.glob(f"{stem}-*{ext}")) + [WORK_DIR / name]:
-            if old != dest:
-                try:
-                    old.unlink()                # an older core; may be in use by another window
-                except OSError:
-                    pass
-    return dest
+    """The emulator core: None = the built-in Python core (the default, nothing to install);
+    else the path of a C core library (neocore.c, built by emulator/build_core.py) that is
+    faster: put neocore.dll (Windows) or libneocore.so (Linux) next to this script, or give
+    its path in the BRICO68K_CORE environment variable (BRICO68K_CORE=python forces the
+    Python core). Both give the same results word for word."""
+    env = os.environ.get("BRICO68K_CORE", "").strip()
+    if env.lower() == "python":
+        return None
+    if env:
+        if not Path(env).is_file():
+            raise RuntimeError(f"BRICO68K_CORE: no file {env}")
+        return Path(env)
+    for name in C_CORE_NAMES:
+        if (TOOL_DIR / name).is_file():
+            return TOOL_DIR / name
+    return None
+
+
+def core_label():
+    try:
+        p = core_path()
+    except RuntimeError as e:
+        return str(e)
+    return f"C ({p.name})" if p else "Python"
 
 
 # MAME snk/neogeo_v.cpp create_rgb_lookups: 3900/2200/1000/470/220 ohm, dark = 8.2k pull-down
@@ -491,7 +484,7 @@ def main_cli(argv):
         if not parse_console_log(raw, [n for n, *_ in parse_extensions(rom)]):
             print("ERROR: no BricoNeo command found in this log ('> Command' lines)")
             return 2
-        core_path()                                   # extract the core once, before the worker processes
+        core_path()                                   # a bad BRICO68K_CORE fails here, not in the workers
 
         def prog(i, n):
             if i % 16 == 0 or i == n:
@@ -993,7 +986,7 @@ def main_gui(rom_arg=None):
     cartf.columnconfigure(1, weight=1); cartf.rowconfigure(9, weight=1)
     ttk.Label(sett, text="What is emulated", style="CardBold.TLabel").grid(row=12, column=0, sticky="w")
     ttk.Label(sett, style="CardMuted.TLabel", justify="left", wraplength=760, text=(
-        "68000 (Musashi, exact cycle counts), Z80 (4 MHz) running a test M1, WRAM, palette RAM (2 banks), "
+        "68000 (Musashi port, exact cycle counts), Z80 (4 MHz) running a test M1, WRAM, palette RAM (2 banks), "
         "system latch, LSPC registers and VRAM, line counter and frame timing, AES inputs with nothing plugged in, "
         "open bus, VBLANK and timer interrupts, Brico16Bits host (1 ms clear, 3 s timeout).\nNot emulated: YM2610 "
         "and sound, memory card, protected cartridges (SMA, PVC, CMC). Fix layer and sprites: drawn from VRAM "
@@ -1672,8 +1665,12 @@ def main_gui(rom_arg=None):
                 if now - st["t_last"] > 0.5:
                     st["t_last"] = now
             host = st["host"]
+            ran = 0
             for _ in range(n):
+                if time.time() - now > 0.06:    # keep the window responsive (the Python core is ~real time)
+                    break
                 core.lib.neo_run_frame()
+                ran += 1
                 r = host.poll() if host and host.pending else None
                 if r:
                     stt, text, secs = r
@@ -1687,8 +1684,8 @@ def main_gui(rom_arg=None):
                     next_step()
                     if not fast:
                         break
-            if n:
-                draw(); st["fps_n"] += n
+            if ran:
+                draw(); st["fps_n"] += ran
             if not st["plan"] and st["plan_total"] and not (host and host.pending) and st["wait_until"] is None:
                 if st["plan_total"] > 1:
                     lbl = st.get("plan_label", "Run all")
@@ -1768,7 +1765,8 @@ def main_gui(rom_arg=None):
     root.bind("<F8>", lambda _e: toggle_pause())
     root.protocol("WM_DELETE_WINDOW", on_close)
 
-    out(f"{APP_NAME} {APP_VERSION} · Musashi 68000 + Z80 + Neo Geo AES model · Brico16Bits-like host\n", "info")
+    out(f"{APP_NAME} {APP_VERSION} · Musashi 68000 + Z80 + Neo Geo AES model · Brico16Bits-like host"
+        f" · core: {core_label()}\n", "info")
     for scr in st["screens"]:
         place(scr)
     update_form(); push_faults(); apply_options()
@@ -1796,7 +1794,6 @@ def main_gui(rom_arg=None):
     return root
 
 
-# @@CORES@@
 
 if __name__ == "__main__":
     args = sys.argv[1:]

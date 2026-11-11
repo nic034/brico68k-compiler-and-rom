@@ -41,7 +41,7 @@ DIAG_CASES = [
 VRAM = [("vramlo:data:2:1", "vramhi:data:2:1", {"BRICO_STUCK": "0x3c0002,0x3c0003,0x0004,0xFFFF"},
          ["TestVRAM", "TestLSPC", "TestChip"])]
 def emu_run(faults, jobs):
-    c = Core(os.environ.get('CORE', str(HERE / 'build' / 'libneocore_zig.so'))); c.load(rom)
+    c = Core(None if os.environ.get('CORE', 'python') == 'python' else os.environ['CORE']); c.load(rom)
     if faults and faults[0] == "diag":
         c.load_cart(CartImage("diag", bytes(0x100000))); faults = faults[1:]
     else:

@@ -20,7 +20,7 @@ COL = {0x20F0: 'G', 0x0060: 'g', 0x4F00: 'R', 0x108F: 'B', 0x4F80: 'O', 0x6FF0: 
 
 
 def emu_bands(spec):
-    c = Core(os.environ.get('CORE', str(HERE / 'build' / 'libneocore_zig.so'))); c.load(rom)
+    c = Core(None if os.environ.get('CORE', 'python') == 'python' else os.environ['CORE']); c.load(rom)
     c.lib.neo_set_options(0, 1)
     apply_faults(c, [parse_fault(f) for f in spec.split('+') if f]); c.power_on()
     for _ in range(60):

@@ -1,5 +1,7 @@
 """Drives the Brico68k Emulator window like a user and checks every function.
-Usage: python3.12 guiverify.py Brico68k_Emulator.py OUTDIR   (needs a display, e.g. xvfb-run)"""
+Usage: python3.12 guiverify.py Brico68k_Emulator.py OUTDIR   (needs a display, e.g. xvfb-run)
+With the Python core the diagnosis step exceeds its 10 minute limit (4 checks fail): set
+BRICO68K_CORE to a C core (emulator/build/libneocore_zig.so) for the full run."""
 import importlib.util, json, subprocess, sys, time
 from pathlib import Path
 

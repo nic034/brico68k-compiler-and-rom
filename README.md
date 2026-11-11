@@ -11,7 +11,7 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.4 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.16: tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.17 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
 | `rom/ROM.BIO` | Ready-to-use ROM, 128 KB: 32 KB of code + CRC32 + 3 mirrors, exactly what the BricoNeo builds itself for header flag `$0004` (SHA-256 in `rom/ROM.BIO.sha256`) |
 | `brico16bits/` | Optional Brico16Bits patch (EXCPT: 68000 exception reports). Syntax-checked only, not built for the Pico, not run |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
@@ -59,9 +59,20 @@ run `python Brico68k_Emulator.py [ROM]`. It opens `rom/ROM.BIO` by default. Then
 same commands as on the Brico16Bits console: `Help`, `Echo 1234`, `TestWRAM`, `TestDAC 1`,
 `Dump $100000 16`.
 
-The file embeds a small emulator core for Windows x64 and Linux x64. The core is the Musashi
-68000 (exact cycle counts), a real Z80 (superzazu/z80) and a Neo Geo AES model written from
-MAME's driver:
+The file is pure Python (standard library only, any OS with Python 3.8+): no DLL, nothing to
+extract or install. Its core is a Python port of the Musashi 68000 (exact cycle counts), the part
+of the superzazu/z80 Z80 that the model's Z80 programs use, and a Neo Geo AES model written from
+MAME's driver. The port gives the same results as the C Musashi word for word (see "Checking the
+Python core" below).
+
+Speed, measured (one core of a cloud x86 server): 53 to 60 frames/s for 59.2 in real time with
+Python 3.11 to 3.13, 38 frames/s with Python 3.8; TestWRAM (0.42 s emulated) takes 0.4 to 0.7 s.
+Slow with this core: `--diagnose` (and the same search in the window), which replays a log on 290
+simulated faults: hours instead of a few minutes, so use the C core for it. For speed, the
+C build of the same core is still supported: put `neocore.dll` (Windows) or `libneocore.so`
+(Linux) built by `emulator/build_core.py` next to the script, or give its path in the
+`BRICO68K_CORE` environment variable (`BRICO68K_CORE=python` forces the Python core). The first
+line of the window says which core runs.
 
 - **Emulated**: BIOS ROM, WRAM, both palette banks, the system latch, LSPC registers and VRAM,
   the line counter and frame timing, the auto-animation counter, AES inputs with nothing
@@ -137,8 +148,7 @@ error report and CartTest included), with word-for-word identical output:
   built-in test cartridge and test M1: 38 out of 38. This covers TestZ80, TestAudio,
   PlayEyeSnd and CartTest.
 
-Nothing to install with pip: the emulator uses only the Python standard library, and its core is
-embedded. The window needs Tkinter. It comes with Python on Windows (python.org installer); on
+Nothing to install with pip: the emulator uses only the Python standard library. The window needs Tkinter. It comes with Python on Windows (python.org installer); on
 Linux it may be a separate package (`sudo apt install python3-tk`), and the tool says so if it is
 missing.
 
@@ -227,21 +237,42 @@ between both banks, so MAME's TestChip also reports a bank-select fault that a r
 would not have.
 
 Text mode: `python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234"` and `--check`.
-Rebuild the core: `python3 emulator/build_core.py` (needs git and `pip install ziglang`; clones
-already at the pinned commits in `emulator/build/` are reused, so a rebuild works offline). The
-build is reproducible: the same sources give the same core checksums.
-It fetches Musashi and the Z80 core at pinned commits.
-The build is reproducible: it gives the same binaries.
+Optional C core: `python3 emulator/build_core.py` (needs git and `pip install ziglang`; clones
+already at the pinned commits in `emulator/build/` are reused, so a rebuild works offline). It
+fetches Musashi and the Z80 core at pinned commits; the build is reproducible. The C core is not
+embedded in `Brico68k_Emulator.py` any more (`emulator/package_emulator.py` builds the one file
+from `emulator_main.py`, `m68k_tables.py`, `m68k_py.py`, `neo_py.py` and `emu_host.py`).
+
+Checking the Python core:
+- `emulator/build_m68k_tables.py` writes `m68k_tables.py` from Musashi itself (which handler and
+  how many cycles for each of the 65536 opcodes), so the Python decode cannot drift from it.
+- `emulator/test/test_m68k_py.py` runs the Python 68000 and the C Musashi side by side on the
+  same random memory: random opcodes (every one of the 1704 handlers is hit), random registers,
+  supervisor or user mode, trace bit, interrupt requests, odd addresses (address errors, double
+  faults), STOP, one or several instructions per call. It compares the cycles, every register and
+  the full ordered list of bus accesses. 1 million cases, 0 differences.
+- `emulator/test/test_neo_py.py` runs the Python and C AES models in lockstep (commands, reset
+  button, Z80 options, cartridges, faults, test inputs) and compares cycles, PC, output words,
+  screen lines, VRAM and palette after every slice: 0 differences.
+- `emulator/regress_rom.py` with `CORE=python` against the C core: 517 scenarios, 1937 commands,
+  0 differences (about 45 minutes on 2 cores, 1 minute with the C core). The scenarios the check
+  sets apart as chaotic (random unstable lines, a crashed 68000) are not word-for-word between the
+  two runs because the C library keeps its random generator and CPU registers from one scenario
+  to the next in a worker; the 3 deterministic ones that differed are identical when both cores
+  start from a fresh process.
+- `emulator/guiverify.py`: 191/191 with the C core; with the Python core 187/191, the 4 misses
+  being the diagnosis step that exceeds its 10 minute limit.
 
 ROM regression check, for a source change meant to keep every output (a size or speed change):
 `python3 emulator/regress_rom.py run OLD.BIO old.json`, the same for the new ROM, then
-`python3 emulator/regress_rom.py compare old.json new.json`. 507 scenarios (no cartridge, test
+`python3 emulator/regress_rom.py compare old.json new.json`. 517 scenarios (no cartridge, test
 cartridge, PROG board, every single fault the core models, every slot fault), each command's
 output words, screen lines, Z80 commands and cartridge writes; about 1 minute on 2 cores.
-`python3 emulator/build_test_core.py` (Linux, gcc) builds a test-only core with settable joypad,
-DIP, STATUS_A/B and SYSTYPE ports and an MVS backup RAM: with
-`CORE=emulator/build/libneocore_test.so` the check adds 10 input sets (MVS, buttons, memory
-card states), which the shipped AES core never reaches.
+`python3 emulator/build_test_core.py` (Linux, gcc) builds a test-only C core with settable joypad,
+DIP, STATUS_A/B and SYSTYPE ports and an MVS backup RAM; the Python core has the same test hook.
+With `CORE=python` or `CORE=emulator/build/libneocore_test.so` the check adds 10 input sets (MVS,
+buttons, memory card states), which the AES model never reaches otherwise. With the Python core
+the check takes much longer than with the C core.
 
 ## ROM contents: 27 extensions
 
@@ -599,9 +630,11 @@ each well under the 3 s host limit.
 
 ## Licences
 
-- Brico68k Emulator core: Musashi 68000, MIT, © Karl Stenerud (`emulator/MUSASHI_LICENSE.txt`);
-  Z80 core superzazu/z80, MIT, © Nicolas Allemand (`emulator/Z80_LICENSE.txt`);
-  `emulator/neocore.c` is written from MAME's Neo Geo driver behaviour (no MAME code is copied).
+- Brico68k Emulator core: Musashi 68000, MIT, © Karl Stenerud (`emulator/MUSASHI_LICENSE.txt`),
+  ported to Python in `emulator/m68k_py.py` (its tables generated from Musashi); Z80 core
+  superzazu/z80, MIT, © Nicolas Allemand (`emulator/Z80_LICENSE.txt`), the part used ported in
+  `emulator/neo_py.py`; `emulator/neocore.c` and its Python port `neo_py.py` are written from
+  MAME's Neo Geo driver behaviour (no MAME code is copied).
 - Brico68k firmware source: MIT, © Aurelien34. See `source/LICENSE`; the changes in this
   repository are under the same licence.
 - vasm and vlink: their authors' terms. They are free for non-commercial use; ask the authors

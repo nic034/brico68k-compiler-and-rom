@@ -5,6 +5,11 @@ import ctypes
 import re
 import struct
 
+try:                            # one-file build: the Python core is inlined above
+    PyNeoLib
+except NameError:
+    from neo_py import PyNeoLib
+
 FRAME_CYCLES = 202752
 CPU_HZ = 12000000
 H_IDLE, H_SENT, H_WAIT, H_DONE, H_TIMEOUT = range(5)
@@ -13,7 +18,17 @@ TYPE_NAMES = {TYPE_VOID: "void", TYPE_WORD: "word", TYPE_STRING: "text", TYPE_DU
 
 
 class Core:
-    def __init__(self, lib_path):
+    def __init__(self, lib_path=None):
+        """lib_path None: the built-in Python core (PyNeoLib); else a C core library (neocore.c)."""
+        self.kind = "python" if lib_path is None else "C"
+        self.cart = None
+        self._vals = (ctypes.c_uint16 * 2048)()
+        self._lines = (ctypes.c_uint16 * 224)()
+        self._vram = (ctypes.c_uint16 * 0x8800)()
+        self._pal = (ctypes.c_uint16 * 0x1000)()
+        if lib_path is None:
+            self.lib = PyNeoLib()
+            return
         self.lib = lib = ctypes.CDLL(str(lib_path))
         lib.neo_version.restype = ctypes.c_int
         lib.neo_load_bios.argtypes = [ctypes.c_char_p, ctypes.c_int]
@@ -38,11 +53,6 @@ class Core:
         lib.neo_cart_writes.restype = ctypes.c_uint32
         lib.neo_cart_latch_writes.restype = ctypes.c_uint32
         lib.neo_cart_bank.restype = ctypes.c_int
-        self.cart = None
-        self._vals = (ctypes.c_uint16 * 2048)()
-        self._lines = (ctypes.c_uint16 * 224)()
-        self._vram = (ctypes.c_uint16 * 0x8800)()
-        self._pal = (ctypes.c_uint16 * 0x1000)()
 
     def load(self, rom):
         if self.lib.neo_load_bios(rom, len(rom)) != 0:

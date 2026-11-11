@@ -4,6 +4,33 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-11 - Emulator 1.17: pure Python, no DLL
+
+**Emulator 1.17** (ROM unchanged: 1.35-nic034-09)
+- `Brico68k_Emulator.py` is now pure Python: no embedded DLL / shared library, nothing extracted,
+  works on any OS with Python 3.8+ (checked with 3.8, 3.11, 3.12, 3.13). The file shrinks from
+  750 KB to 250 KB.
+- New `emulator/m68k_py.py`: a line-for-line Python port of the Musashi 68000 as the C core built
+  it (address error, trace, RESET, interrupts with Musashi's auto-clear, STOP, halt on a double
+  fault). Its decode and cycle tables (`emulator/m68k_tables.py`) are generated from Musashi itself
+  by `emulator/build_m68k_tables.py`. New `emulator/neo_py.py`: the port of `neocore.c` (same API)
+  and of the part of the superzazu/z80 Z80 the model's programs use.
+- Checked: `emulator/test/test_m68k_py.py` runs the Python 68000 and the C Musashi side by side on
+  random code (all 1704 handlers, user / supervisor, trace, interrupts, odd addresses, STOP):
+  cycles, registers and the ordered list of bus accesses, 1 million cases, 0 differences.
+  `emulator/test/test_neo_py.py` runs the Python and C AES models in lockstep (commands, reset
+  button, Z80 options, cartridges, faults, test inputs): 0 differences.
+  `emulator/regress_rom.py` with `CORE=python` against the C core: 517 scenarios, 1937 commands,
+  0 differences. `guiverify.py`: 191/191 with the C core, 187/191 with the Python core (the 4
+  misses are the diagnosis step, too slow for its 10 minute limit).
+- Speed: about real time (53 to 60 frames/s for 59.2 with Python 3.11 to 3.13, 38 with 3.8, one
+  cloud x86 core). `--diagnose` takes hours with the Python core instead of minutes: use the C
+  core for it.
+- The C core is optional: a `neocore.dll` / `libneocore.so` next to the script (or
+  `BRICO68K_CORE=path`) is used instead, for speed. The window's first line names the core.
+- Tests: `regress_rom.py` takes `CORE=python` (inputs scenarios included, the Python core has the
+  test input hook); the MAME comparison scripts use the Python core by default.
+
 ## 2026-11-11 - Emulator 1.16 draws the tile layers; fork 1.35-nic034-09
 
 **Emulator 1.16**

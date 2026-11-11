@@ -17,7 +17,7 @@ JOBS = ["Echo:0x1234","Read:0x320001","Read:0x380000","Read:0x300000","Write:0x5
 res, _ = mame_bench.run(R, JOBS)
 mame = [r for r in res if 'name' in r]
 rom = open(R, 'rb').read()
-c = Core(os.environ.get('CORE', str(HERE / 'build' / 'libneocore_zig.so'))); c.load(rom)
+c = Core(None if os.environ.get('CORE', 'python') == 'python' else os.environ['CORE']); c.load(rom)
 c.load_cart('test' if os.environ.get('BRICO_CART') else 'none')    # same P ROM as the MAME cartridge brtest
 c.power_on(); c.lib.neo_set_options(int(os.environ.get("Z80","0")), 0)
 for _ in range(60): c.lib.neo_run_frame()
