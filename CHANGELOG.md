@@ -4,6 +4,56 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-11 - Emulator 1.16 draws the tile layers; fork 1.35-nic034-09
+
+**Emulator 1.16**
+- The screen now shows the fix layer and the sprites, drawn from VRAM over the backdrop lines, so
+  TestGfx is visible. Tiles: the cartridge's S and C ROMs when the set has them, generated tiles
+  for the built-in test cartridge, none without a cartridge. Not a game renderer: vertical shrink
+  approximated (no L0 ROM), no auto-animation. Redrawn when VRAM, the palette or the cartridge
+  change, not while a command runs.
+- New fault: the vector table switch held on the system ROM or on the cartridge
+  (`vec:stuck:bios`, `vec:stuck:cart`; Faults tab: "Vector table switch"). It is in the fault
+  dictionary of `--diagnose` (290 single faults).
+- `--png FILE` saves the screen after `--run` / `--script`.
+- Built-in test cartridge: vectors like a game's (SP `$10F300`, reset `$C00402`, exceptions to the
+  system ROM entry points) instead of random words, and tile numbers wrap at the chip sizes.
+- Core: `neo_get_vram`, `neo_get_palette`, fault region 7. Both cores rebuilt with zig 0.17.1.
+
+**ROM 1.35-nic034-09**, SHA-256 `24d124f2d880572c5f2368fd58b8f847af23d95862884979068cea4b39871684`, 18 bytes under `$7FFA`
+- The screen clear shared by TestDAC, TestBus and TestGfx also puts sprite 0 off screen (x = 380).
+  Found with MAME: it draws sprite 0 in the unused sprite slots of each line even with a height of
+  0, so TestGfx had a white column 1 pixel wide at x = 0. Whether a real LSPC does the same is not
+  known; SNK's system ROM parks every sprite at that x.
+
+**Tools**: `tools/make_test_cart.py` gives the MAME bench cartridge the same tiles and vectors as
+the emulator's; new `emulator/compare_mame_gfx.py` (TestGfx in MAME against the emulator's drawing,
+pixel by pixel); `emulator/regress_rom.py` records the picture too, has the vector faults, and
+clears the faults before each power-on (a worker kept the previous scenario's fault while
+starting the next one; it only mattered for a fault that acts at power-on, which the vector
+switch is the first to be); the test-only core no longer needs its own latch and VRAM functions.
+
+**Found, not fixed**: with the vector table switch held on the cartridge at power-on and a game
+inserted, this ROM does not start (the cartridge's reset vector is `$C00402`, an entry of SNK's
+system ROM; Brico68k has text there). `INITIAL_PC_ORG equ $402` exists upstream but is not used.
+A jump to the start at `$C00402` would let the ROM start in that case and report the fault; it
+needs the layout around `$400` moved, and room (18 bytes left).
+
+Checks:
+- MAME 0.264 (installed for this session; L0 ROM = a generated table, see compare_mame_gfx.py):
+  44/44 commands identical without a cartridge, 44/44 with the test cartridge (TestVectors and
+  TestGfx included), 27/28 with injected faults (the known palette difference), and the three
+  TestGfx screens identical pixel for pixel (0 of 71680).
+- ROM -08 against -09, 517 scenarios, 1937 commands: 15 differences, all intended (3 Version,
+  12 TestGfx VRAM checksums: sprite 0's x; the drawn picture is the same). Two runs of -09: 0.
+- New core against the previous one, same ROM: identical on every scenario.
+- `guiverify.py` (Tk under Xvfb): 191/191, with new checks for the tile layers on both screens
+  and for the vector fault from the Faults form.
+
+Not checked: real hardware; a real game ROM set's tiles (none here: the S and C decoders were
+checked by a round trip on the generated tiles and through MAME); the real L0 ROM; Windows (the
+DLL is cross-built, not run); `build.py` and CMake.
+
 ## 2026-11-10 - TestGfx: whole-screen mode (fork 1.35-nic034-08)
 
 ROM SHA-256 `7c63dc6c5c539ca9797273d82b7c944d532bafde45d73438d142e945c3ecbf92` (fork **1.35-nic034-08**, header 1.35, 27 extensions). The code ends

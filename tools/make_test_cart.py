@@ -48,6 +48,13 @@ def p_rom():
     $182 -> $186 (wiki "68k program header"). CartTest reads it."""
     rnd = random.Random(0xB1C068)
     p = bytearray(rnd.getrandbits(8) for _ in range(3 * 0x100000))
+    # vectors like a game's (wiki "68k vector table"): SP $10F300, reset $C00402, the exceptions to
+    # the system ROM entry points, VBLANK and timer to the cartridge. With the vector table switch
+    # held on the cartridge the console then starts as with a real game (reset = system ROM $402).
+    vec = [0x0010F300, 0x00C00402, 0x00C00408, 0x00C0040E, 0x00C00414] + [0x00C00426] * 27
+    vec[8], vec[9], vec[15], vec[24], vec[25], vec[26] = 0x00C0041A, 0x00C00420, 0x00C0042C, 0x00C00432, 0x200, 0x204
+    for i, v in enumerate(vec):
+        p[4 * i:4 * i + 4] = v.to_bytes(4, "big")
     p[0x100:0x108] = b"NEO-GEO\x00"
     p[0x108:0x10A] = (0x0999).to_bytes(2, "big")
     p[0x10A:0x10E] = (0x300000).to_bytes(4, "big")
@@ -61,14 +68,12 @@ def word_swap(data):
     return bytes(b for i in range(0, len(data), 2) for b in (data[i + 1], data[i]))
 
 
-def s_rom():
-    s = bytearray(0x20000)
-    for tile in range(len(s) // 32):
-        if tile == 0x20:
-            continue  # blank (space)
-        for i in range(32):
-            s[tile * 32 + i] = 0xF0 if (i // 4) % 2 else 0x0F
-    return bytes(s)
+def tile_roms():
+    """S1, C1, C2: the tiles of the emulator's built-in test cartridge (a 5 x 7 font at the ASCII
+    codes, numbered sprite tiles with an F), so TestGfx shows the same picture in MAME."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "emulator"))
+    from emu_host import test_cart_tile_roms
+    return test_cart_tile_roms(0x20000 // 32, 0x100000 // 128)
 
 
 def m_rom():
@@ -91,14 +96,15 @@ def build(out):
     rd.mkdir(parents=True, exist_ok=True)
     (out / "hash").mkdir(parents=True, exist_ok=True)
     p = p_rom()
+    s1, c1, c2 = tile_roms()
     files = {
         "brt-p1.p1": word_swap(p[:0x100000]),
         "brt-p2.p2": word_swap(p[0x100000:]),
-        "brt-s1.s1": s_rom(),
+        "brt-s1.s1": s1,
         "brt-m1.m1": m_rom(),
         "brt-v1.v1": bytes(0x80000),
-        "brt-c1.c1": bytes(0x80000),
-        "brt-c2.c2": bytes(0x80000),
+        "brt-c1.c1": c1,
+        "brt-c2.c2": c2,
     }
     for n, d in files.items():
         (rd / n).write_bytes(d)

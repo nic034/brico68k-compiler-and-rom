@@ -11,7 +11,7 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.4 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.15: tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.16: tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
 | `rom/ROM.BIO` | Ready-to-use ROM, 128 KB: 32 KB of code + CRC32 + 3 mirrors, exactly what the BricoNeo builds itself for header flag `$0004` (SHA-256 in `rom/ROM.BIO.sha256`) |
 | `brico16bits/` | Optional Brico16Bits patch (EXCPT: 68000 exception reports). Syntax-checked only, not built for the Pico, not run |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
@@ -103,11 +103,19 @@ MAME's driver:
   - **Diagnostic PROG board** (jwestfall69 `neogeo-diag-aes-prog`): one 1 MiB 16-bit SRAM read
     in both P windows and written through P2, with the board's byte-lane decoding from its
     KiCad netlist (UB, LB, OE, WE from /ROMOEU-L, /PORTOEU-L, /PORTWEU-L).
-- **Not emulated**: the YM2610 (ports `$04`-`$07` read 0) and sound, Z80 ROM banking, sprites,
-  the fix layer, protected cartridges (SMA, PVC, CMC, encrypted P: their extra registers read
-  as P ROM) and a memory card. S, C, V and M1 are checked, not used: the cartridge's M1 does
-  not replace the built-in test M1. The screen shows the backdrop colour of each line, which is
-  enough for TestDAC and Color.
+- **Screen**: the backdrop colour of each line (TestDAC, TestBus, Color), and over it the fix
+  layer and the sprites drawn from VRAM (TestGfx). The tiles are the cartridge's S and C ROMs when
+  the ROM set has them (not decrypted: a CMC / PCM set shows noise); the built-in test cartridge
+  has generated tiles (a 5 x 7 font at the ASCII codes, numbered sprite tiles with an F); no
+  cartridge or the PROG board: no tile. It is a drawing for the ROM's test screens, not a game
+  renderer: vertical shrink is approximated (the real table is the L0 ROM, SNK's, not included),
+  no auto-animation, no 96 sprites per line limit. With the same tiles and the same table, MAME
+  gives the same picture pixel for pixel (`emulator/compare_mame_gfx.py`).
+  `--png FILE` saves the screen after `--run` / `--script`.
+- **Not emulated**: the YM2610 (ports `$04`-`$07` read 0) and sound, Z80 ROM banking,
+  protected cartridges (SMA, PVC, CMC, encrypted P: their extra registers read
+  as P ROM) and a memory card. V and M1 are checked, not used: the cartridge's M1 does
+  not replace the built-in test M1.
 - **Interrupts** (1.9): VBLANK (level 1, line `$F0` + 58 mclk), LSPC timer (level 2, 6 MHz
   pixel clock, `REG_LSPCMODE` bits 4-7, `REG_TIMERHIGH/LOW`, reloads as in MAME) and level 3
   pending from power-on, acknowledged through `REG_IRQACK`. Taken from MAME `neogeo.cpp`.
@@ -190,6 +198,12 @@ in the ways real boards fail, then see how each test reports it:
   With the suffix `245` (`romoel245` ... `portoeu245`) the dead output sits behind a 245 / NEO-G0 /
   NEO-BUF: the lane gives back the last value written to the cartridge side. The same pins serve
   P1, P2 and the PROG board, reads and writes.
+- **Vector table switch** held on the system ROM (`vec:stuck:bios`) or on the cartridge
+  (`vec:stuck:cart`): `$000000-$00007F` is always read from that side, whatever the 68000 writes
+  to `REG_SWPBIOS` / `REG_SWPROM`. TestVectors names it. Held on the cartridge **at power-on**,
+  the console does not start with a game inserted: the 68000 takes the cartridge's reset vector
+  (`$C00402`, an entry of SNK's system ROM), and this ROM has no code there. The built-in test
+  cartridge has vectors like a game's, so the emulator shows the same thing.
 
 The tab also has presets for typical AES faults. Faults stay active across power cycles, like
 a real hardware fault; a red lamp and the tab title show how many are active. Example:
@@ -221,7 +235,7 @@ The build is reproducible: it gives the same binaries.
 
 ROM regression check, for a source change meant to keep every output (a size or speed change):
 `python3 emulator/regress_rom.py run OLD.BIO old.json`, the same for the new ROM, then
-`python3 emulator/regress_rom.py compare old.json new.json`. 501 scenarios (no cartridge, test
+`python3 emulator/regress_rom.py compare old.json new.json`. 507 scenarios (no cartridge, test
 cartridge, PROG board, every single fault the core models, every slot fault), each command's
 output words, screen lines, Z80 commands and cartridge writes; about 1 minute on 2 cores.
 `python3 emulator/build_test_core.py` (Linux, gcc) builds a test-only core with settable joypad,
@@ -237,7 +251,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | Command | No WRAM | What it does |
 |---|:-:|---|
 | **TestChip** | partly | Quick state of the board, one line per part, < 1 s (see below) |
-| **Version** | yes | The only place with the fork version: says it is the Nic034 fork, `1.35-nic034-08`, the upstream base and the source. Also in the `?` list. |
+| **Version** | yes | The only place with the fork version: says it is the Nic034 fork, `1.35-nic034-09`, the upstream base and the source. Also in the `?` list. |
 | **TestBus** | yes | BIOS socket, 68000 -> BricoNeo, as NeoDiag does it: A15/A16 from the mirror bytes, A1-A14/D0-D15 by CRC32; text and 16 screen bands (see below). Also run at boot. |
 | Echo, Read, Write, WriteB, Dump | yes | Link check and raw memory access. Odd addresses are handled. Dump: at most 2045 words (BricoNeo buffer: 2048 words, address included). |
 | TestInp | yes | Controllers, memory card detect, AES/MVS mode |
@@ -259,7 +273,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 
 Bold entries are new in this repository.
 
-The code ends 30 bytes under `$7FFA` (fork 1.35-nic034-08): a new extension needs room made
+The code ends 18 bytes under `$7FFA` (fork 1.35-nic034-09): a new extension needs room made
 elsewhere first. The 32 KB limit is the NeoDiag layout (header flag `$0004`), not the BricoNeo.
 
 `ChipCheck` was renamed **TestChip** in 1.35-nic034-07 (same test, same output).
@@ -479,7 +493,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `84f7840` (2026-11-09; since `5859d6b` only the byte-swap detection changed, it now also accepts reset vectors above the first 64 KB: no effect here, ours is `$00C0xxxx`). Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-08** (Version command only); the header announces **1.35**, the upstream base; 27 extensions, flags `$0007`, SHA-256 `7c63dc6c5c539ca9797273d82b7c944d532bafde45d73438d142e945c3ecbf92` |
+| This ROM | fork version **1.35-nic034-09** (Version command only); the header announces **1.35**, the upstream base; 27 extensions, flags `$0007`, SHA-256 `24d124f2d880572c5f2368fd58b8f847af23d95862884979068cea4b39871684` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
@@ -557,9 +571,12 @@ each well under the 3 s host limit.
   and bus hold tests exist nowhere else: MAME and the emulator cannot check them). No console log
   was compared word for word, and no board with a known fault has been tested yet: that the tests
   name a real fault correctly is still shown in simulation only. MAME stays the reference.
-  **1.35-nic034-07 and -08 (TestVectors, TestGfx) have not run on real hardware yet.** TestGfx was never
-  drawn by an emulator either: the core draws no tile and MAME was not available; its VRAM and
-  palette words were checked, and a picture drawn from them by a small reference renderer.
+  **1.35-nic034-07 to -09 (TestVectors, TestGfx) have not run on real hardware yet.** In MAME
+  0.264 both give the same words as in the emulator, and TestGfx the same picture pixel for pixel
+  with the test cartridge. Not shown by that: the real L0 ROM (vertical shrink), real S and C
+  tiles, and what a real LSPC does with sprite 0 (MAME draws it in the unused sprite slots of
+  each line, 1 pixel wide at x = 0, even with a height of 0: the screen tests now put it off
+  screen, as SNK's system ROM does for every sprite).
 - **CartTest / CartDiag**: MAME has no PROG board (the bench plays it with a shadow RAM) and no
   slot address faults on a ROM. The test cartridge's softlist entry needs `<feature name="slot"
   value="rom"/>`: without it MAME 0.264 maps `$000100-$000103` to a protection handler that reads

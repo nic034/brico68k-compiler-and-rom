@@ -13,7 +13,7 @@ JOBS = ["Echo:0x1234","Read:0x320001","Read:0x380000","Read:0x300000","Write:0x5
         "TestInp","TestWRAM","TestBRAM","TestPRAM","TestVRAM","TestLSPC","Color:0x7FFF",
         "TestStatusA","TestSystype","TestZ80","TestTiming","TestChip","TestDAC","Echo:0x77","TestDAC:0x10","TestBus","Echo:0x66","Version","@0xC00001","Echo:0x55","PlayEyeSnd","TestAudio","Echo:0x88",
         "TestWatchdog","Echo:0x99","TestWatchdog","Dump:0xC00000:16","Read:0x400000",
-        "CartTest","CartTest:1","Dump:0x100:8"]
+        "CartTest","CartTest:1","Dump:0x100:8","TestVectors","TestGfx:0x100","Echo:0x31","TestGfx:0:1","TestDAC:0x15","TestVectors"]
 res, _ = mame_bench.run(R, JOBS)
 mame = [r for r in res if 'name' in r]
 rom = open(R, 'rb').read()

@@ -26,8 +26,11 @@ Simulated faults (window: Faults tab, text mode: --fault): data bit stuck,
 address line stuck, WRAM chip dead, on WRAM, palette RAM (also seen on the
 screen), VRAM, the LSPC line counter and the cartridge slot (data, address,
 strobes) - to see how each test reacts.
-NOT emulated: YM2610 and sound, Z80 ROM banking, sprites and fix layer (the
-screen shows the backdrop colour of each line; S, C, V are not used), protected
+The screen shows the backdrop colour of each line, and over it the fix layer and
+the sprites drawn from VRAM with the cartridge's S and C tiles (generated tiles
+for the built-in test cartridge): a simple drawing for the ROM's test screens,
+not a game renderer (vertical shrink approximated: no L0 ROM; no auto-animation).
+NOT emulated: YM2610 and sound, Z80 ROM banking (V is not used), protected
 cartridges (SMA, PVC, CMC, encrypted P), memory card, and the
 LSPC VRAM access delays of real boards (neither does MAME): code that accesses
 VRAM too fast passes here and can fail on a real console. Interrupts: VBLANK
@@ -59,7 +62,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.15"
+APP_VERSION = "1.16"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -115,14 +118,19 @@ _LEVELS = [[round(255 * sum(g for i, g in enumerate(_G) if v >> i & 1) / (_SUM +
             for v in range(32)] for dark in (0, 1)]
 
 
-def neo_rgb(c):
-    """Neo Geo colour word -> '#rrggbb' (MAME DAC model)."""
+def neo_rgb3(c):
+    """Neo Geo colour word -> (r, g, b), 0-255 (MAME DAC model)."""
     d = c >> 15
     r = ((c >> 14) & 1) | ((c >> 7) & 0x1E)
     g = ((c >> 13) & 1) | ((c >> 3) & 0x1E)
     b = ((c >> 12) & 1) | ((c << 1) & 0x1E)
     L = _LEVELS[d]
-    return f"#{L[r]:02x}{L[g]:02x}{L[b]:02x}"
+    return L[r], L[g], L[b]
+
+
+def neo_rgb(c):
+    """Neo Geo colour word -> '#rrggbb' (MAME DAC model)."""
+    return "#%02x%02x%02x" % neo_rgb3(c)
 
 
 # ---------------------------------------------------------------------------
@@ -452,6 +460,8 @@ def main_cli(argv):
                          "board) or a game ROM set (folder or MAME .zip)")
     ap.add_argument("--cart-list", metavar="XML", help="official MAME list (hash/neogeo.xml): identifies the "
                     "ROM set by CRC32, loads it with the list's layout and checks every chip")
+    ap.add_argument("--png", metavar="FILE", help="after --run / --script: save the screen (backdrop, fix layer "
+                    "and sprites drawn from VRAM, x2) as a PNG")
     ap.add_argument("rom_pos", nargs="?")
     a = ap.parse_args(argv)
     if "help" in [f.lower() for f in a.fault]:
@@ -551,6 +561,17 @@ def main_cli(argv):
         st, text, secs = host.run_blocking(arg)
         print(text, end="")
         print(f"[{st}, {secs * 1000:.0f} ms emulated]")
+    if a.png:
+        for _ in range(4):                            # a few frames: the backdrop lines of the last command
+            core.lib.neo_run_frame()
+        cache = {}
+        try:
+            write_png(a.png, [[cache.get(c) or cache.setdefault(c, neo_rgb3(c)) for c in row]
+                              for row in core.screen()], 2)
+        except OSError as e:
+            print(f"ERROR: cannot write the picture: {e}")
+            return 2
+        print(f"SCREEN: {a.png}" + ("" if cart.tiles else " (no tiles: backdrop only)"))
     return 0
 
 
@@ -570,7 +591,8 @@ TOOLS = set(CATEGORIES[-1][1])
 CHK_PROGRESS, CHK_PROG_MAGIC = 0x10FFF0, 0x10FFF2   # TestChip progress word and its magic ($C4EC)
 # what the emulator cannot judge by itself
 LOOK = {"TestDAC": "Look at the screen: 16 bands, one colour bit each (a black band = dead bit).",
-        "TestGfx": "Sprites and fix tiles are not drawn by the emulator (backdrop only): look at the real screen.",
+        "TestGfx": "Look at the screen: labels, fix tiles, flips, 8 x 4 tiles, H and V shrink (drawn from VRAM; "
+                   "V shrink approximated, no L0 ROM). No tiles without a game or the test cartridge.",
         "PlayEyeSnd": "Sound is not emulated: the eyecatcher music cannot be heard here."}
 STATUS_STYLE = {   # status -> (label, foreground, background)
     "PASS": ("PASS", "#1a7f37", "#dafbe1"), "FAIL": ("FAIL", "#cf222e", "#ffebe9"),
@@ -869,6 +891,10 @@ def main_gui(rom_arg=None):
 
     for cv, s in ((thumb, 0.8), (big, 2.0)):
         st["screens"].append([cv, s, [cv.create_rectangle(0, 0, 0, 0, outline="", fill="#000000") for _ in range(224)]])
+    # tile layers (fix + sprites): one image over the line rectangles of each screen, transparent
+    # where the backdrop shows. base = 320 x 224, items = [canvas image item, scaled image]
+    st["layers"] = {"key": None, "t": 0.0, "base": None, "shown": False,
+                    "items": [[cv.create_image(0, 0, anchor="nw", state="hidden"), None] for cv, _, _ in st["screens"]]}
 
     # --- Faults tab content ----------------------------------------------------------------
     ttk.Label(flt, text="Simulated hardware faults", style="CardBold.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
@@ -884,7 +910,8 @@ def main_gui(rom_arg=None):
     ttk.Label(flt, text="Add a fault", style="CardBold.TLabel").grid(row=5, column=0, columnspan=4, sticky="w")
     REGIONS = [("WRAM", "wram"), ("Palette RAM", "pal"), ("VRAM lower (slow)", "vramlo"),
                ("VRAM upper (fast)", "vramhi"), ("LSPC line counter", "line"),
-               ("BIOS socket (68000 -> BricoNeo)", "bios"), ("Cartridge slot (P bus)", "cart")]
+               ("BIOS socket (68000 -> BricoNeo)", "bios"), ("Cartridge slot (P bus)", "cart"),
+               ("Vector table switch", "vec")]
     reg_var = tk.StringVar(value=REGIONS[0][0]); kind_var = tk.StringVar(value="Data bit stuck")
     bit_var = tk.StringVar(value="0"); lvl_var = tk.StringVar(value="1"); range_var = tk.StringVar(); ferr = tk.StringVar()
     ttk.Label(flt, text="Component", style="Card.TLabel").grid(row=6, column=0, sticky="w", pady=3)
@@ -969,8 +996,9 @@ def main_gui(rom_arg=None):
         "68000 (Musashi, exact cycle counts), Z80 (4 MHz) running a test M1, WRAM, palette RAM (2 banks), "
         "system latch, LSPC registers and VRAM, line counter and frame timing, AES inputs with nothing plugged in, "
         "open bus, VBLANK and timer interrupts, Brico16Bits host (1 ms clear, 3 s timeout).\nNot emulated: YM2610 "
-        "and sound, sprites, fix layer, memory card, protected cartridges (SMA, PVC, CMC). Cartridge: P1/P2 "
-        "(P2 banks) or the PROG board SRAM on the 68000 bus; S, C, V, M1 are only loaded and checked.\n"
+        "and sound, memory card, protected cartridges (SMA, PVC, CMC). Fix layer and sprites: drawn from VRAM "
+        "with the cartridge's S and C tiles (V shrink approximated). Cartridge: P1/P2 "
+        "(P2 banks) or the PROG board SRAM on the 68000 bus; V, M1 are only loaded and checked.\n"
         "Keys: F5 reset, F8 pause, Ctrl+L clear the console, Up/Down command history.")).grid(
         row=13, column=0, columnspan=3, sticky="we")
     sett.columnconfigure(0, weight=1)
@@ -1347,6 +1375,8 @@ def main_gui(rom_arg=None):
             return ["Data bit stuck", "Data line unstable", "Address line stuck", "Strobe dead"]
         if code == "bios":
             return ["Address line stuck", "Address line unstable"]
+        if code == "vec":
+            return ["Switch held"]
         k = ["Data bit stuck"]
         if code != "line":
             k.append("Address line stuck")
@@ -1360,6 +1390,13 @@ def main_gui(rom_arg=None):
         if kind_var.get() not in ks:
             kind_var.set(ks[0])
         k = kind_var.get()
+        if k.startswith("Switch"):
+            bit_lbl.configure(text="Latch Q1"); sp_bit.grid_remove(); lvl_lbl.configure(text="Held on")
+            cb_lvl.configure(values=["system ROM", "cartridge"])
+            if lvl_var.get() not in ("system ROM", "cartridge"):
+                lvl_var.set("system ROM")
+            range_var.set("$000000-$00007F always read from that side (REG_SWPBIOS / REG_SWPROM ignored). "
+                          "Held on the cartridge: the console starts on the cartridge's vectors."); return
         if k.startswith("Strobe"):
             bit_lbl.configure(text="Signal"); sp_bit.grid_remove(); lvl_lbl.configure(text="Strobe")
             cb_lvl.configure(values=[s.upper() for s in STROBES])
@@ -1399,7 +1436,9 @@ def main_gui(rom_arg=None):
 
     def fault_add_form():
         code = dict(REGIONS)[reg_var.get()]; k = kind_var.get()
-        if k.startswith("Chip"):
+        if k.startswith("Switch"):
+            fault_add(f"vec:stuck:{'cart' if lvl_var.get() == 'cartridge' else 'bios'}")
+        elif k.startswith("Chip"):
             fault_add(f"wram:lane:{lvl_var.get().split()[0]}")
         elif k.startswith("Strobe"):
             fault_add(f"cart:strobe:{lvl_var.get().lower()}")
@@ -1424,6 +1463,7 @@ def main_gui(rom_arg=None):
         cv.configure(width=W, height=H)
         for y, r in enumerate(rects):
             cv.coords(r, 0, int(y * s), W, int((y + 1) * s))
+        scale_layers()
 
     def draw():
         lines = st["core"].lines(); cols = st["colours"]
@@ -1432,6 +1472,55 @@ def main_gui(rom_arg=None):
                 cols[y] = c; fill = neo_rgb(c)
                 for cv, _, rects in st["screens"]:
                     cv.itemconfigure(rects[y], fill=fill)
+        draw_layers()
+
+    def scale_layers():
+        """Fits the tile layer image to each screen (scales are multiples of 1/20: zoom then subsample)."""
+        L = st.get("layers")
+        if not L:
+            return
+        for (cv, s, _), it in zip(st["screens"], L["items"]):
+            old = it[1]                      # kept until the item shows the new one: Tk refuses to
+            if not (L["shown"] and L["base"]):          # configure an item whose image is gone
+                cv.itemconfigure(it[0], image="", state="hidden"); it[1] = None
+                continue
+            k = max(1, round(s * 20))
+            g = __import__("math").gcd(k, 20)
+            img = L["base"].zoom(k // g) if k // g > 1 else L["base"]
+            new = img.subsample(20 // g) if 20 // g > 1 else img
+            cv.itemconfigure(it[0], image=new, state="normal"); cv.tag_raise(it[0])
+            it[1] = new
+            del old
+
+    def draw_layers(force=False):
+        """Redraws the fix layer and the sprites when VRAM, the palette or the cartridge changed.
+        Not while a command runs (a memory test fills VRAM with patterns), at most 5 times a second."""
+        L, core, host = st["layers"], st["core"], st["host"]
+        now = time.time()
+        if core is None or (not force and ((host and host.pending) or now - L["t"] < 0.2)):
+            return
+        L["t"] = now
+        key = core.layer_state()
+        if key == L["key"]:
+            return
+        L["key"] = key
+        rows = core.layers()
+        base = tk.PhotoImage(width=320, height=224)          # transparent
+        cache, shown = {}, False
+        for y, row in enumerate(rows):
+            x = 0
+            while x < 320:
+                if row[x] is None:
+                    x += 1
+                    continue
+                x0 = x; run = []
+                while x < 320 and row[x] is not None:
+                    c = row[x]; run.append(cache.get(c) or cache.setdefault(c, neo_rgb(c))); x += 1
+                base.put("{" + " ".join(run) + "}", to=(x0, y)); shown = True
+        old = L["base"]                      # the screens may still show the old picture
+        L["base"], L["shown"] = base, shown
+        scale_layers()
+        del old
 
     # --- Compare tab: work in a separate process (the core in this window keeps its state) --------
     st["job"] = None; st["cmp"] = None; st["diag"] = None

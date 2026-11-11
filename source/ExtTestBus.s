@@ -309,7 +309,8 @@ BUS_SCREEN:
 	BandColour
 	bra .frame
 
-; screenBlank: palette bank 0, every sprite hidden (SCB3 Y/height = 0), every
+; screenBlank: palette bank 0, every sprite hidden (SCB3 Y/height = 0, sprite 0
+; also off screen), every
 ; fix tile = $20 (blank in the usual fonts) on palette 0. Destroys d0, d1, a0.
 screenBlank_JsrA6:
 	move.b d0,(REG_PALBANK0).l
@@ -321,6 +322,11 @@ screenBlank_JsrA6:
 .clrSprites:
 	move.w d0,(a0)
 	dbra d1,.clrSprites
+	; sprite 0 off screen (x = 380, as the system ROM's LSP_1st does for every
+	; sprite): MAME draws sprite 0 in the unused slots of each line even with
+	; a height of 0, 1 pixel wide at x = 0 with whatever SCB1 holds.
+	move.w #VRAM_SCB4,(REG_VRAMADD).l
+	move.w #$BE00,(a0)
 	move.w #VRAM_FIXMAP,(REG_VRAMADD).l
 	move.w #$0020,d0
 	move.w #40*32-1,d1

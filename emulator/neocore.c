@@ -114,6 +114,8 @@ static uint64_t h_done_cycles;
  *         3 VRAM upper (fast, $8000-$87FF), 4 LSPC line counter,
  *         5 BIOS socket address lines A1-A16 (68000 -> BricoNeo),
  *         6 cartridge slot P bus (D0-D15, A1-A19, strobes)
+ *         7 vector table switch (system latch Q1): kind 0, bit 0, held at
+ *           `value` (0 = system ROM, 1 = cartridge) whatever the 68000 writes
  * kind:   0 data bit stuck at `value` (what the CPU - and for the palette
  *           the DAC - reads; the cell cannot hold the other level)
  *         1 address line stuck at `value` (accesses fold onto the other half)
@@ -146,6 +148,14 @@ static unsigned fault_data(int region, unsigned w)
 		if (faults[i].region == region && faults[i].kind == 0)
 			w = faults[i].value ? (w | (1u << faults[i].bit)) : (w & ~(1u << faults[i].bit));
 	return w;
+}
+
+/* vector table $000000-$00007F from the cartridge? Latch Q1, unless a fault holds the switch */
+static int vectors_from_cart(void)
+{
+	for (int i = 0; i < nfaults; i++)
+		if (faults[i].region == 7) return faults[i].value;
+	return latch[1];
 }
 
 static unsigned fault_addr(int region, unsigned idx, int shift)
@@ -386,7 +396,7 @@ static unsigned read16(unsigned a, int lsb_only)
 {
 	a &= 0xFFFFFE;
 	if (a < 0x000080) {                                     /* vectors: BIOS socket unless swapped */
-		if (latch[1]) return cart_read(a);
+		if (vectors_from_cart()) return cart_read(a);
 		unsigned o = socket_addr(a);
 		host_port_read(a, o);
 		return bios_word(o);
@@ -672,6 +682,13 @@ EXPORT uint32_t neo_host_cycles(void) { return (uint32_t)h_done_cycles; }
 EXPORT void neo_host_ack(void) { if (h_state == H_DONE || h_state == H_TIMEOUT) h_state = H_IDLE; }
 
 EXPORT void neo_get_lines(uint16_t *out) { memcpy(out, frame_lines, sizeof frame_lines); }
+/* what the tile layers are made of, as the LSPC and the DAC read it (faults applied):
+ * VRAM words $0000-$87FF (0x8800 words) and the 4096 colours of the selected palette bank */
+EXPORT void neo_get_vram(uint16_t *out) { for (unsigned v = 0; v < 0x8800; v++) out[v] = vram_read(v); }
+EXPORT void neo_get_palette(uint16_t *out)
+{
+	for (unsigned i = 0; i < 0x1000; i++) out[i] = (uint16_t)fault_data(1, pal[pal_index(i << 1)]);
+}
 EXPORT uint32_t neo_frames(void) { return frames; }
 EXPORT uint32_t neo_pc(void) { return m68k_get_reg(NULL, M68K_REG_PC); }
 EXPORT uint32_t neo_reg(int r) { return m68k_get_reg(NULL, (m68k_register_t)r); }
@@ -706,9 +723,10 @@ EXPORT void neo_fault_clear(void) { nfaults = 0; }
 EXPORT int neo_fault_count(void) { return nfaults; }
 EXPORT int neo_fault_add(int region, int kind, int bit, int value)
 {
-	static const int data_bits[7] = { 15, 15, 15, 15, 8, -1, 15 };
-	static const int addr_lo[7] = { 1, 1, 0, 0, -1, 1, 1 }, addr_hi[7] = { 15, 13, 14, 10, -1, 16, 19 };
-	if (kind < 0 || kind > 3 || nfaults >= MAX_FAULTS || region < 0 || region > 6) return -1;
+	static const int data_bits[8] = { 15, 15, 15, 15, 8, -1, 15, 0 };
+	static const int addr_lo[8] = { 1, 1, 0, 0, -1, 1, 1, -1 }, addr_hi[8] = { 15, 13, 14, 10, -1, 16, 19, -1 };
+	if (kind < 0 || kind > 3 || nfaults >= MAX_FAULTS || region < 0 || region > 7) return -1;
+	if (region == 7 && kind != 0) return -1;
 	if (value < 0 || value > ((region == 6 && kind == 2) ? 9 : 1)) return -1;
 	if (kind == 0 && (bit < 0 || bit > data_bits[region])) return -1;
 	if (kind == 1 && (addr_lo[region] < 0 || bit < addr_lo[region] || bit > addr_hi[region])) return -1;

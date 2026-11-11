@@ -2,7 +2,7 @@
 ; Paste the whole file into the serial terminal (PuTTY, Tera Term...). Lines starting with ; are ignored.
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
 > Version
-Brico68k 1.35-nic034-08 - Nic034 fork (Nicolas), not an Aurelien34 release
+Brico68k 1.35-nic034-09 - Nic034 fork (Nicolas), not an Aurelien34 release
 Based on Aurelien34/Brico68k 1.35 (52c1c92): the BricoNeo shows 1.35
 Source: github.com/nic034/brico68k-compiler-and-rom
 

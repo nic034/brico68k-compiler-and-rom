@@ -22,6 +22,8 @@ class Core:
         lib.neo_host_values.argtypes = [ctypes.POINTER(ctypes.c_uint16), ctypes.c_int]
         lib.neo_host_cycles.restype = ctypes.c_uint32
         lib.neo_get_lines.argtypes = [ctypes.POINTER(ctypes.c_uint16)]
+        lib.neo_get_vram.argtypes = [ctypes.POINTER(ctypes.c_uint16)]
+        lib.neo_get_palette.argtypes = [ctypes.POINTER(ctypes.c_uint16)]
         lib.neo_frames.restype = ctypes.c_uint32
         lib.neo_pc.restype = ctypes.c_uint32
         lib.neo_cycles.restype = ctypes.c_uint64
@@ -39,6 +41,8 @@ class Core:
         self.cart = None
         self._vals = (ctypes.c_uint16 * 2048)()
         self._lines = (ctypes.c_uint16 * 224)()
+        self._vram = (ctypes.c_uint16 * 0x8800)()
+        self._pal = (ctypes.c_uint16 * 0x1000)()
 
     def load(self, rom):
         if self.lib.neo_load_bios(rom, len(rom)) != 0:
@@ -60,6 +64,25 @@ class Core:
     def lines(self):
         self.lib.neo_get_lines(self._lines)
         return list(self._lines)
+
+    def layer_state(self):
+        """Reads VRAM and the palette as the display sees them; returns a checksum of what the
+        tile layers depend on (redraw only when it changes)."""
+        import zlib
+        self.lib.neo_get_vram(self._vram)
+        self.lib.neo_get_palette(self._pal)
+        return zlib.crc32(bytes(self._pal), zlib.crc32(bytes(self._vram))) ^ id(self.cart)
+
+    def layers(self):
+        """Fix layer and sprites from the last layer_state(): 224 rows of 320 colour words or None
+        (backdrop). See render_layers for what is and is not drawn."""
+        return render_layers(self._vram, self._pal, self.cart.tiles if self.cart else None)
+
+    def screen(self):
+        """The whole picture: 224 rows of 320 colour words, tile layers over the backdrop lines."""
+        self.layer_state()
+        lines = self.lines()
+        return [[lines[y] if c is None else c for c in row] for y, row in enumerate(self.layers())]
 
 
 def parse_extensions(rom):
@@ -216,6 +239,13 @@ def test_cart_prom():
     import random
     rnd = random.Random(0xB1C068)
     p = bytearray(rnd.getrandbits(8) for _ in range(3 * 0x100000))
+    # vectors like a game's (wiki "68k vector table"): SP $10F300, reset $C00402, the exceptions to
+    # the system ROM entry points, VBLANK and timer to the cartridge. With the vector table switch
+    # held on the cartridge the console then starts as with a real game (reset = system ROM $402).
+    vec = [0x0010F300, 0x00C00402, 0x00C00408, 0x00C0040E, 0x00C00414] + [0x00C00426] * 27
+    vec[8], vec[9], vec[15], vec[24], vec[25], vec[26] = 0x00C0041A, 0x00C00420, 0x00C0042C, 0x00C00432, 0x200, 0x204
+    for i, v in enumerate(vec):
+        p[4 * i:4 * i + 4] = v.to_bytes(4, "big")
     p[0x100:0x108] = b"NEO-GEO\x00"
     p[0x108:0x10A] = (0x0999).to_bytes(2, "big")
     p[0x10A:0x10E] = (0x300000).to_bytes(4, "big")
@@ -239,8 +269,9 @@ MAX_SET = 512 << 20
 
 
 class CartImage:
-    def __init__(self, kind, data=b"", name="", chips=None, notes=None):
+    def __init__(self, kind, data=b"", name="", chips=None, notes=None, tiles=None):
         self.kind, self.mode, self.data, self.name = kind, CART_MODES[kind], data, name
+        self.tiles = tiles              # RomTiles / SyntheticTiles for the screen, None = no tile
         self.chips = chips or []        # dicts: chip, file, size, crc, expected, status
         self.notes = notes or []
 
@@ -268,7 +299,10 @@ def make_cart(kind):
     if kind == "test":
         return CartImage("test", test_cart_prom(), "Built-in test cartridge (NGH 0999)",
                          notes=["Generated P ROM: header + security code at $186, pseudo-random words "
-                                "(same bytes as the MAME bench cartridge 'brtest')."])
+                                "(same bytes as the MAME bench cartridge 'brtest').",
+                                "Tiles for the screen: generated here (S: a 5 x 7 font at the ASCII codes, "
+                                "C: numbered tiles with an F), not the MAME bench cartridge's."],
+                         tiles=SyntheticTiles())
     if kind == "diag":
         import random
         rnd = random.Random(0x5EA)       # SRAM power-on content: anything
@@ -447,7 +481,10 @@ def load_cartridge(path, softlist=None):
             if any(c["status"] == "MISSING" for c in chips):
                 notes.append("MISSING: not in this set. A MAME split clone set keeps the chips it shares in "
                              "its parent's zip: merge them, or check the parent too.")
-            return CartImage("game", _p_window(maincpu), f"{best} - {sw['description']}", chips, notes)
+            tiles = RomTiles(_build_area(*sw["areas"]["fixed"], files, by_crc) if "fixed" in sw["areas"] else None,
+                             _build_area(*sw["areas"]["sprites"], files, by_crc) if "sprites" in sw["areas"] else None)
+            notes.append(tiles.note())
+            return CartImage("game", _p_window(maincpu), f"{best} - {sw['description']}", chips, notes, tiles)
     # no list (or no match): P1 / P2 by name, byte order and layout by the header
     ps = sorted((n for n in files if _chip_of(n) == "P"),
                 key=lambda n: int(re.search(r"p(\d)", n).group(1)) if re.search(r"p(\d)", n) else 9)
@@ -480,20 +517,34 @@ def load_cartridge(path, softlist=None):
     notes.append(f"P ROM {'byte-swapped files (MAME order)' if swap else 'files in 68000 order'}, "
                  f"layout from the NEO-GEO header{' (P1 halves swapped, ROM_CONTINUE)' if layout == 'halves' else ''}. "
                  "Give the MAME list hash/neogeo.xml to check every chip's CRC32.")
-    return CartImage("game", _p_window(maincpu), Path(path).stem, chips, notes)
+    # tiles by name: S1, and the C pairs interleaved byte by byte (odd chip first), as MAME loads them
+    num = lambda n: int(re.search(r"[sc](\d)", n).group(1)) if re.search(r"[sc](\d)", n) else 9
+    ss = sorted((n for n in files if _chip_of(n) == "S"), key=num)
+    cs = sorted((n for n in files if _chip_of(n) == "C"), key=num)
+    spr = bytearray()
+    for i in range(0, len(cs) - 1, 2):
+        a, b = files[cs[i]], files[cs[i + 1]]
+        m = min(len(a), len(b))
+        pair = bytearray(2 * m)
+        pair[0::2], pair[1::2] = a[:m], b[:m]
+        spr += pair
+    tiles = RomTiles(files[ss[0]] if ss else None, bytes(spr) if spr else None)
+    notes.append(tiles.note())
+    return CartImage("game", _p_window(maincpu), Path(path).stem, chips, notes, tiles)
 
 
 # Simulated faults
 # ---------------------------------------------------------------------------
-FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4, "bios": 5, "cart": 6}
+FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4, "bios": 5, "cart": 6, "vec": 7}
 REGION_NAMES = {0: "WRAM", 1: "Palette RAM", 2: "VRAM lower (slow)", 3: "VRAM upper (fast)",
-                4: "LSPC line counter", 5: "BIOS socket (68000 -> BricoNeo)", 6: "Cartridge slot P bus"}
-FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2, "float": 3, "strobe": 2}
+                4: "LSPC line counter", 5: "BIOS socket (68000 -> BricoNeo)", 6: "Cartridge slot P bus",
+                7: "Vector table switch"}
+FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2, "float": 3, "strobe": 2, "stuck": 0}
 # 0-3 strobes; 4-5 /PORTOE (P2 output enable); 6-9 the OE dead behind a 245 / NEO-G0 / NEO-BUF (bus hold)
 STROBES = ["portwel", "portweu", "romoel", "romoeu", "portoel", "portoeu",
            "romoel245", "romoeu245", "portoel245", "portoeu245"]
 # the BIOS socket has no data faults: a bad D line stops the boot, nothing to test
-DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8, 5: -1, 6: 15}
+DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8, 5: -1, 6: 15, 7: 0}
 ADDR_RANGE = {0: (1, 15), 1: (1, 13), 2: (0, 14), 3: (0, 10), 5: (1, 16), 6: (1, 19)}
 
 FAULT_HELP = ("Fault syntax: REGION:data:BIT:0|1 (data bit stuck), REGION:addr:LINE:0|1 (address line stuck),\n"
@@ -504,6 +555,7 @@ FAULT_HELP = ("Fault syntax: REGION:data:BIT:0|1 (data bit stuck), REGION:addr:L
               "Cartridge slot: cart:data:BIT:0|1, cart:addr:LINE:0|1, cart:float:BIT (D line unstable),\n"
               "cart:strobe:portwel|portweu|romoel|romoeu|portoel|portoeu (strobe dead; the OE ones: the 68000 reads\n"
               "its prefetched word), ...245 suffix (romoel245 ...): OE dead behind a 245, bus hold. Needs --cart test or diag.\n"
+              "Vector table switch (system latch Q1) held: vec:stuck:bios (system ROM) or vec:stuck:cart.\n"
               "Example: --fault wram:data:5:1 --fault pal:addr:13:0 --fault bios:addr:15:1")
 
 
@@ -513,6 +565,10 @@ def parse_fault(spec):
     if len(parts) < 3 or parts[0] not in FAULT_REGIONS or parts[1] not in FAULT_KINDS:
         raise ValueError(f"bad fault '{spec}'. " + FAULT_HELP.splitlines()[0])
     region, kind = FAULT_REGIONS[parts[0]], FAULT_KINDS[parts[1]]
+    if region == 7 or parts[1] == "stuck":
+        if region != 7 or parts[1] != "stuck" or len(parts) != 3 or parts[2] not in ("bios", "cart"):
+            raise ValueError("vector table switch: vec:stuck:bios or vec:stuck:cart")
+        return region, 0, 0, 1 if parts[2] == "cart" else 0
     if kind == 2 and region == 6:
         if parts[1] != "strobe" or len(parts) != 3 or parts[2] not in STROBES:
             raise ValueError("cartridge strobe: cart:strobe:" + "|".join(STROBES))
@@ -548,6 +604,8 @@ def parse_fault(spec):
 def describe_fault(f):
     region, kind, bit, value = f
     name = REGION_NAMES[region]
+    if region == 7:
+        return f"{name}: held on the {'cartridge' if value else 'system ROM'} (latch Q1)"
     if kind == 2 and region == 6:
         return f"{name}: /{STROBES[value].upper()} dead"
     if kind == 3 and region == 6:
@@ -566,6 +624,8 @@ def describe_fault(f):
 def fault_spec(f):
     region, kind, bit, value = f
     r = {v: k for k, v in FAULT_REGIONS.items()}[region]
+    if region == 7:
+        return f"vec:stuck:{'cart' if value else 'bios'}"
     if kind == 2 and region == 6:
         return f"{r}:strobe:{STROBES[value]}"
     if kind == 2:
@@ -580,6 +640,225 @@ def apply_faults(core, faults):
     for f in faults:
         if core.lib.neo_fault_add(*f) != 0:
             raise ValueError(f"fault refused by the core: {describe_fault(f)}")
+
+
+# ---------------------------------------------------------------------------
+# Tile layers: the screen from VRAM. The core keeps VRAM and the palette but draws nothing;
+# this draws the fix layer and the sprites from them, for the test screens of the ROM (TestGfx).
+# Layer rules as MAME snk/neogeo_spr.cpp. NOT a game-accurate renderer:
+# - vertical shrink is approximated (source line = window line * 256 / (shrink + 1)): the real
+#   table is the L0 ROM, which is SNK's and not included;
+# - no auto-animation, no 96 sprites per line limit, windows over 32 tiles not handled;
+# - tiles: the cartridge's S and C ROMs when the set has them (not decrypted: CMC / PCM sets show
+#   noise), generated tiles for the built-in test cartridge, none without a cartridge or with the
+#   PROG board (no CHA board: nothing drives the tile data).
+# ---------------------------------------------------------------------------
+_FONT = {" ": "0000000", "-": "000V000", "0": "EHJLPHE", "1": "4C4444E", "2": "EH1248V", "3": "U11E11U", "4": "26AIV22",
+         "5": "VGU11HE", "6": "68GUHHE", "7": "V124888", "8": "EHHEHHE", "9": "EHHF12C", "A": "EHHVHHH", "B": "UHHUHHU",
+         "C": "EHGGGHE", "D": "UHHHHHU", "E": "VGGUGGV", "F": "VGGUGGG", "G": "EHGNHHF", "H": "HHHVHHH", "I": "E44444E",
+         "J": "72222IC", "K": "HIKOKIH", "L": "GGGGGGV", "M": "HRLLHHH", "N": "HPLJHHH", "O": "EHHHHHE", "P": "UHHUGGG",
+         "Q": "EHHHLID", "R": "UHHUKIH", "S": "FGGE11U", "T": "V444444", "U": "HHHHHHE", "V": "HHHHHA4", "W": "HHHLLRH",
+         "X": "HHA4AHH", "Y": "HHA4444", "Z": "V1248GV"}       # 5 x 7, one base-32 digit per row
+_ZOOM_X = ["0000000010000000", "0000100010000000", "0000100010001000", "0010100010001000", "0010100010001010",
+           "0010101010001010", "0010101010101010", "1010101010101010", "1010101011101010", "1011101011101010",
+           "1011101011101011", "1011101111101011", "1011101111101111", "1111101111101111", "1111101111111111",
+           "1111111111111111"]                                   # MAME zoom_x_tables: the columns kept
+
+
+class SyntheticTiles:
+    """Tiles of the built-in test cartridge. Fix: a 5 x 7 font at the ASCII codes of the digits,
+    capitals, space and '-', a hollow box for every other tile except $00, $20 and $FF (blank:
+    VRAM is zero at power-on in the core, a real one holds anything).
+    Sprites: a frame in colour 1 + n % 15, an F (shows the flips) and the low 8 bits of the
+    tile number along the bottom, both in colour 13."""
+    synthetic = True
+
+    def __init__(self, fix_tiles=0x1000, sprite_tiles=0x2000):
+        self._f, self._s = {}, {}
+        self.nf, self.ns = fix_tiles, sprite_tiles      # chip sizes: tile numbers wrap, as on a ROM
+
+    def note(self):
+        return "Tiles: generated"
+
+    def fix(self, n):
+        n %= self.nf
+        if n not in self._f:
+            t = None
+            ch = chr(n & 0xFF) if n < 0x100 else ""
+            if ch in _FONT and ch != " ":
+                t = [[0] * 8] + [[0] + [1 if int(row, 32) >> (4 - x) & 1 else 0 for x in range(5)] + [0, 0]
+                                 for row in _FONT[ch]]
+            elif n not in (0x00, 0x20, 0xFF):
+                t = [[1 if (x in (1, 6) and 1 <= y <= 6) or (y in (1, 6) and 1 <= x <= 6) else 0 for x in range(8)]
+                     for y in range(8)]
+            self._f[n] = t
+        return self._f[n]
+
+    def sprite(self, n):
+        n %= self.ns
+        if n not in self._s:
+            t = [[0] * 16 for _ in range(16)]
+            c = 1 + n % 15
+            for i in range(16):
+                t[0][i] = t[15][i] = t[i][0] = t[i][15] = c
+            for y in range(3, 13):
+                t[y][4] = 13
+            for x in range(4, 11):
+                t[3][x] = 13
+            for x in range(4, 9):
+                t[7][x] = 13
+            for b in range(8):
+                if n >> b & 1:
+                    t[13][13 - b] = 13
+            self._s[n] = t
+        return self._s[n]
+
+
+class RomTiles:
+    """Tiles of a game ROM set: S ROM (32 bytes a tile) and the C ROMs as MAME loads them
+    (C1/C2 interleaved byte by byte, 128 bytes a tile). A blank tile is None."""
+    synthetic = False
+
+    def __init__(self, s_rom, c_rom):
+        self.s, self.c = s_rom or b"", c_rom or b""
+        self._f, self._s = {}, {}
+
+    def note(self):
+        return (f"Tiles for the screen: S ROM {len(self.s) // 32} tiles, C ROMs {len(self.c) // 128} tiles"
+                + ("" if self.s and self.c else " (a missing chip gives no tile)")
+                + ". Not decrypted: an encrypted set shows noise.")
+
+    def fix(self, n):
+        if n not in self._f:
+            t = None
+            if self.s:
+                o = (n * 32) % (len(self.s) - len(self.s) % 32 or 32)
+                g = self.s[o:o + 32]
+                if len(g) == 32 and any(g):
+                    t = [[(g[(0x10, 0x18, 0x00, 0x08)[x >> 1] + y] >> (4 if x & 1 else 0)) & 15 for x in range(8)]
+                         for y in range(8)]
+            self._f[n] = t
+        return self._f[n]
+
+    def sprite(self, n):
+        if n not in self._s:
+            t = None
+            if len(self.c) >= 128:
+                o = (n * 128) % (len(self.c) - len(self.c) % 128)
+                g = self.c[o:o + 128]
+                if any(g):
+                    t = []
+                    for y in range(16):
+                        row = []
+                        for half in (0x40, 0x00):       # left 8 pixels, then right 8
+                            b0, b1, b2, b3 = (g[half | i | y << 2] for i in (0, 2, 1, 3))
+                            row += [(b3 >> x & 1) << 3 | (b2 >> x & 1) << 2 | (b1 >> x & 1) << 1 | (b0 >> x & 1)
+                                    for x in range(8)]
+                        t.append(row)
+            self._s[n] = t
+        return self._s[n]
+
+
+def test_cart_tile_roms(fix_tiles=0x1000, sprite_tiles=0x2000):
+    """The built-in test cartridge's tiles as ROM files: (S1, C1, C2), in the chips' own formats
+    (what RomTiles decodes). tools/make_test_cart.py writes them, so the MAME bench cartridge
+    shows the same tiles as this emulator."""
+    src = SyntheticTiles()
+    s1 = bytearray(fix_tiles * 32)
+    for n in range(fix_tiles):
+        t = src.fix(n)
+        if t:
+            for y in range(8):
+                for x in range(8):
+                    s1[n * 32 + (0x10, 0x18, 0x00, 0x08)[x >> 1] + y] |= t[y][x] << (4 if x & 1 else 0)
+    c = bytearray(sprite_tiles * 128)                 # C1 / C2 interleaved byte by byte, as MAME loads them
+    for n in range(sprite_tiles):
+        t = src.sprite(n)
+        for y in range(16):
+            for half, x0 in ((0x40, 0), (0x00, 8)):
+                for x in range(8):
+                    v = t[y][x0 + x]
+                    for plane, i in enumerate((0, 2, 1, 3)):
+                        if v >> plane & 1:
+                            c[n * 128 + (half | i | y << 2)] |= 1 << x
+    return bytes(s1), bytes(c[0::2]), bytes(c[1::2])
+
+
+def render_layers(vram, pal, tiles):
+    """Fix layer and sprites from VRAM ($0000-$87FF) and the 4096 colours of the palette bank.
+    Returns 224 rows of 320 entries: a colour word, or None where the backdrop shows.
+    tiles = None (no cartridge): every row is None."""
+    W, H = 320, 224
+    out = [[None] * W for _ in range(H)]
+    if tiles is None:
+        return out
+    x = y = rows = zy = 0
+    for s in range(381):                                # low numbers first: higher ones on top
+        y3, z2 = vram[0x8200 + s], vram[0x8000 + s]
+        zx = z2 >> 8 & 15
+        if y3 & 0x40:                                   # sticky: glued to the right of the previous one
+            x = (x + (vram[0x8000 + s - 1] >> 8 & 15) + 1) & 0x1FF if s else 0
+        else:
+            x = vram[0x8400 + s] >> 7
+            y = (0x200 - (y3 >> 7)) & 0x1FF
+            rows, zy = y3 & 0x3F, z2 & 0xFF
+        if not rows:
+            continue
+        x0 = x - 0x200 if x >= 0x1F0 else x
+        if x0 >= W:
+            continue
+        keep = _ZOOM_X[zx]
+        base = s * 64
+        for wl in range(min(rows, 32) * 16):
+            sy = ((y + wl) & 0x1FF) - 16
+            if not 0 <= sy < H:
+                continue
+            src = wl if zy == 0xFF else wl * 256 // (zy + 1)
+            if src >= (512 if zy == 0xFF else 256):
+                continue
+            ti, line = (src >> 4) & 31, src & 15
+            lo, at = vram[base + ti * 2], vram[base + ti * 2 + 1]
+            t = tiles.sprite(lo | (at >> 4 & 15) << 16)
+            if t is None:
+                continue
+            row = t[line ^ 15 if at & 2 else line]
+            po = (at >> 8) * 16
+            dst = out[sy]
+            xo = x0
+            for sx in range(16):
+                if keep[sx] == "1":
+                    c = row[15 - sx if at & 1 else sx]
+                    if c and 0 <= xo < W:
+                        dst[xo] = pal[po + c]
+                    xo += 1
+    for col in range(40):                               # fix layer: above everything
+        for r in range(2, 30):
+            w = vram[0x7000 + col * 32 + r]
+            t = tiles.fix(w & 0xFFF)
+            if t is None:
+                continue
+            po = (w >> 12) * 16
+            for ty in range(8):
+                dst, row = out[(r - 2) * 8 + ty], t[ty]
+                for tx in range(8):
+                    if row[tx]:
+                        dst[col * 8 + tx] = pal[po + row[tx]]
+    return out
+
+
+def write_png(path, rows, scale=1):
+    """rows: lists of (r, g, b). A plain 8-bit RGB PNG (no dependency)."""
+    import zlib
+    h, w = len(rows) * scale, len(rows[0]) * scale
+    raw = bytearray()
+    for row in rows:
+        line = b"\x00" + b"".join(bytes(p) * scale for p in row)
+        raw += line * scale
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
 
 
 # ---------------------------------------------------------------------------

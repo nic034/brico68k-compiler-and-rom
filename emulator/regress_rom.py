@@ -9,9 +9,9 @@ status, the raw output words, emulated time, Z80 commands, cartridge writes, and
 backdrop lines after the screen commands (TestDAC, TestBus). About 1 minute on 2 cores.
 With CORE=emulator/build/libneocore_test.so (emulator/build_test_core.py) it also runs
 10 input sets (joypads, DIP, STATUS_A/B, SYSTYPE, MVS with a backup RAM): the stock core is
-an AES with nothing pressed, so it never reaches the MVS / button / memory card branches. It
-also holds the vector table switch (latch Q1) at 0 and at 1 for TestVectors, and records a
-checksum of the VRAM and palette words that TestGfx leaves (the core draws no tile).
+an AES with nothing pressed, so it never reaches the MVS / button / memory card branches.
+After TestGfx it records a checksum of the VRAM and palette words and of the picture drawn from
+them; the vector table switch held on either side is one of the faults (vec:stuck:bios / cart).
 
 "compare" must print 0 differences for a change that is meant to keep the outputs. Apart:
 - unstable cartridge lines (cart:float): random per access, status only;
@@ -78,12 +78,13 @@ def run_cmd(c, h, line):
     rec["words"] = vals
     rec["text"] = "".join(chr(v) if v == 10 or 32 <= v < 127 else f"<{v:04X}>" for v in vals)
     rec["overflow"] = int(c.lib.neo_host_overflow())
-    if line.split()[0].lower() == "testgfx" and st == "eot" and hasattr(c.lib, "neo_test_vram"):
-        buf = (ctypes.c_uint16 * 0x10000)()            # test core only: what the screen is made of
-        c.lib.neo_test_vram(buf)
-        pal = [c.lib.neo_peek16(0x400000 + 2 * i) for i in range(32)] + [c.lib.neo_peek16(0x401FFE)]
+    if line.split()[0].lower() == "testgfx" and st == "eot":
+        c.layer_state()                                # what the screen is made of: VRAM and palette words
+        buf, pal = c._vram, list(c._pal[:32]) + [c._pal[4095]]
         rec["gfx"] = zlib.crc32(bytes(str((list(buf[0x0000:0x0900]), list(buf[0x7000:0x7500]),
                                            list(buf[0x8000:0x8600]), pal)), "ascii"))
+        rows = c.layers()                              # and the picture drawn from them
+        rec["pixels"] = zlib.crc32(bytes(str(rows), "ascii"))
     if line.split()[0].lower() in SCREEN and st == "eot":
         for _ in range(4):
             c.lib.neo_run_frame()
@@ -108,13 +109,12 @@ def scenario(args):
         c.lib.neo_test_inputs(*args[6])
     c.load(rom)
     c.load_cart(E.make_cart(cart))
+    c.lib.neo_fault_clear()        # the core keeps its faults across power cycles; workers are reused
     c.power_on()
     c.lib.neo_set_options(1, wd)
     E.apply_faults(c, [E.parse_fault(f) for f in faults])
     for _ in range(60):
         c.lib.neo_run_frame()
-    if len(args) > 7:
-        c.lib.neo_test_latch(*args[7])                 # after the boot: a held system latch output
     h = E.Host(c, rom)
     out = []
     for line in cmds:
@@ -132,7 +132,8 @@ def scenarios(rom):
              "pal": ["TestPRAM", "TestChip", "TestDAC", "Echo 3"],
              "vramlo": ["TestVRAM", "TestChip", "TestLSPC"], "vramhi": ["TestVRAM", "TestChip", "TestLSPC"],
              "line": ["TestTiming", "TestChip", "TestDAC", "Echo 4", "TestBus", "Echo 5"],
-             "bios": ["TestBus", "Echo 6", "Version", "Dump $C07FF0 16"]}
+             "bios": ["TestBus", "Echo 6", "Version", "Dump $C07FF0 16"],
+             "vec": ["TestVectors", "Echo $41", "TestVectors", "TestChip"]}
     for f in E.all_single_faults():
         spec_ = E.fault_spec(f)
         reg = spec_.split(":")[0]
@@ -144,6 +145,10 @@ def scenarios(rom):
                    [f"cart:float:{b}" for b in range(16)] +
                    [f"cart:strobe:{s}" for s in ("portwel", "portweu", "romoel", "romoeu", "portoel", "portoeu")] +
                    [f"cart:strobe:{s}245" for s in ("romoel", "romoeu", "portoel", "portoeu")])
+    for cart in ("test", "diag"):                       # vector table switch held, with a cartridge
+        for side in ("bios", "cart"):
+            sc.append((f"fault/{cart}/vec:stuck:{side}", rom, cart, 1, [f"vec:stuck:{side}"],
+                       ["TestVectors", "Echo $41", "TestVectors"]))
     for cf in cart_faults:
         sc.append((f"fault/test/{cf}", rom, "test", 1, [cf], ["CartTest", "CartTest 1"]))
         sc.append((f"fault/diag/{cf}", rom, "diag", 1, [cf], ["CartDiag", "CartTest"]))
@@ -157,10 +162,6 @@ def scenarios(rom):
                 (0x6E, 0x33, 0x99, 0x40, 0xC6, 0x007F, 1), (0x81, 0xCC, 0x66, 0x9F, 0x23, 0x1234, 0),
                 (0x33, 0x0F, 0xF0, 0x5A, 0x41, 0x00BF, 0), (0xCC, 0xF0, 0x0F, 0xA5, 0xB9, 0x0000, 1)]):
             sc.append((f"inputs/{i}", rom, "none", 1, [], cmds, inp))
-        idle = (0xFF, 0x00, 0xFF, 0x00, 0x7F, 0xFF00, 0)
-        for cart in ("none", "test", "diag"):
-            for v in (0, 1):                           # vector table switch (latch Q1) held
-                sc.append((f"latch/q1={v}/{cart}", rom, cart, 1, [], ["TestVectors", "Echo $41", "TestVectors"], idle, (1, v)))
     return sc
 
 
@@ -195,7 +196,7 @@ def compare(a, b):
                 continue
             if ra["cmd"].startswith(("Dump $C0", "Read $C0")):     # reads the ROM itself: layout changes
                 continue
-            keys = ("status", "words", "lines", "gfx", "z80", "cartw", "latchw", "overflow")
+            keys = ("status", "words", "lines", "gfx", "pixels", "z80", "cartw", "latchw", "overflow")
             bad = [k for k in keys if ra.get(k) != rb.get(k)]
             if bad == ["words"] and MEASURED.sub("", ra.get("text", "")) == MEASURED.sub("", rb.get("text", "")):
                 g = lambda r: " | ".join(l.strip() for l in r.get("text", "").splitlines() if "after ~" in l)
