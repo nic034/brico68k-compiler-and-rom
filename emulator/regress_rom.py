@@ -28,6 +28,7 @@ import sys, os, json, re, zlib, ctypes, difflib, importlib.util
 from collections import defaultdict
 from multiprocessing import Pool
 from pathlib import Path
+from atomic_results import write_results
 
 EMU = str(Path(__file__).resolve().parent.parent / "Brico68k_Emulator.py")
 spec = importlib.util.spec_from_file_location("bemu", EMU)
@@ -233,7 +234,7 @@ if __name__ == "__main__":
         sc = scenarios(rom)
         with Pool(jobs) as p:
             res = dict(p.map(scenario, sc, chunksize=4))
-        json.dump(res, open(out, "w"))
+        write_results(out, res)
         print(f"{len(res)} scenarios, {sum(len(v) for v in res.values())} commands -> {out}")
     elif len(sys.argv) == 4 and sys.argv[1] == "compare":
         sys.exit(1 if compare(json.load(open(sys.argv[2])), json.load(open(sys.argv[3]))) else 0)
