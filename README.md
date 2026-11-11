@@ -1,5 +1,18 @@
 # Brico68k Compiler and ROM
 
+
+> **Development ownership:** Nicolas alone maintains the Brico68k diagnostic ROM,
+> its 68000 source, generated binaries and ROM compiler. Automated contributions
+> in this project are restricted to the Neo Geo/68000 **emulator and validation
+> tooling**. The separate [BricoBanc](https://github.com/nic034/bricobanc)
+> project covers Pico RP2040/Brico16Bits emulation and the integrated test GUI.
+> The ROM is used as **read-only test input**; ROM sources and binaries are
+> never changed by emulator or BricoBanc maintenance.
+>
+> See [GUIDE_DEVELOPPEMENT.md](GUIDE_DEVELOPPEMENT.md) for ownership, permitted
+> paths, validation requirements and limits.
+
+
 A one-file tool that builds the **Brico68k** Neo Geo diagnostic ROM, and a ready-to-use build
 of an extended Brico68k (BricoNeo 1.35 + review fixes + new tests).
 
