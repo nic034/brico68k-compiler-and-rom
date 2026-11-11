@@ -23,6 +23,8 @@ def inventory_differences(old, new):
             for index, rec in enumerate(records):
                 if not isinstance(rec, dict) or not isinstance(rec.get('cmd'), str):
                     raise ValueError(f'{scenario}: {side} record {index} lacks string cmd')
+                if not rec['cmd'].strip():
+                    raise ValueError(f'{scenario}: {side} record {index} has empty cmd')
     differences = []
     for scenario in sorted(old.keys() - new.keys()):
         differences.append(f'MISSING scenario: {scenario}')
@@ -76,6 +78,22 @@ class InventoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             inventory_differences([], {})
 
+
+    def test_empty_command_rejected_old(self):
+        with self.assertRaisesRegex(ValueError, 'empty cmd'):
+            inventory_differences({'s': [{'cmd': ''}]}, {'s': [{'cmd': 'Echo 1'}]})
+
+    def test_whitespace_command_rejected_new(self):
+        with self.assertRaisesRegex(ValueError, 'empty cmd'):
+            inventory_differences({'s': [{'cmd': 'Echo 1'}]}, {'s': [{'cmd': ' \\t '}]})
+
+    def test_empty_command_rejected_in_added_scenario(self):
+        with self.assertRaisesRegex(ValueError, 'empty cmd'):
+            inventory_differences({}, {'added': [{'cmd': ''}]})
+
+    def test_empty_command_rejected_in_removed_scenario(self):
+        with self.assertRaisesRegex(ValueError, 'empty cmd'):
+            inventory_differences({'removed': [{'cmd': ' \\n'}]}, {})
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
