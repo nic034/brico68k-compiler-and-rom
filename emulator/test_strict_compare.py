@@ -60,5 +60,11 @@ class StrictCompareTests(unittest.TestCase):
         self.assertEqual(main([], runner=lambda *_: None), 2)
 
 
+    def test_empty_command_fails_before_launching_comparator(self):
+        rc, calls = self.run_case({'s': [{'cmd': 'Echo 1'}]}, {'s': [{'cmd': '\\t  '}]})
+        self.assertEqual(rc, 2)
+        self.assertFalse(calls)
+
+
 if __name__ == '__main__':
     unittest.main()
