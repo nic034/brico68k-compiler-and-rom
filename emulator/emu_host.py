@@ -26,6 +26,7 @@ class Core:
         self._lines = (ctypes.c_uint16 * 224)()
         self._vram = (ctypes.c_uint16 * 0x8800)()
         self._pal = (ctypes.c_uint16 * 0x1000)()
+        self._ssg = (ctypes.c_uint16 * 16)()
         if lib_path is None:
             self.lib = PyNeoLib()
             return
@@ -53,6 +54,7 @@ class Core:
         lib.neo_cart_writes.restype = ctypes.c_uint32
         lib.neo_cart_latch_writes.restype = ctypes.c_uint32
         lib.neo_cart_bank.restype = ctypes.c_int
+        lib.neo_ssg_regs.restype = ctypes.c_uint32
 
     def load(self, rom):
         if self.lib.neo_load_bios(rom, len(rom)) != 0:
@@ -70,6 +72,11 @@ class Core:
 
     def power_on(self):
         self.lib.neo_power_on()
+
+    def ssg(self):
+        """(16 YM2610 SSG registers as the Z80 wrote them, count of SSG writes)."""
+        n = self.lib.neo_ssg_regs(self._ssg)
+        return list(self._ssg), n
 
     def lines(self):
         self.lib.neo_get_lines(self._lines)
@@ -946,3 +953,49 @@ def parse_console_log(raw, ext_names):
             e["output"].pop()
         e["output"] = "\n".join(e["output"]) + ("\n" if e["output"] else "")
     return entries
+
+
+# ---------------------------------------------------------------------------
+# Sound: the YM2610 SSG part (AY-3-8910 compatible) from the registers the Z80 wrote.
+# Square-wave tones only (no noise, no envelope, no FM / ADPCM): enough to hear that the Z80
+# received the command and programmed the sound chip.
+SSG_CLOCK = 2000000                  # YM2610 8 MHz / 4; tone f = SSG_CLOCK / (16 x period)
+
+
+def ssg_voices(regs):
+    """Audible SSG channels: [(channel 'A'/'B'/'C', frequency Hz, volume 0-15)]."""
+    out = []
+    for ch in range(3):
+        period = regs[2 * ch] | ((regs[2 * ch + 1] & 0x0F) << 8)
+        vol = regs[8 + ch] & 0x1F
+        vol = 15 if vol & 0x10 else vol          # envelope mode: taken as full volume
+        if not (regs[7] >> ch) & 1 and vol and period:
+            out.append(("ABC"[ch], SSG_CLOCK / (16 * period), vol))
+    return out
+
+
+def ssg_describe(voices):
+    return ", ".join(f"tone {c} {f:.0f} Hz vol {v}" for c, f, v in voices) if voices else "silent"
+
+
+def ssg_wav(voices, seconds=4.0, rate=22050):
+    """A mono 16-bit WAV of the voices (square waves, AY logarithmic volume), as bytes."""
+    import io, wave
+    n = int(seconds * rate)
+    amp = [0] + [int(9000 * 10 ** ((v - 15) * 1.5 / 20)) for v in range(1, 16)]
+    buf = bytearray(2 * n)
+    if voices:
+        parts = []
+        for _c, f, v in voices:
+            half = rate / (2 * f)
+            a = amp[v] // len(voices) if len(voices) > 1 else amp[v]
+            parts.append((half, a))
+        for i in range(n):
+            x = 0
+            for half, a in parts:
+                x += a if int(i / half) & 1 else -a
+            struct.pack_into("<h", buf, 2 * i, max(-32767, min(32767, x)))
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(bytes(buf))
+    return out.getvalue()

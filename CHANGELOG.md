@@ -4,6 +4,25 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-11 - Emulator 1.19: sound (YM2610 SSG tones)
+
+**Emulator 1.19** (ROM unchanged: 1.35-nic034-09)
+- The built-in test M1 now programs the YM2610 SSG for the sound commands: `$5C` / `$5D` / `$5E`
+  (TestAudio) give a 1000 / 1506 / 749 Hz tone until the next command, `$02` (PlayEyeSnd) a short
+  jingle, `$03` silences before the reset. `$01` / `$03` replies and timings are unchanged
+  (regress_rom.py, C core, old vs new: 0 differences).
+- The cores (C and Python) latch the SSG registers the Z80 writes (ports `$04` / `$05`), new API
+  `neo_ssg_regs`; the Python Z80 gains the opcodes of the jingle (ld b/d, djnz, dec d, jr nz).
+- The window plays the tones (winsound on Windows, paplay / pw-play / aplay / afplay elsewhere;
+  Settings > Sound), shows them in the status bar (`♪ 1000 Hz`) and notes them in the console.
+  A tone is heard only if the Z80 took the NMI, read the command and wrote the sound chip.
+- PlayEyeSnd runs in "Run all tests" (LOOK: listen) instead of N/A.
+- Not emulated: FM, ADPCM, SSG noise and envelopes, panning (the beeps are mono). The MAME bench
+  cartridge (`tools/make_test_cart.py`) has the same M1; not re-run in MAME this time.
+- Checks: test_neo_py.py lockstep Python vs C (SSG registers included), 0 differences;
+  guiverify 193/193 (C core); tones checked by measuring the generated WAV frequencies; the
+  speaker output itself could not be heard here (no audio device on the test machine).
+
 ## 2026-11-11 - Emulator 1.18: status lamps, screen preview in the console
 
 **Emulator 1.18** (ROM unchanged: 1.35-nic034-09)

@@ -11,7 +11,7 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.4 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.18 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.19 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
 | `rom/ROM.BIO` | Ready-to-use ROM, 128 KB: 32 KB of code + CRC32 + 3 mirrors, exactly what the BricoNeo builds itself for header flag `$0004` (SHA-256 in `rom/ROM.BIO.sha256`) |
 | `brico16bits/` | Optional Brico16Bits patch (EXCPT: 68000 exception reports). Syntax-checked only, not built for the Pico, not run |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
@@ -86,9 +86,19 @@ line of the window says which core runs.
   patched Brico16Bits shows it.
 - **Z80**: 4 MHz, wired as on the board: sound latch on port `$00` (NMI when a command is
   pending and the NMI is enabled with `out ($08)` / `out ($18)`), reply latch on port `$0C`,
-  2 KB RAM. It runs a built-in test M1 that only answers the standard handshake
-  (`$03` reset gives `$00`, `$01` gives `$01`). It can also run without any program, like an
-  AES with no cartridge.
+  2 KB RAM. It runs a built-in test M1 that answers the standard handshake
+  (`$03` silence + reset gives `$00`, `$01` gives `$01`) and programs the YM2610 SSG for the
+  sound commands: `$5C` / `$5D` / `$5E` (TestAudio's left / right / centre beeps) give a
+  1000 / 1506 / 749 Hz tone until the next command, `$02` (PlayEyeSnd) a short jingle (C E G C)
+  standing in for a cartridge's eyecatcher music. Its listing is in `emulator/neo_py.py`
+  (`TEST_M1_PARTS`); the MAME bench cartridge (`tools/make_test_cart.py`) carries the same M1. It
+  can also run without any program, like an AES with no cartridge.
+- **Sound** (1.19): the SSG square-wave tones the Z80 programmed (ports `$04` / `$05`, registers
+  `$00`-`$0F`) are played through the PC speakers: winsound on Windows, `paplay` / `pw-play` /
+  `aplay` / `afplay` elsewhere (Settings > Sound to switch off). The status bar shows the tone
+  (`♪ 1000 Hz`) and the console notes each change. So a sound is heard only when the 68000 sent the
+  command, the Z80 took the NMI, read the latch and wrote the sound chip. The beeps are mono: the
+  SSG has no panning (left / right on a real board come from the driver's FM / ADPCM channels).
 - **Watchdog**: on by default. Real AES and MVS boards both have it, in NEO-B1 (kicked by any
   write to `REG_DIPSW` `$300001`, about 135 ms, it resets the whole system, Z80 included).
   MAME's `aes` driver has none: switch it off in Settings, or `--no-watchdog`, to compare with it.
@@ -123,7 +133,8 @@ line of the window says which core runs.
   no auto-animation, no 96 sprites per line limit. With the same tiles and the same table, MAME
   gives the same picture pixel for pixel (`emulator/compare_mame_gfx.py`).
   `--png FILE` saves the screen after `--run` / `--script`.
-- **Not emulated**: the YM2610 (ports `$04`-`$07` read 0) and sound, Z80 ROM banking,
+- **Not emulated**: the rest of the YM2610 (FM, ADPCM, SSG noise and envelopes, status reads
+  0), Z80 ROM banking,
   protected cartridges (SMA, PVC, CMC, encrypted P: their extra registers read
   as P ROM) and a memory card. V and M1 are checked, not used: the cartridge's M1 does
   not replace the built-in test M1.
@@ -177,8 +188,8 @@ Badges are read from the text the ROM prints, the way a technician would read it
 | PASS | the last `=>` line says success; TestAudio got its Z80 ACK |
 | FAIL | failure line, `ERROR` line, 68000 exception, or timeout |
 | CHECK | inconclusive, out of tolerance, or the test could not run |
-| N/A | not applicable here: TestBRAM on AES, PlayEyeSnd (no sound), TestWatchdog with the watchdog off |
-| LOOK | TestDAC: only your eyes can judge the 16 bands |
+| N/A | not applicable here: TestBRAM on AES, TestWatchdog with the watchdog off |
+| LOOK | TestDAC and TestGfx: only your eyes can judge the screen; PlayEyeSnd: your ears |
 | INFO | report only (TestInp, TestStatusA, TestSystype, tools): read the output |
 | ARMED | first TestWatchdog pass; run it again for the result |
 

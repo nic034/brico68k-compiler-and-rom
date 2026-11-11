@@ -106,13 +106,13 @@ check("Run all finished", wait_idle(60))
 pump(0.3)
 expect = {"TestChip": "PASS", "TestBus": "PASS", "TestWRAM": "PASS", "TestBRAM": "N/A", "TestPRAM": "PASS", "TestVRAM": "PASS",
           "TestLSPC": "PASS", "TestTiming": "PASS", "TestGfx": "LOOK", "TestDAC": "LOOK", "TestVectors": "PASS",
-          "TestZ80": "PASS", "TestAudio": "PASS", "PlayEyeSnd": "N/A", "TestInp": "INFO", "TestStatusA": "INFO",
+          "TestZ80": "PASS", "TestAudio": "PASS", "PlayEyeSnd": "LOOK", "TestInp": "INFO", "TestStatusA": "INFO",
           "TestSystype": "INFO", "TestWatchdog": "PASS"}
 for n, e in expect.items():
     check(f"Run all badge {n} = {e}", badge(n) == e, str(badge(n)))
 check("tools not run by Run all", all(badge(n) == "" for n in m.TOOLS))
 check("watchdog on by default", b["wd"].get() is True)
-check("summary line", b["summary"].get().startswith("11 pass") and "2 look" in b["summary"].get(), b["summary"].get())
+check("summary line", b["summary"].get().startswith("11 pass") and "3 look" in b["summary"].get(), b["summary"].get())
 check("console 'Run all done' with summary", "Run all done: 11 pass" in console())
 check("TestDAC last: 16 colours on screen", len(set(st["colours"])) == 16, str(len(set(st["colours"]))))
 check("report shows the last test", "TestDAC" in report() and "LOOK" in b["verdict"].cget("text"))
@@ -156,6 +156,12 @@ b["cmd"].set("")
 
 # command during TestAudio beeps: the beeps poll the BricoNeo command block, the command runs
 b["send"]("TestAudio"); wait_idle()
+t_end = time.time() + 6
+while time.time() < t_end and not b["lamps"]["sound"][1].cget("text").startswith("♪"):
+    pump(0.05)
+check("TestAudio: the Z80 programs the SSG, sound lamp on", b["lamps"]["sound"][1].cget("text") == "♪ 1000 Hz",
+      b["lamps"]["sound"][1].cget("text"))
+check("TestAudio: sound noted in the console", "♪ YM2610 SSG programmed by the Z80: tone A 1000 Hz vol 15" in console())
 b["send"]("TestWRAM"); wait_idle()
 check("command during the beeps runs", "[Timeout]" not in console()[-200:] and badge("TestWRAM") == "PASS")
 
@@ -189,7 +195,7 @@ check("no program: TestAudio FAIL", badge("TestAudio") == "FAIL", str(badge("Tes
 check("no program: TestChip CHECK (Z80 only)", badge("TestChip") == "CHECK", str(badge("TestChip")))
 tree.selection_set("TestAudio"); pump(0.1)
 check("no program: failure marked as expected", "Expected here" in b["verdict"].cget("text"))
-b["z80"].set("Test M1 (handshake only)"); pump(0.1)
+b["z80"].set("Test M1 (handshake + SSG beeps)"); pump(0.1)
 
 # tile layers: TestGfx draws the fix layer and the sprites with the test cartridge's tiles
 L = st["layers"]

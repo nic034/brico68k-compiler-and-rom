@@ -3,8 +3,8 @@
 
 Both cores run the same ROM and the same command sequences (with the console reset button,
 the Z80 options, cartridges, faults and odd run lengths); after every slice the cycle count,
-PC, frame count, Z80 commands, cartridge bank and writes, host state and output words, and the
-backdrop lines are compared, and VRAM / palette at the end of each sequence.
+PC, frame count, Z80 commands, cartridge bank and writes, host state and output words, the
+backdrop lines and the YM2610 SSG registers the Z80 wrote are compared, and VRAM / palette at the end of each sequence.
 Usage: python3 emulator/test/test_neo_py.py [C core] [ROM]
   C core: default emulator/build/libneocore_test.so (build_test_core.py), which also has the
   test input hook.
@@ -37,7 +37,7 @@ def state(c):
     # power-on (neither is the Python one), so compare what each sequence added
     return (L.neo_cycles(), L.neo_pc(), L.neo_frames(), L.neo_z80_commands() - c.z0, L.neo_cart_bank(), L.neo_cart_writes(),
             L.neo_cart_latch_writes(), L.neo_host_state(), list(c._vals[:n]), L.neo_host_overflow(), tuple(c.lines()),
-            L.neo_watchdog_resets())
+            L.neo_watchdog_resets(), c.ssg())
 
 
 fails = 0

@@ -17,9 +17,12 @@ real AES and MVS boards; on by default, MAME's aes driver has none).
 Host: command + P1-P3 written into the ROM, cleared after 1 ms, 3 s timeout,
 2048-word buffer, as Brico16Bits CommandExtension.cpp.
 Z80 (superzazu/z80 core, 4 MHz) wired as on the board (sound latch, NMI,
-reply latch, 2 KB RAM), running a built-in test M1 that only answers the
-standard handshake ($03 reset -> $00, $01 -> $01), or no program at all (like
-an AES without cartridge).
+reply latch, 2 KB RAM), running a built-in test M1 that answers the
+standard handshake ($03 reset -> $00, $01 -> $01) and programs the YM2610 SSG
+for the sound commands ($5C/$5D/$5E beeps, $02 a short jingle), or no program
+at all (like an AES without cartridge). Sound: the SSG square-wave tones the
+Z80 programmed are played (winsound on Windows; paplay / pw-play / aplay /
+afplay elsewhere); FM, ADPCM, noise and envelopes are not emulated.
 Cartridge (window: Cartridge tab, one at a time; text mode: --cart): none, the
 built-in test cartridge, a game ROM set (folder or MAME zip: P1/P2 on the 68000
 bus with the P2 bank latch; S, C, V, M1 loaded and their size and CRC32 shown,
@@ -56,12 +59,13 @@ import os
 import platform
 import re
 import struct
+import subprocess
 import sys
 import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.18"
+APP_VERSION = "1.19"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -1547,9 +1551,31 @@ VBSTART = 0xF0
 VBL_IRQ_AT = VBSTART * LINE_CYCLES + 29
 TMR_RELOAD_AT = VBSTART * LINE_CYCLES + 573
 H_IDLE, H_SENT, H_WAIT, H_DONE, H_TIMEOUT = range(5)
-TEST_M1_BOOT = bytes([0xf3, 0x31, 0xff, 0xff, 0xaf, 0xd3, 0x0c, 0xd3, 0x08, 0xfb, 0xc3, 0x0a, 0x00])
-TEST_M1_NMI = bytes([0xdb, 0x00, 0xfe, 0x03, 0xca, 0x00, 0x00, 0xfe, 0x01, 0xc2, 0x76, 0x00,
-                     0x3e, 0x01, 0xd3, 0x0c, 0xed, 0x45])
+# The built-in test M1 (Z80 program; same bytes in neocore.c and in tools/make_test_cart.py's
+# MAME bench cartridge). YM2610 SSG: port $04 = register, $05 = data; f = 125 kHz / period.
+#   $0000 boot: di / ld sp,$ffff / xor a / out ($0c),a / out ($08),a (NMI on) / ei / idle: jp idle
+#   $0066 NMI: in a,($00) / cp 3 / jp z,stop / cp 1 / jp nz,other / ld a,1 / out ($0c),a / retn
+#   $0090 stop ($03): SSG mixer $3F (all off), volume A 0 / jp 0 (reboot: reply $00)
+#   $00B0 other: $5C / $5D / $5E: beeps / $02: jingle / else retn
+#   $0100 / $0130 / $0160 beep ($5C left 1000 Hz, $5D right 1506 Hz, $5E centre 749 Hz): tone A
+#         period, mixer $3E (tone A on), volume A 15 / retn: the tone lasts until the next command
+#   $0200 jingle ($02, stand-in for the eyecatcher music of a real M1): ld sp,$ffff / C5 E5 G5
+#         (120 ms each) C6 (214 ms): ld d,n / loop: ld b,0 / djnz $ / dec d / jr nz,loop /
+#         then silence / jp idle
+TEST_M1_PARTS = (
+    (0x0000, bytes.fromhex("f331ffffafd30cd308fbc30a00")),
+    (0x0066, bytes.fromhex("db00fe03ca9000fe01c2b0003e01d30ced45")),
+    (0x0090, bytes.fromhex("3e07d3043e3fd3053e08d3043e00d305c30000")),
+    (0x00B0, bytes.fromhex("fe5cca0001fe5dca3001fe5eca6001fe02ca0002ed45")),
+    (0x0100, bytes.fromhex("3e00d3043e7dd3053e01d3043e00d3053e07d3043e3ed3053e08d3043e0fd305ed45")),
+    (0x0130, bytes.fromhex("3e00d3043e53d3053e01d3043e00d3053e07d3043e3ed3053e08d3043e0fd305ed45")),
+    (0x0160, bytes.fromhex("3e00d3043ea7d3053e01d3043e00d3053e07d3043e3ed3053e08d3043e0fd305ed45")),
+    (0x0200, bytes.fromhex(
+        "31ffff3e07d3043e3ed3053e08d3043e0fd3053e00d3043eefd3053e01d3043e00d305168f060010fe1520f9"
+        "3e00d3043ebed3053e01d3043e00d305168f060010fe1520f93e00d3043e9fd3053e01d3043e00d305168f06"
+        "0010fe1520f93e00d3043e77d3053e01d3043e00d3051600060010fe1520f93e07d3043e3fd3053e08d3043e"
+        "00d305c30a00")),
+)
 CART_MAX = 0x1000000
 MAX_FAULTS = 16
 
@@ -1577,8 +1603,11 @@ def _make_neo():
     z80_reply = 0
     z80_commands = 0
     z80_time = 0
-    zpc = 0; zsp = 0xFFFF; za = 0xFF; zzf = 1
+    zpc = 0; zsp = 0xFFFF; za = 0xFF; zzf = 1; zb = zd = 0
     ziff1 = ziff2 = ziff_delay = zhalted = znmi = 0
+    ssg = [0] * 16              # YM2610 SSG registers as the Z80 wrote them
+    ssg_addr = 0
+    ssg_writes = 0
     # host
     h_state = H_IDLE
     h_t0 = 0
@@ -1767,7 +1796,15 @@ def _make_neo():
         return 0xFF
 
     def z_out(port, v):
-        nonlocal snd_latch, nmi_enable, z80_reply
+        nonlocal snd_latch, nmi_enable, z80_reply, ssg_addr, ssg_writes
+        if port == 0x04:                         # YM2610 address (port A)
+            ssg_addr = v
+            return
+        if port == 0x05:                         # YM2610 data (port A): registers $00-$0F = SSG
+            if ssg_addr < 0x10:
+                ssg[ssg_addr] = v
+                ssg_writes += 1
+            return
         if port == 0x00:
             snd_latch = 0
             return
@@ -1796,7 +1833,7 @@ def _make_neo():
 
     def z80_step():
         """One z80_step(): an instruction (NOP when halted) then process_interrupts. Returns T-states."""
-        nonlocal zpc, zsp, za, zzf, ziff1, ziff2, ziff_delay, zhalted, znmi
+        nonlocal zpc, zsp, za, zzf, zb, zd, ziff1, ziff2, ziff_delay, zhalted, znmi
         if zhalted:
             cyc = 4
         else:
@@ -1830,6 +1867,20 @@ def _make_neo():
                 cyc = 4
             elif op == 0x76:                     # halt
                 zhalted = 1; cyc = 4
+            elif op == 0x06:                     # ld b,n
+                zb = znext(); cyc = 7
+            elif op == 0x16:                     # ld d,n
+                zd = znext(); cyc = 7
+            elif op == 0x10:                     # djnz e
+                e = znext(); zb = (zb - 1) & 0xFF; cyc = 8
+                if zb:
+                    zpc = (zpc + e - ((e & 0x80) << 1)) & 0xFFFF; cyc = 13
+            elif op == 0x15:                     # dec d (only Z is used)
+                zd = (zd - 1) & 0xFF; zzf = 1 if zd == 0 else 0; cyc = 4
+            elif op == 0x20:                     # jr nz,e
+                e = znext(); cyc = 7
+                if not zzf:
+                    zpc = (zpc + e - ((e & 0x80) << 1)) & 0xFFFF; cyc = 12
             elif op == 0xED:
                 op2 = znext()
                 if op2 == 0x45:                  # retn
@@ -1858,17 +1909,20 @@ def _make_neo():
         return cyc
 
     def z80_reset():
-        nonlocal zpc, zsp, za, zzf, ziff1, ziff2, ziff_delay, zhalted, znmi, snd_pending, nmi_enable, nmi_line, z80_reply
-        zpc = 0; zsp = 0xFFFF; za = 0xFF; zzf = 1
+        nonlocal zpc, zsp, za, zzf, zb, zd, ziff1, ziff2, ziff_delay, zhalted, znmi, snd_pending, nmi_enable, nmi_line
+        nonlocal z80_reply, ssg_addr
+        zpc = 0; zsp = 0xFFFF; za = 0xFF; zzf = 1; zb = zd = 0
         ziff1 = ziff2 = ziff_delay = zhalted = znmi = 0
         snd_pending = nmi_enable = nmi_line = 0
         z80_reply = 0
+        ssg[:] = [0] * 16          # the YM2610 is reset with the console (/IC on the reset line)
+        ssg_addr = 0
 
     def z80_load_program():
         m1[:] = b"\xff" * 0x10000
         if z80_mode == 1:
-            m1[0:len(TEST_M1_BOOT)] = TEST_M1_BOOT
-            m1[0x66:0x66 + len(TEST_M1_NMI)] = TEST_M1_NMI
+            for a, b in TEST_M1_PARTS:
+                m1[a:a + len(b)] = b
 
     def z80_sync():
         nonlocal z80_time, zsp
@@ -2137,7 +2191,8 @@ def _make_neo():
     def neo_power_on():
         nonlocal vram_offset, vram_read_buffer, vram_modulo, anim_speed, anim_disabled, anim_frame_counter
         nonlocal anim_counter, h_state, h_count, h_overflow, h_armed, h_clear_pending, now_base, last_line
-        nonlocal frames, wdog_resets, irq_vbl, irq_tmr, irq3, tmr_ctrl, tmr_load, tmr_next, wdog_kick
+        nonlocal frames, wdog_resets, irq_vbl, irq_tmr, irq3, tmr_ctrl, tmr_load, tmr_next, wdog_kick, ssg_writes
+        ssg_writes = 0                              # SSG write count: since power on
         wram[:] = bytes(0x10000)
         pal[:] = [0] * 0x2000
         vram[:] = [0] * 0x10000
@@ -2328,6 +2383,11 @@ def _make_neo():
         faults.append((region, kind, bit, value))
         return 0
 
+    def neo_ssg_regs(out):
+        """The 16 YM2610 SSG registers into out[0..15]; returns the count of SSG register writes."""
+        out[:16] = ssg
+        return ssg_writes & 0xFFFFFFFF
+
     def neo_test_inputs(p1, dip, p2, sa, sb, sys_, mvs):
         """Test hook (as build_test_core.py's core): input ports, MVS backup RAM."""
         nonlocal t_p1, t_dip, t_p2, t_sa, t_sb, t_sys, t_mvs
@@ -2342,6 +2402,7 @@ def _make_neo():
         neo_frames=lambda: frames, neo_pc=lambda: cpu.pc(), neo_reg=lambda r: cpu.get_reg(r),
         neo_cycles=lambda: now_base, neo_watchdog_resets=lambda: wdog_resets,
         neo_z80_commands=lambda: z80_commands, neo_z80_pc=lambda: zpc,
+        neo_ssg_regs=neo_ssg_regs,
         neo_peek16=lambda a: read16(a & 0xFFFFFFFF, 0) & 0xFFFF,
         neo_cart_load=neo_cart_load, neo_cart_bank=lambda: cart_bank, neo_cart_writes=lambda: cart_writes,
         neo_cart_latch_writes=lambda: cart_latch_writes, neo_fault_clear=neo_fault_clear,
@@ -2393,6 +2454,7 @@ class Core:
         self._lines = (ctypes.c_uint16 * 224)()
         self._vram = (ctypes.c_uint16 * 0x8800)()
         self._pal = (ctypes.c_uint16 * 0x1000)()
+        self._ssg = (ctypes.c_uint16 * 16)()
         if lib_path is None:
             self.lib = PyNeoLib()
             return
@@ -2420,6 +2482,7 @@ class Core:
         lib.neo_cart_writes.restype = ctypes.c_uint32
         lib.neo_cart_latch_writes.restype = ctypes.c_uint32
         lib.neo_cart_bank.restype = ctypes.c_int
+        lib.neo_ssg_regs.restype = ctypes.c_uint32
 
     def load(self, rom):
         if self.lib.neo_load_bios(rom, len(rom)) != 0:
@@ -2437,6 +2500,11 @@ class Core:
 
     def power_on(self):
         self.lib.neo_power_on()
+
+    def ssg(self):
+        """(16 YM2610 SSG registers as the Z80 wrote them, count of SSG writes)."""
+        n = self.lib.neo_ssg_regs(self._ssg)
+        return list(self._ssg), n
 
     def lines(self):
         self.lib.neo_get_lines(self._lines)
@@ -3314,6 +3382,52 @@ def parse_console_log(raw, ext_names):
         e["output"] = "\n".join(e["output"]) + ("\n" if e["output"] else "")
     return entries
 
+
+# ---------------------------------------------------------------------------
+# Sound: the YM2610 SSG part (AY-3-8910 compatible) from the registers the Z80 wrote.
+# Square-wave tones only (no noise, no envelope, no FM / ADPCM): enough to hear that the Z80
+# received the command and programmed the sound chip.
+SSG_CLOCK = 2000000                  # YM2610 8 MHz / 4; tone f = SSG_CLOCK / (16 x period)
+
+
+def ssg_voices(regs):
+    """Audible SSG channels: [(channel 'A'/'B'/'C', frequency Hz, volume 0-15)]."""
+    out = []
+    for ch in range(3):
+        period = regs[2 * ch] | ((regs[2 * ch + 1] & 0x0F) << 8)
+        vol = regs[8 + ch] & 0x1F
+        vol = 15 if vol & 0x10 else vol          # envelope mode: taken as full volume
+        if not (regs[7] >> ch) & 1 and vol and period:
+            out.append(("ABC"[ch], SSG_CLOCK / (16 * period), vol))
+    return out
+
+
+def ssg_describe(voices):
+    return ", ".join(f"tone {c} {f:.0f} Hz vol {v}" for c, f, v in voices) if voices else "silent"
+
+
+def ssg_wav(voices, seconds=4.0, rate=22050):
+    """A mono 16-bit WAV of the voices (square waves, AY logarithmic volume), as bytes."""
+    import io, wave
+    n = int(seconds * rate)
+    amp = [0] + [int(9000 * 10 ** ((v - 15) * 1.5 / 20)) for v in range(1, 16)]
+    buf = bytearray(2 * n)
+    if voices:
+        parts = []
+        for _c, f, v in voices:
+            half = rate / (2 * f)
+            a = amp[v] // len(voices) if len(voices) > 1 else amp[v]
+            parts.append((half, a))
+        for i in range(n):
+            x = 0
+            for half, a in parts:
+                x += a if int(i / half) & 1 else -a
+            struct.pack_into("<h", buf, 2 * i, max(-32767, min(32767, x)))
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(bytes(buf))
+    return out.getvalue()
+
 # ---------------------------------------------------------------------------
 # Embedded core
 # ---------------------------------------------------------------------------
@@ -3337,6 +3451,59 @@ def core_path():
         if (TOOL_DIR / name).is_file():
             return TOOL_DIR / name
     return None
+
+
+class SoundOut:
+    """Plays the SSG voices as a looping WAV, standard library only: winsound on Windows, else
+    the first of paplay / pw-play / aplay / afplay found. Without any, it stays silent."""
+
+    def __init__(self):
+        import shutil, tempfile
+        self.key = None
+        self.proc = None
+        self.dir = Path(tempfile.gettempdir())
+        self.win = None
+        self.player = None
+        if IS_WIN:
+            try:
+                import winsound
+                self.win = winsound
+            except ImportError:
+                pass
+        else:
+            for p in ("paplay", "pw-play", "aplay", "afplay"):
+                if shutil.which(p):
+                    self.player = p
+                    break
+        self.available = bool(self.win or self.player)
+
+    def stop(self):
+        if self.win:
+            self.win.PlaySound(None, 0)
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+        self.proc = None
+
+    def set(self, voices):
+        key = tuple((c, round(f), v) for c, f, v in voices)
+        if key == self.key and (self.win or not key or (self.proc and self.proc.poll() is None)):
+            return
+        self.stop()
+        self.key = key
+        if not key or not self.available:
+            return
+        path = self.dir / ("brico68k_ssg_" + "_".join(f"{c}{f}v{v}" for c, f, v in key) + ".wav")
+        try:
+            if not path.is_file():
+                path.write_bytes(ssg_wav(voices, seconds=1.0 if self.win else 20.0))
+            if self.win:
+                w = self.win
+                w.PlaySound(str(path), w.SND_FILENAME | w.SND_ASYNC | w.SND_LOOP | w.SND_NODEFAULT)
+            else:
+                self.proc = subprocess.Popen([self.player, str(path)], stdout=subprocess.DEVNULL,
+                                             stderr=subprocess.DEVNULL)
+        except (OSError, RuntimeError):
+            self.available = False
 
 
 def core_label():
@@ -3830,7 +3997,8 @@ LAMP_OFF = ("#e6e9ed", "#59636e")     # status bar pill when off: background, te
 LOOK = {"TestDAC": "Look at the screen: 16 bands, one colour bit each (a black band = dead bit).",
         "TestGfx": "Look at the screen: labels, fix tiles, flips, 8 x 4 tiles, H and V shrink (drawn from VRAM; "
                    "V shrink approximated, no L0 ROM). No tiles without a game or the test cartridge.",
-        "PlayEyeSnd": "Sound is not emulated: the eyecatcher music cannot be heard here."}
+        "PlayEyeSnd": "Listen: the built-in test M1 plays a short jingle on the YM2610 SSG (C E G C); a real "
+                      "cartridge M1 plays its own eyecatcher music, which is not emulated (FM / ADPCM)."}
 STATUS_STYLE = {   # status -> (label, foreground, background)
     "PASS": ("PASS", "#1a7f37", "#dafbe1"), "FAIL": ("FAIL", "#cf222e", "#ffebe9"),
     "WARN": ("CHECK", "#9a6700", "#fff8c5"), "NA": ("N/A", "#59636e", "#eef1f4"),
@@ -3887,7 +4055,7 @@ def run_all_plan(names, watchdog):
         if n not in names or n == "TestDAC":
             continue
         if n == "PlayEyeSnd":
-            plan.append(("skip", n, "NA", "Sound is not emulated: nothing to judge."))
+            plan += [("cmd", n), ("wait", 1.0)]            # the jingle lasts ~0.6 s
         elif n == "TestWatchdog":
             if watchdog:
                 plan += [("cmd", n), ("wait", 2.0), ("cmd", n)]
@@ -3999,7 +4167,7 @@ def main_gui(rom_arg=None):
     sbar = tk.Frame(root, bg=C["panel"], highlightthickness=1, highlightbackground=C["border"])
     sbar.pack(fill="x", side="bottom")
     lamps = {}
-    for key, label in (("cpu", "68000 off"), ("host", "Host"), ("z80", "Z80"), ("cart", "No cartridge"), ("fault", "No fault")):
+    for key, label in (("cpu", "68000 off"), ("host", "Host"), ("z80", "Z80"), ("sound", "Silent"), ("cart", "No cartridge"), ("fault", "No fault")):
         # a pill: solid colour + white text when on, pale grey when off (a coloured dot alone was too small)
         f = tk.Frame(sbar, bg=LAMP_OFF[0], padx=8, pady=2); f.pack(side="left", padx=(8, 0), pady=5)
         d = tk.Label(f, text="○", fg=LAMP_OFF[1], bg=LAMP_OFF[0], font=(F[0], F[1] + 3)); d.pack(side="left")
@@ -4194,7 +4362,7 @@ def main_gui(rom_arg=None):
     ttk.Button(sett, text="Browse...", command=lambda: pick_rom()).grid(row=1, column=2, sticky="w", padx=(6, 0), pady=(4, 0))
     ttk.Separator(sett).grid(row=2, column=0, columnspan=3, sticky="we", pady=12)
     ttk.Label(sett, text="Z80 program", style="CardBold.TLabel").grid(row=3, column=0, sticky="w")
-    Z80_CHOICES = ["Test M1 (handshake only)", "No program (AES without cartridge)"]
+    Z80_CHOICES = ["Test M1 (handshake + SSG beeps)", "No program (AES without cartridge)"]
     old = cfg.get("z80", "")
     z80_var = tk.StringVar(value=Z80_CHOICES[1] if ("without" in old or old.startswith("No")) else Z80_CHOICES[0])
     for i, ch in enumerate(Z80_CHOICES):
@@ -4207,7 +4375,11 @@ def main_gui(rom_arg=None):
     speed_var = tk.StringVar(value="fast" if cfg.get("fast") else "real")
     ttk.Radiobutton(sett, text="Real time (60 frames/s, like the console)", value="real", variable=speed_var).grid(row=9, column=0, columnspan=3, sticky="w")
     ttk.Radiobutton(sett, text="Fast (as fast as this PC can)", value="fast", variable=speed_var).grid(row=10, column=0, columnspan=3, sticky="w")
-    ttk.Separator(sett).grid(row=11, column=0, columnspan=3, sticky="we", pady=12)
+    snd_var = tk.BooleanVar(value=cfg.get("sound", True))
+    ttk.Checkbutton(sett, text="Sound: play the YM2610 SSG tones the Z80 programs (square waves; FM, ADPCM, "
+                    "noise and envelopes are not emulated)", variable=snd_var).grid(row=11, column=0, columnspan=3,
+                                                                                 sticky="w", pady=(10, 0))
+    ttk.Separator(sett).grid(row=14, column=0, columnspan=3, sticky="we", pady=12)
     CART_CHOICES = [("none", "No cartridge"),
                     ("test", "Built-in test cartridge (generated P ROM: header + security code, 2 P2 banks)"),
                     ("game", "Game cartridge: the ROM set below (P1, P2 on the 68000 bus; S, C, V, M1 loaded and checked)"),
@@ -4238,16 +4410,16 @@ def main_gui(rom_arg=None):
     cart_txt.grid(row=9, column=0, columnspan=4, sticky="nsew"); cart_sb.grid(row=9, column=4, sticky="ns")
     cart_txt.configure(state="disabled")
     cartf.columnconfigure(1, weight=1); cartf.rowconfigure(9, weight=1)
-    ttk.Label(sett, text="What is emulated", style="CardBold.TLabel").grid(row=12, column=0, sticky="w")
+    ttk.Label(sett, text="What is emulated", style="CardBold.TLabel").grid(row=15, column=0, sticky="w")
     ttk.Label(sett, style="CardMuted.TLabel", justify="left", wraplength=760, text=(
         "68000 (Musashi port, exact cycle counts), Z80 (4 MHz) running a test M1, WRAM, palette RAM (2 banks), "
         "system latch, LSPC registers and VRAM, line counter and frame timing, AES inputs with nothing plugged in, "
-        "open bus, VBLANK and timer interrupts, Brico16Bits host (1 ms clear, 3 s timeout).\nNot emulated: YM2610 "
-        "and sound, memory card, protected cartridges (SMA, PVC, CMC). Fix layer and sprites: drawn from VRAM "
+        "open bus, VBLANK and timer interrupts, Brico16Bits host (1 ms clear, 3 s timeout), the YM2610 SSG "
+        "square-wave tones (sound).\nNot emulated: the rest of the YM2610 (FM, ADPCM, noise, envelopes), memory card, protected cartridges (SMA, PVC, CMC). Fix layer and sprites: drawn from VRAM "
         "with the cartridge's S and C tiles (V shrink approximated). Cartridge: P1/P2 "
         "(P2 banks) or the PROG board SRAM on the 68000 bus; V, M1 are only loaded and checked.\n"
         "Keys: F5 reset, F8 pause, Ctrl+L clear the console, Up/Down command history.")).grid(
-        row=13, column=0, columnspan=3, sticky="we")
+        row=16, column=0, columnspan=3, sticky="we")
     sett.columnconfigure(0, weight=1)
 
     # --- helpers ---------------------------------------------------------------------------
@@ -4269,6 +4441,25 @@ def main_gui(rom_arg=None):
     def out(text, tag=None):
         st["log"].append(text)
         write(con, text, tag)
+
+    sound = SoundOut()
+
+    def sound_poll():
+        """The tone the Z80 left in the YM2610 SSG: status lamp, console note, speaker."""
+        core = st["core"]
+        if not core:
+            return
+        regs, n = core.ssg()
+        voices = ssg_voices(regs)
+        key = tuple((c, round(f), v) for c, f, v in voices)
+        if key != st.get("snd_key"):
+            st["snd_key"] = key
+            if voices:
+                lamp("sound", C["ok"], "♪ " + ", ".join(f"{f:.0f} Hz" for _c, f, _v in voices))
+                out(f"   ♪ YM2610 SSG programmed by the Z80: {ssg_describe(voices)}\n", "info")
+            else:
+                lamp("sound", "#8c959f", "Silent")
+        sound.set(voices if snd_var.get() and st["running"] else [])
 
     def lamp(key, colour, text):
         d, t, f = lamps[key]
@@ -4546,6 +4737,7 @@ def main_gui(rom_arg=None):
             return
         st["running"] = not st["running"]; st["t_last"] = time.time()
         b_pause.configure(text="Pause" if st["running"] else "Run")
+        sound_poll()
 
     def send(line=None, from_plan=False):
         line = (line if line is not None else cmd_var.get()).strip()
@@ -4959,6 +5151,7 @@ def main_gui(rom_arg=None):
                         break
             if ran:
                 draw(); st["fps_n"] += ran
+                sound_poll()
             if not st["plan"] and st["plan_total"] and not (host and host.pending) and st["wait_until"] is None:
                 if st["plan_total"] > 1:
                     lbl = st.get("plan_label", "Run all")
@@ -4998,12 +5191,13 @@ def main_gui(rom_arg=None):
 
     def persist():
         save_config({"cfg_version": 2, "rom": rom_var.get(), "z80": z80_var.get(), "watchdog": wd_var.get(),
-                     "faults": [fault_spec(f) for f in st["faults"]], "fast": speed_var.get() == "fast",
+                     "faults": [fault_spec(f) for f in st["faults"]], "fast": speed_var.get() == "fast", "sound": snd_var.get(),
                      "history": st["history"][-50:], "geometry": root.winfo_geometry(),
                      "cart": cart_var.get(), "cart_set": cart_set_var.get(), "cart_list": cart_list_var.get()})
 
     def on_close():
         persist()
+        sound.stop()
         try:
             root.after_cancel(st["after"])
         except (KeyError, tk.TclError):
@@ -5032,6 +5226,7 @@ def main_gui(rom_arg=None):
                                        rdesc.configure(wraplength=max(300, e.width - 30))))
     reg_var.trace_add("write", update_form); kind_var.trace_add("write", update_form)
     z80_var.trace_add("write", apply_options); wd_var.trace_add("write", apply_options)
+    snd_var.trace_add("write", lambda *_: sound_poll())
     cart_var.trace_add("write", cart_changed)
     speed_var.trace_add("write", lambda *_: persist())
     rom_var.trace_add("write", refresh_missing)
@@ -5056,7 +5251,7 @@ def main_gui(rom_arg=None):
                   "tree": tree, "run_all": run_all, "run_script": run_script, "run_selected": run_selected, "stop": stop_plan,
                   "cmd": cmd_var, "reset": do_reset, "pause": toggle_pause, "z80": z80_var, "wd": wd_var,
                   "speed": speed_var, "save_log": save_log, "history": history, "busy": busy_var,
-                  "lamps": lamps, "rom": rom_var, "notebook": nb, "compare_open": compare_open, "compare_diagnose": compare_diagnose,
+                  "lamps": lamps, "sound": snd_var, "sound_out": sound, "rom": rom_var, "notebook": nb, "compare_open": compare_open, "compare_diagnose": compare_diagnose,
                   "compare_apply": compare_apply, "compare_tree": cmp_tree, "compare_text": cmp_text,
                   "compare_info": cmp_info, "tabs": {"report": rep, "console": conf, "compare": cmpf,
                   "screen": scrf, "faults": flt, "cartridge": cartf, "settings": sett}, "verdict": verdict, "report_text": rtext,

@@ -30,9 +30,31 @@ VBSTART = 0xF0
 VBL_IRQ_AT = VBSTART * LINE_CYCLES + 29
 TMR_RELOAD_AT = VBSTART * LINE_CYCLES + 573
 H_IDLE, H_SENT, H_WAIT, H_DONE, H_TIMEOUT = range(5)
-TEST_M1_BOOT = bytes([0xf3, 0x31, 0xff, 0xff, 0xaf, 0xd3, 0x0c, 0xd3, 0x08, 0xfb, 0xc3, 0x0a, 0x00])
-TEST_M1_NMI = bytes([0xdb, 0x00, 0xfe, 0x03, 0xca, 0x00, 0x00, 0xfe, 0x01, 0xc2, 0x76, 0x00,
-                     0x3e, 0x01, 0xd3, 0x0c, 0xed, 0x45])
+# The built-in test M1 (Z80 program; same bytes in neocore.c and in tools/make_test_cart.py's
+# MAME bench cartridge). YM2610 SSG: port $04 = register, $05 = data; f = 125 kHz / period.
+#   $0000 boot: di / ld sp,$ffff / xor a / out ($0c),a / out ($08),a (NMI on) / ei / idle: jp idle
+#   $0066 NMI: in a,($00) / cp 3 / jp z,stop / cp 1 / jp nz,other / ld a,1 / out ($0c),a / retn
+#   $0090 stop ($03): SSG mixer $3F (all off), volume A 0 / jp 0 (reboot: reply $00)
+#   $00B0 other: $5C / $5D / $5E: beeps / $02: jingle / else retn
+#   $0100 / $0130 / $0160 beep ($5C left 1000 Hz, $5D right 1506 Hz, $5E centre 749 Hz): tone A
+#         period, mixer $3E (tone A on), volume A 15 / retn: the tone lasts until the next command
+#   $0200 jingle ($02, stand-in for the eyecatcher music of a real M1): ld sp,$ffff / C5 E5 G5
+#         (120 ms each) C6 (214 ms): ld d,n / loop: ld b,0 / djnz $ / dec d / jr nz,loop /
+#         then silence / jp idle
+TEST_M1_PARTS = (
+    (0x0000, bytes.fromhex("f331ffffafd30cd308fbc30a00")),
+    (0x0066, bytes.fromhex("db00fe03ca9000fe01c2b0003e01d30ced45")),
+    (0x0090, bytes.fromhex("3e07d3043e3fd3053e08d3043e00d305c30000")),
+    (0x00B0, bytes.fromhex("fe5cca0001fe5dca3001fe5eca6001fe02ca0002ed45")),
+    (0x0100, bytes.fromhex("3e00d3043e7dd3053e01d3043e00d3053e07d3043e3ed3053e08d3043e0fd305ed45")),
+    (0x0130, bytes.fromhex("3e00d3043e53d3053e01d3043e00d3053e07d3043e3ed3053e08d3043e0fd305ed45")),
+    (0x0160, bytes.fromhex("3e00d3043ea7d3053e01d3043e00d3053e07d3043e3ed3053e08d3043e0fd305ed45")),
+    (0x0200, bytes.fromhex(
+        "31ffff3e07d3043e3ed3053e08d3043e0fd3053e00d3043eefd3053e01d3043e00d305168f060010fe1520f9"
+        "3e00d3043ebed3053e01d3043e00d305168f060010fe1520f93e00d3043e9fd3053e01d3043e00d305168f06"
+        "0010fe1520f93e00d3043e77d3053e01d3043e00d3051600060010fe1520f93e07d3043e3fd3053e08d3043e"
+        "00d305c30a00")),
+)
 CART_MAX = 0x1000000
 MAX_FAULTS = 16
 
@@ -60,8 +82,11 @@ def _make_neo():
     z80_reply = 0
     z80_commands = 0
     z80_time = 0
-    zpc = 0; zsp = 0xFFFF; za = 0xFF; zzf = 1
+    zpc = 0; zsp = 0xFFFF; za = 0xFF; zzf = 1; zb = zd = 0
     ziff1 = ziff2 = ziff_delay = zhalted = znmi = 0
+    ssg = [0] * 16              # YM2610 SSG registers as the Z80 wrote them
+    ssg_addr = 0
+    ssg_writes = 0
     # host
     h_state = H_IDLE
     h_t0 = 0
@@ -250,7 +275,15 @@ def _make_neo():
         return 0xFF
 
     def z_out(port, v):
-        nonlocal snd_latch, nmi_enable, z80_reply
+        nonlocal snd_latch, nmi_enable, z80_reply, ssg_addr, ssg_writes
+        if port == 0x04:                         # YM2610 address (port A)
+            ssg_addr = v
+            return
+        if port == 0x05:                         # YM2610 data (port A): registers $00-$0F = SSG
+            if ssg_addr < 0x10:
+                ssg[ssg_addr] = v
+                ssg_writes += 1
+            return
         if port == 0x00:
             snd_latch = 0
             return
@@ -279,7 +312,7 @@ def _make_neo():
 
     def z80_step():
         """One z80_step(): an instruction (NOP when halted) then process_interrupts. Returns T-states."""
-        nonlocal zpc, zsp, za, zzf, ziff1, ziff2, ziff_delay, zhalted, znmi
+        nonlocal zpc, zsp, za, zzf, zb, zd, ziff1, ziff2, ziff_delay, zhalted, znmi
         if zhalted:
             cyc = 4
         else:
@@ -313,6 +346,20 @@ def _make_neo():
                 cyc = 4
             elif op == 0x76:                     # halt
                 zhalted = 1; cyc = 4
+            elif op == 0x06:                     # ld b,n
+                zb = znext(); cyc = 7
+            elif op == 0x16:                     # ld d,n
+                zd = znext(); cyc = 7
+            elif op == 0x10:                     # djnz e
+                e = znext(); zb = (zb - 1) & 0xFF; cyc = 8
+                if zb:
+                    zpc = (zpc + e - ((e & 0x80) << 1)) & 0xFFFF; cyc = 13
+            elif op == 0x15:                     # dec d (only Z is used)
+                zd = (zd - 1) & 0xFF; zzf = 1 if zd == 0 else 0; cyc = 4
+            elif op == 0x20:                     # jr nz,e
+                e = znext(); cyc = 7
+                if not zzf:
+                    zpc = (zpc + e - ((e & 0x80) << 1)) & 0xFFFF; cyc = 12
             elif op == 0xED:
                 op2 = znext()
                 if op2 == 0x45:                  # retn
@@ -341,17 +388,20 @@ def _make_neo():
         return cyc
 
     def z80_reset():
-        nonlocal zpc, zsp, za, zzf, ziff1, ziff2, ziff_delay, zhalted, znmi, snd_pending, nmi_enable, nmi_line, z80_reply
-        zpc = 0; zsp = 0xFFFF; za = 0xFF; zzf = 1
+        nonlocal zpc, zsp, za, zzf, zb, zd, ziff1, ziff2, ziff_delay, zhalted, znmi, snd_pending, nmi_enable, nmi_line
+        nonlocal z80_reply, ssg_addr
+        zpc = 0; zsp = 0xFFFF; za = 0xFF; zzf = 1; zb = zd = 0
         ziff1 = ziff2 = ziff_delay = zhalted = znmi = 0
         snd_pending = nmi_enable = nmi_line = 0
         z80_reply = 0
+        ssg[:] = [0] * 16          # the YM2610 is reset with the console (/IC on the reset line)
+        ssg_addr = 0
 
     def z80_load_program():
         m1[:] = b"\xff" * 0x10000
         if z80_mode == 1:
-            m1[0:len(TEST_M1_BOOT)] = TEST_M1_BOOT
-            m1[0x66:0x66 + len(TEST_M1_NMI)] = TEST_M1_NMI
+            for a, b in TEST_M1_PARTS:
+                m1[a:a + len(b)] = b
 
     def z80_sync():
         nonlocal z80_time, zsp
@@ -620,7 +670,8 @@ def _make_neo():
     def neo_power_on():
         nonlocal vram_offset, vram_read_buffer, vram_modulo, anim_speed, anim_disabled, anim_frame_counter
         nonlocal anim_counter, h_state, h_count, h_overflow, h_armed, h_clear_pending, now_base, last_line
-        nonlocal frames, wdog_resets, irq_vbl, irq_tmr, irq3, tmr_ctrl, tmr_load, tmr_next, wdog_kick
+        nonlocal frames, wdog_resets, irq_vbl, irq_tmr, irq3, tmr_ctrl, tmr_load, tmr_next, wdog_kick, ssg_writes
+        ssg_writes = 0                              # SSG write count: since power on
         wram[:] = bytes(0x10000)
         pal[:] = [0] * 0x2000
         vram[:] = [0] * 0x10000
@@ -811,6 +862,11 @@ def _make_neo():
         faults.append((region, kind, bit, value))
         return 0
 
+    def neo_ssg_regs(out):
+        """The 16 YM2610 SSG registers into out[0..15]; returns the count of SSG register writes."""
+        out[:16] = ssg
+        return ssg_writes & 0xFFFFFFFF
+
     def neo_test_inputs(p1, dip, p2, sa, sb, sys_, mvs):
         """Test hook (as build_test_core.py's core): input ports, MVS backup RAM."""
         nonlocal t_p1, t_dip, t_p2, t_sa, t_sb, t_sys, t_mvs
@@ -825,6 +881,7 @@ def _make_neo():
         neo_frames=lambda: frames, neo_pc=lambda: cpu.pc(), neo_reg=lambda r: cpu.get_reg(r),
         neo_cycles=lambda: now_base, neo_watchdog_resets=lambda: wdog_resets,
         neo_z80_commands=lambda: z80_commands, neo_z80_pc=lambda: zpc,
+        neo_ssg_regs=neo_ssg_regs,
         neo_peek16=lambda a: read16(a & 0xFFFFFFFF, 0) & 0xFFFF,
         neo_cart_load=neo_cart_load, neo_cart_bank=lambda: cart_bank, neo_cart_writes=lambda: cart_writes,
         neo_cart_latch_writes=lambda: cart_latch_writes, neo_fault_clear=neo_fault_clear,

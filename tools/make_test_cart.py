@@ -8,8 +8,8 @@ Content (all generated, nothing copyrighted):
   P ROM 3 MB: P1 1 MB + P2 2 MB (2 banks), pseudo-random words, fixed seed,
               game header and security code (CartTest).
   S1 128 KB : fix tiles, tile $20 blank, other tiles striped.
-  M1 64 KB  : tiny Z80 service: $03 = reset (reply $00), $01 = reply $01.
-               No YM2610 code: lets TestZ80 / the TestAudio handshake run on AES.
+  M1 64 KB  : the emulator's built-in test M1 (emulator/neo_py.py TEST_M1_PARTS): $03 = silence
+               + reset (reply $00), $01 = reply $01, $5C/$5D/$5E = SSG beeps, $02 = a jingle.
   V1, C1/C2 : blank.
 Usage: python3 tools/make_test_cart.py OUTDIR      then mame_bench.py with
        BRICO_CART=OUTDIR (adds -hashpath / -cart brtest).
@@ -22,11 +22,6 @@ from pathlib import Path
 
 NAME = "brtest"
 
-# Z80 service (same bytes as bricobanc engines/z80_reference_service.asm):
-#   di / ld sp,$ffff / xor a / out ($0c),a / out ($08),a (NMI on) / ei / jp idle
-#   NMI ($66): in a,($00) / cp 3 / jp z,0 / cp 1 / jp nz,done / ld a,1 / out ($0c),a / retn
-Z80_BOOT = bytes.fromhex("f331ffffafd30cd308fbc30a00")
-Z80_NMI = bytes.fromhex("db00fe03ca0000fe01c276003e01d30ced45")
 
 
 # Security code: 61 words (neogeodev wiki "Security code"; word 25 is $6606 as in
@@ -77,9 +72,11 @@ def tile_roms():
 
 
 def m_rom():
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "emulator"))
+    from neo_py import TEST_M1_PARTS          # the Z80 program of the emulator (listing there)
     m = bytearray(b"\xff" * 0x10000)
-    m[:len(Z80_BOOT)] = Z80_BOOT
-    m[0x66:0x66 + len(Z80_NMI)] = Z80_NMI
+    for a, b in TEST_M1_PARTS:
+        m[a:a + len(b)] = b
     return bytes(m)
 
 
