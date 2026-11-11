@@ -14,21 +14,23 @@ def inventory_differences(old, new):
     """Return human-readable structural changes without masking chaotic outputs."""
     if not isinstance(old, dict) or not isinstance(new, dict):
         raise ValueError('regression recordings must be JSON objects')
+    # Validate *all* scenarios before comparing inventories, including scenarios
+    # that exist on only one side. Otherwise malformed new/removed scenarios pass.
+    for side, recording in (('old', old), ('new', new)):
+        for scenario, records in recording.items():
+            if not isinstance(records, list):
+                raise ValueError(f'{scenario}: {side} commands must be arrays')
+            for index, rec in enumerate(records):
+                if not isinstance(rec, dict) or not isinstance(rec.get('cmd'), str):
+                    raise ValueError(f'{scenario}: {side} record {index} lacks string cmd')
     differences = []
     for scenario in sorted(old.keys() - new.keys()):
         differences.append(f'MISSING scenario: {scenario}')
     for scenario in sorted(new.keys() - old.keys()):
         differences.append(f'ADDED scenario: {scenario}')
     for scenario in sorted(old.keys() & new.keys()):
-        before, after = old[scenario], new[scenario]
-        if not isinstance(before, list) or not isinstance(after, list):
-            raise ValueError(f'{scenario}: commands must be arrays')
-        for side, records in (('old', before), ('new', after)):
-            for index, rec in enumerate(records):
-                if not isinstance(rec, dict) or not isinstance(rec.get('cmd'), str):
-                    raise ValueError(f'{scenario}: {side} record {index} lacks string cmd')
-        a = [r['cmd'] for r in before]
-        b = [r['cmd'] for r in after]
+        a = [r['cmd'] for r in old[scenario]]
+        b = [r['cmd'] for r in new[scenario]]
         if a != b:
             differences.append(f'COMMANDS changed: {scenario}: {a!r} -> {b!r}')
     return differences
@@ -61,6 +63,14 @@ class InventoryTests(unittest.TestCase):
     def test_malformed_record_rejected(self):
         with self.assertRaises(ValueError):
             inventory_differences({'s': [{'cmd': 'A'}]}, {'s': [{}]})
+
+    def test_malformed_added_scenario_rejected(self):
+        with self.assertRaises(ValueError):
+            inventory_differences({}, {'added': [{}]})
+
+    def test_malformed_removed_scenario_rejected(self):
+        with self.assertRaises(ValueError):
+            inventory_differences({'removed': 42}, {})
 
     def test_malformed_root_rejected(self):
         with self.assertRaises(ValueError):
