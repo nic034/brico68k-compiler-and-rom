@@ -61,7 +61,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.17"
+APP_VERSION = "1.18"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -3825,6 +3825,7 @@ CATEGORIES = [
 ]
 TOOLS = set(CATEGORIES[-1][1])
 CHK_PROGRESS, CHK_PROG_MAGIC = 0x10FFF0, 0x10FFF2   # TestChip progress word and its magic ($C4EC)
+LAMP_OFF = ("#e6e9ed", "#59636e")     # status bar pill when off: background, text
 # what the emulator cannot judge by itself
 LOOK = {"TestDAC": "Look at the screen: 16 bands, one colour bit each (a black band = dead bit).",
         "TestGfx": "Look at the screen: labels, fix tiles, flips, 8 x 4 tiles, H and V shrink (drawn from VRAM; "
@@ -3998,11 +3999,12 @@ def main_gui(rom_arg=None):
     sbar = tk.Frame(root, bg=C["panel"], highlightthickness=1, highlightbackground=C["border"])
     sbar.pack(fill="x", side="bottom")
     lamps = {}
-    for key, label in (("cpu", "68000"), ("host", "Host"), ("z80", "Z80"), ("cart", "No cartridge"), ("fault", "No fault")):
-        f = tk.Frame(sbar, bg=C["panel"]); f.pack(side="left", padx=(12, 4), pady=4)
-        d = tk.Label(f, text="●", fg="#8c959f", bg=C["panel"], font=F); d.pack(side="left")
-        t = tk.Label(f, text=label, fg=C["text"], bg=C["panel"], font=FS); t.pack(side="left")
-        lamps[key] = (d, t)
+    for key, label in (("cpu", "68000 off"), ("host", "Host"), ("z80", "Z80"), ("cart", "No cartridge"), ("fault", "No fault")):
+        # a pill: solid colour + white text when on, pale grey when off (a coloured dot alone was too small)
+        f = tk.Frame(sbar, bg=LAMP_OFF[0], padx=8, pady=2); f.pack(side="left", padx=(8, 0), pady=5)
+        d = tk.Label(f, text="○", fg=LAMP_OFF[1], bg=LAMP_OFF[0], font=(F[0], F[1] + 3)); d.pack(side="left")
+        t = tk.Label(f, text=label, fg=LAMP_OFF[1], bg=LAMP_OFF[0], font=(FS[0], FS[1], "bold")); t.pack(side="left", padx=(4, 0))
+        lamps[key] = (d, t, f)
     status = tk.StringVar()
     tk.Label(sbar, textvariable=status, fg=C["muted"], bg=C["panel"], font=FS).pack(side="right", padx=12)
     busy_var = tk.StringVar()
@@ -4072,7 +4074,14 @@ def main_gui(rom_arg=None):
     con = tk.Text(cbox, wrap="word", font=mono, bg="#fbfcfd", fg=C["text"], bd=0, padx=10, pady=8,
                   highlightthickness=1, highlightbackground=C["border"], state="disabled")
     csb = ttk.Scrollbar(cbox, command=con.yview); con.configure(yscrollcommand=csb.set)
-    csb.pack(side="right", fill="y"); con.pack(fill="both", expand=True)
+    cprev_box = tk.Frame(cbox, bg=C["panel"])     # screen preview, top right of the console
+    cprev = tk.Canvas(cprev_box, width=192, height=134, bg="#000000", highlightthickness=1,
+                      highlightbackground="#8c959f", cursor="hand2")
+    cprev.pack(side="top")
+    cprev_txt = tk.StringVar(value="Screen (click to enlarge)")
+    tk.Label(cprev_box, textvariable=cprev_txt, bg=C["panel"], fg=C["muted"], font=FS, justify="right").pack(side="top", anchor="e")
+    csb.pack(side="right", fill="y"); cprev_box.pack(side="right", anchor="n", padx=(8, 8))
+    con.pack(fill="both", expand=True)
     for t in (con, rtext):
         t.tag_configure("cmd", foreground=C["accent"], font=(mono[0], mono[1], "bold"))
         t.tag_configure("info", foreground=C["muted"]); t.tag_configure("err", foreground=C["err"])
@@ -4113,8 +4122,10 @@ def main_gui(rom_arg=None):
 
     # Screen tab
     scrf = ttk.Frame(nb, style="Card.TFrame", padding=14); nb.add(scrf, text="Screen")
-    ttk.Label(scrf, text="Backdrop colour of each line (palette $401FFE). Sprites and fix layer are not drawn: "
-              "TestDAC and Color are fully visible.", style="CardMuted.TLabel").pack(anchor="w")
+    ttk.Label(scrf, text="Backdrop colour of each line (palette $401FFE), fix layer and sprites (tiles from the "
+              "cartridge's S and C ROMs).", style="CardMuted.TLabel").pack(anchor="w")
+    scr_hint = tk.StringVar()
+    ttk.Label(scrf, textvariable=scr_hint, style="CardMuted.TLabel", foreground=C["warn"]).pack(anchor="w")
     big_holder = tk.Frame(scrf, bg=C["panel"]); big_holder.pack(fill="both", expand=True, pady=(8, 0))
     big = tk.Canvas(big_holder, width=640, height=448, bg="#000000", highlightthickness=1, highlightbackground="#8c959f")
     big.pack()
@@ -4125,7 +4136,7 @@ def main_gui(rom_arg=None):
     cartf = ttk.Frame(nb, style="Card.TFrame", padding=14); nb.add(cartf, text="Cartridge")
     sett = ttk.Frame(nb, style="Card.TFrame", padding=14); nb.add(sett, text="Settings")
 
-    for cv, s in ((thumb, 0.8), (big, 2.0)):
+    for cv, s in ((thumb, 0.8), (big, 2.0), (cprev, 0.6)):
         st["screens"].append([cv, s, [cv.create_rectangle(0, 0, 0, 0, outline="", fill="#000000") for _ in range(224)]])
     # tile layers (fix + sprites): one image over the line rectangles of each screen, transparent
     # where the backdrop shows. base = 320 x 224, items = [canvas image item, scaled image]
@@ -4260,7 +4271,12 @@ def main_gui(rom_arg=None):
         write(con, text, tag)
 
     def lamp(key, colour, text):
-        lamps[key][0].configure(fg=colour); lamps[key][1].configure(text=text)
+        d, t, f = lamps[key]
+        if colour == "#8c959f":              # off / nothing
+            bg, fg, dot = LAMP_OFF[0], LAMP_OFF[1], "○"
+        else:
+            bg, fg, dot = colour, "#ffffff", "●"
+        f.configure(bg=bg); d.configure(bg=bg, fg=fg, text=dot); t.configure(bg=bg, fg=fg, text=text)
 
     def copy_text(w):
         root.clipboard_clear(); root.clipboard_append(w.get("1.0", "end-1c")); status.set("Copied to the clipboard.")
@@ -4479,6 +4495,14 @@ def main_gui(rom_arg=None):
     def power_on():
         if not refresh_missing():
             return
+        status.set("Power on: building the core and booting the ROM (1 to 3 s)...")
+        root.configure(cursor="watch"); root.update_idletasks()
+        try:
+            _power_on()
+        finally:
+            root.configure(cursor=""); status.set("")
+
+    def _power_on():
         try:
             rom = Path(rom_var.get()).read_bytes()
             core = st["core"] or Core(core_path())
@@ -4509,9 +4533,11 @@ def main_gui(rom_arg=None):
 
     def do_reset():
         if st["core"]:
+            root.configure(cursor="watch"); root.update_idletasks()
             st["core"].lib.neo_reset(); st["host"].pending = None; st["busy_t0"] = None
             for _ in range(60):
                 st["core"].lib.neo_run_frame()
+            root.configure(cursor="")
             st["plan"] = []; st["plan_total"] = 0; st["wait_until"] = None
             out("--- Reset (RAM kept) ---\n", "info")
 
@@ -4736,6 +4762,10 @@ def main_gui(rom_arg=None):
         if core is None or (not force and ((host and host.pending) or now - L["t"] < 0.2)):
             return
         L["t"] = now
+        no_tiles = not (st.get("cart") and st["cart"].tiles)
+        scr_hint.set("No cartridge tiles: the fix layer and the sprites stay empty, as on a real AES without a game "
+                     "(TestGfx shows a black screen). Cartridge tab > test cartridge to see them." if no_tiles else "")
+        cprev_txt.set("No cartridge tiles:\nno fix layer, no sprites" if no_tiles else "Screen (click to enlarge)")
         key = core.layer_state()
         if key == L["key"]:
             return
@@ -4987,6 +5017,7 @@ def main_gui(rom_arg=None):
     cmp_tree.bind("<<TreeviewSelect>>", cmp_select)
     tree.bind("<Double-1>", lambda _e: run_selected()); tree.bind("<Return>", lambda _e: run_selected())
     thumb.bind("<Button-1>", lambda _e: nb.select(scrf))
+    cprev.bind("<Button-1>", lambda _e: nb.select(scrf))
     big_holder.bind("<Configure>", layout_big)
 
     def layout_thumb(e):
@@ -5031,7 +5062,7 @@ def main_gui(rom_arg=None):
                   "screen": scrf, "faults": flt, "cartridge": cartf, "settings": sett}, "verdict": verdict, "report_text": rtext,
                   "summary": summary, "fault_add": fault_add, "fault_remove": fault_remove,
                   "fault_clear": fault_clear, "fault_list": flb, "fault_form": (reg_var, kind_var, bit_var, lvl_var,
-                  fault_add_form, ferr), "big": big, "thumb": thumb,
+                  fault_add_form, ferr), "big": big, "thumb": thumb, "console_preview": cprev, "screen_hint": scr_hint,
                   "cart": cart_var, "cart_set": cart_set_var, "cart_list": cart_list_var, "cart_info": cart_info,
                   "busy_bar": busy_bar, "key_widgets": [b_power, b_reset, b_pause, b_open, b_runall, b_run, b_stop, tree, thumb]}
     return root

@@ -4,6 +4,19 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-11 - Emulator 1.18: status lamps, screen preview in the console
+
+**Emulator 1.18** (ROM unchanged: 1.35-nic034-09)
+- Status bar: the lamps are coloured pills with white text when on (green / orange / red) and
+  pale grey with a hollow dot when off; the small coloured dot was hard to read.
+- Console tab: a screen preview at the top right (click: Screen tab).
+- Screen tab: says so when the cartridge has no tiles. Without a cartridge (the default), TestGfx
+  gives a black screen: the fix layer and the sprites come from the cartridge's S and C ROMs, as
+  on a real AES; the test cartridge (Cartridge tab) shows the test screen. Its stale "sprites and
+  fix layer are not drawn" text is corrected.
+- Power on / Reset: busy cursor and a status message during the 1 to 3 s of core build and boot
+  (the window looked frozen).
+
 ## 2026-11-11 - Emulator 1.17: pure Python, no DLL
 
 **Emulator 1.17** (ROM unchanged: 1.35-nic034-09)
