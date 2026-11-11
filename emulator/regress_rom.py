@@ -172,6 +172,22 @@ def compare(a, b):
     diffs = 0
     chaos = defaultdict(int)
     times = defaultdict(lambda: [0.0, 0.0, 0])
+    # Compare the scenario/command inventory before comparing results.  zip()
+    # silently discards trailing records; a new scenario was also ignored.
+    for sc in sorted(set(b) - set(a)):
+        print("ADDED scenario", sc)
+        diffs += 1
+    for sc in a:
+        if sc not in b:
+            continue  # The existing loop reports MISSING scenario below.
+        old, new = a[sc], b[sc]
+        if len(old) != len(new):
+            print("DIFF command count", sc, len(old), len(new))
+            diffs += 1
+        for index, (ra, rb) in enumerate(zip(old, new)):
+            if ra["cmd"] != rb["cmd"]:
+                print("DIFF command", sc, index, ra["cmd"], rb["cmd"])
+                diffs += 1
     for sc in a:
         if "cart:float" in sc:          # random by design (unstable line): status only
             if [r["status"] for r in a[sc]] != [r["status"] for r in b.get(sc, [])]:
