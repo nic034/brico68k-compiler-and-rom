@@ -11,7 +11,7 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.4 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.19 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.20 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
 | `rom/ROM.BIO` | Ready-to-use ROM, 128 KB: 32 KB of code + CRC32 + 3 mirrors, exactly what the BricoNeo builds itself for header flag `$0004` (SHA-256 in `rom/ROM.BIO.sha256`) |
 | `brico16bits/` | Optional Brico16Bits patch (EXCPT: 68000 exception reports). Syntax-checked only, not built for the Pico, not run |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
@@ -167,6 +167,9 @@ The window (light theme) is a diagnostic dashboard:
 
 - **Sidebar**: the tests grouped by Memory, Video, Sound, Inputs and system, Cartridge and Tools, each with a
   result badge, plus a live thumbnail of the screen (click it to enlarge).
+- **Check rules** runs the same sequence in a separate Python core and checks every test against
+  the Brico16Bits rules (see "Writing and testing a new extension"); the findings go to each
+  test's report and badge.
 - **Run all tests** chains every test in a sensible order: memory, video, Z80 and audio (with a
   4 s wait for the beeps), inputs, TestWatchdog in two passes (only when the watchdog option is
   on), then TestDAC last so its pattern stays on screen. The tools (Echo, Read, Write, Dump...)
@@ -196,6 +199,47 @@ Badges are read from the text the ROM prints, the way a technician would read it
 A badge is a reading aid, not a second opinion: the raw output in the Report tab is what the ROM
 said. With the Z80 option set to no program, the Z80 failures are marked as expected.
 Keys: Enter sends, Up/Down browses the history, F5 resets, F8 pauses, Ctrl+L clears the console.
+
+### Writing and testing a new extension
+
+**Space first.** The ROM uses the NeoDiag layout (header flag `$0004`): code must end before
+`$7FFA` (32 KiB, copied 4 times). With the 27 extensions of 1.35-nic034-09, **18 bytes are free**:
+a new extension does not fit until code is freed, or the NeoDiag layout is given up for the full
+128 KiB (a decision to take, it changes what the BricoNeo shows of the image). Brico68k Compiler
+now prints the free space after each build.
+
+Nothing to add to the emulator: it reads the extension table of the ROM. A new extension:
+1. `source/ExtMyTest.s` + a `DECLARE_EXTENSION` line in `source/Brico68k.s`, then build.
+2. `python Brico68k_Emulator.py --test MyTest` (or `--test "MyTest 3"` with parameters, several
+   lines at once, `--test` alone for everything): verdict, emulated time and rule check of each,
+   exit code 1 on a FAIL. Add `--fault ...` (see below) to see that the test catches the fault it is
+   written for, `--cart test|diag|<set>` for cartridge tests. In the window: **Check rules**.
+3. It shows in the window's "Other" group, Run all runs it once, and its badge comes from its last
+   `=> ...` line (`Test success` / `Test Failure` / `CHECK` / `N/A`, as the other tests print).
+   Only to change that (group, a wait after it, a LOOK note...), add one line to `TESTS` in
+   `emulator/emulator_main.py`.
+
+The rule check (`emu_host.check_command`, Python core) watches the bus while the command runs:
+
+| Finding | Rule |
+|---|---|
+| FAIL output with interrupts enabled | port writes with the IRQ mask at 3 or more (`$2700`) |
+| FAIL output from code outside the ROM | the BricoNeo skips the next socket access, the opcode fetch only from ROM code |
+| WARN P1-P3 read after the 1 ms clear | read the parameters first |
+| FAIL no EOT / watchdog reset before the EOT | one EOT within 3 s; `WatchDog` in every loop > ~100 ms |
+| WARN several EOTs, output after the EOT | one EOT, nothing after it |
+| FAIL more than 2047 words | the ring buffer wraps |
+| WARN result does not fit the declared type | word = 1 word, void = none, dump = address + data |
+| WARN over 1.5 s | half of the 3 s timeout |
+| FAIL / WARN command block not read for 1 ms / 0.75 ms after the EOT | a command is held 1 ms: code that keeps running polls it |
+| FAIL loop-mode repeat missed | the same command sent 20 us after the EOT (`*MyTest`) must run |
+
+`emulator/test/test_ext_check.py` builds the ROM with `test/ExtCheckBad.s` (one broken rule per
+P1) and shows that each finding fires, and that the real ROM gives only the two known ones:
+TestVRAM takes 1.77 s, and **TestBus misses a command sent within ~2.7 ms of its EOT** (it clears
+the screen before polling; with the console loop mode `*TestBus` the repeat times out). Limits:
+the rules are the Brico16Bits code as modelled here, and the 20 us loop-mode delay is an
+assumption, not measured on a BricoNeo; only a real console confirms a finding.
 
 ### Simulated faults
 
@@ -271,7 +315,9 @@ Checking the Python core:
   two runs because the C library keeps its random generator and CPU registers from one scenario
   to the next in a worker; the 3 deterministic ones that differed are identical when both cores
   start from a fresh process.
-- `emulator/guiverify.py`: 191/191 with the C core; with the Python core 187/191, the 4 misses
+- `emulator/test/test_ext_check.py`: the rule check sees each of 12 broken cases (see "Writing and
+  testing a new extension").
+- `emulator/guiverify.py`: 200/200 with the C core; with the Python core 187/191, the 4 misses
   being the diagnosis step that exceeds its 10 minute limit.
 
 ROM regression check, for a source change meant to keep every output (a size or speed change):

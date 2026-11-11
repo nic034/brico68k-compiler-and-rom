@@ -183,6 +183,7 @@ class Host:
         self.exts = parse_extensions(rom)
         self.by_name = {n.lower(): (n, a, t, d) for n, a, t, d in self.exts}
         self.pending = None
+        self.last_values = []           # output words of the last finished command
 
     def find(self, name):
         return self.by_name.get(name.lower())
@@ -212,6 +213,7 @@ class Host:
         self.core.lib.neo_host_ack()
         name, _, typ, _ = self.pending
         self.pending = None
+        self.last_values = values
         if st == H_TIMEOUT:
             return "timeout", "[Timeout]\n", 3.0
         exc = format_exception(typ, values)
@@ -233,6 +235,182 @@ class Host:
             if r:
                 return r
         return "timeout", "[Timeout]\n", 3.0
+
+
+# ---------------------------------------------------------------------------
+# Extension checker: the Brico16Bits rules a new extension must follow, checked on the bus
+# ---------------------------------------------------------------------------
+CHECK_LONG = 1.5                 # s: half the BricoNeo 3 s timeout
+CHECK_POLL_WARN = 0.75e-3        # s: after the EOT, BRICO_COMMAND_IN read less often than this: little margin
+CHECK_POLL_FAIL = 1e-3           # s: the BricoNeo holds a command 1 ms: a longer gap can miss one
+CHECK_AFTER = 0.1                # s watched after the EOT
+CHECK_RESEND = 20e-6             # s: loop mode (*Command) resends this long after the EOT and the 1 ms clear
+                                 # (assumed Brico16Bits latency: not measured on a real BricoNeo)
+
+
+class ExtCheck:
+    """Watches one command on the Python core (neo_watch hook) and lists what breaks the Brico16Bits
+    rules: output with interrupts on or from RAM, P1-P3 read after the 1 ms clear, no EOT or two,
+    output after the EOT, more than 2047 words, a result that does not fit the declared type, a run
+    close to the 3 s timeout, a watchdog reset, no polling of the next command after the EOT.
+    Usage: check_command(host, line), or chk.begin(); run; chk.after(); chk.end(...)"""
+
+    def __init__(self, core):
+        self.lib = core.lib
+        self.ok = hasattr(core.lib, "neo_watch")       # the C core has no hook
+
+    def begin(self):
+        self.arm = 0
+        self.out_irq = self.out_ram = self.late_param = None
+        self.eot = None
+        self.eots = self.after_eot = 0
+        self.last_poll = None
+        self.gap = 0
+        self.wd0 = self.lib.neo_watchdog_resets()
+        self.wd_before_eot = 0
+        if self.ok:
+            self.lib.neo_watch(self._on)
+
+    def _on(self, o, t):
+        L = self.lib
+        if self.arm:                                   # the 2 reads after $1FF02 (mirrors the core)
+            self.arm -= 1
+            return
+        if o == 0x1FF02:
+            self.arm = 2
+            if self.eot is not None:
+                self.after_eot += 1
+                return
+            sr, pc = L.neo_reg(17), L.neo_reg(29)
+            if (sr & 0x700) < 0x300 and self.out_irq is None:      # an AES interrupt (levels 1-3) can come
+                self.out_irq = (pc, sr)
+            if not 0xC00000 <= pc < 0xD00000 and self.out_ram is None:
+                self.out_ram = pc
+        elif o == 0x1FF00:
+            self.eots += 1
+            if self.eot is None:
+                self.eot = self.last_poll = t
+                self.wd_before_eot = L.neo_watchdog_resets() - self.wd0
+        elif o < 0xA0:
+            if self.eot is not None:
+                if o < 0x94:                           # BRICO_COMMAND_IN: waiting for the next command
+                    self.gap = max(self.gap, t - self.last_poll)
+                    self.last_poll = t
+            elif o >= 0x94 and self.late_param is None and L.neo_host_state() == H_WAIT:
+                self.late_param = L.neo_pc()
+
+    def after(self, seconds=CHECK_AFTER):
+        """Runs a little after the EOT to see the 68000 wait for the next command."""
+        for _ in range(max(1, round(seconds * 60))):
+            self.lib.neo_run_frame()
+
+    def end(self, typ, status, secs, values, resets_ok=False):
+        """[(level 'FAIL' | 'WARN', message)]; stops watching."""
+        L = self.lib
+        if not self.ok:
+            return []
+        L.neo_watch(None)
+        if self.eot is not None and self.last_poll is not None:
+            self.gap = max(self.gap, L.neo_cycles() - self.last_poll)
+        wd = L.neo_watchdog_resets() - self.wd0
+        f = []
+        if self.out_irq:
+            f.append(("FAIL", f"output written with interrupts enabled (SR ${self.out_irq[1]:04x} at "
+                              f"${self.out_irq[0]:06x}): an interrupt between the arming read and the value "
+                              "corrupts it; write with SR = $2700"))
+        if self.out_ram:
+            f.append(("FAIL", f"output written from code outside the BIOS ROM (PC ${self.out_ram:06x}): the "
+                              "BricoNeo skips the next socket access after the arming read, which is the opcode "
+                              "fetch only when the code runs from the ROM"))
+        if self.late_param is not None:
+            f.append(("WARN", f"P1-P3 read after the 1 ms clear (near PC ${self.late_param:06x}): the block "
+                              "reads 0 by then; read the parameters first"))
+        if status == "timeout":
+            f.append(("FAIL", "no end of transmission (EOT) within the 3 s BricoNeo timeout"))
+        elif self.eot is None and status != "error":
+            f.append(("FAIL", "watchdog reset before the EOT: call WatchDog in every loop longer than ~100 ms"
+                      if wd else "the command ended without an EOT read (console reset?)"))
+        if self.eots > 1:
+            f.append(("WARN", f"{self.eots} EOT reads: one per command (the extra ones are ignored)"))
+        if self.after_eot:
+            f.append(("WARN", f"{self.after_eot} word(s) output after the EOT: the BricoNeo ignores them"))
+        if L.neo_host_overflow():
+            f.append(("FAIL", "more than 2047 output words: the BricoNeo ring buffer wrapped, cap the output"))
+        elif typ == TYPE_WORD and self.eot is not None and status == "eot" and len(values) != 1:
+            f.append(("WARN", f"word extension sent {len(values)} words: the console shows only the first"))
+        if typ == TYPE_VOID and values:
+            f.append(("WARN", f"void extension sent {len(values)} word(s): the console shows none"))
+        if typ == TYPE_DUMP and self.eot is not None and status == "eot" and len(values) < 2:
+            f.append(("WARN", "dump extension without its 2 address words"))
+        if secs > CHECK_LONG and status == "eot":
+            f.append(("WARN", f"{secs:.2f} s: close to the 3 s BricoNeo timeout (keep tests well below)"))
+        if self.eot is not None and self.wd_before_eot:
+            f.append(("FAIL", "watchdog reset before the EOT: call WatchDog in every loop longer than ~100 ms"))
+        elif self.eot is not None and wd and not resets_ok:
+            f.append(("WARN", "watchdog reset after the EOT: the code that keeps running must call WatchDog"))
+        if self.eot is not None and not wd and not resets_ok and self.gap > CHECK_POLL_WARN * CPU_HZ:
+            big = self.gap >= CHECK_POLL_FAIL * CPU_HZ
+            f.append(("FAIL" if big else "WARN",
+                      f"after the EOT, BRICO_COMMAND_IN was not read for {self.gap / CPU_HZ * 1000:.2f} ms"
+                      + (": a command sent then is missed (the BricoNeo holds it 1 ms)" if big else
+                         ": little margin on the 1 ms the BricoNeo holds a command")
+                      + "; poll it every ~0.6 ms and jump to DISPATCH_COMMAND"))
+        return f
+
+
+def _run_to_eot(host, line, step=1200):
+    """Host.run_blocking with 0.1 ms slices: stops right after the EOT. (status, text, secs, t_sent)"""
+    L = host.core.lib
+    err = host.start(line)
+    for _ in range(2000):              # busy until the 1 ms clear of a command that ended sooner
+        if not err or not err.startswith("Busy"):
+            break
+        L.neo_run(12)
+        err = host.start(line)
+    t0 = L.neo_cycles()
+    if err:
+        return "error", err + "\n", 0.0, t0
+    while True:
+        L.neo_run(step)
+        r = host.poll()
+        if r:
+            return r + (t0,)
+        if L.neo_cycles() - t0 > 4 * CPU_HZ:             # the host model times out at 3 s
+            return "timeout", "[Timeout]\n", 3.0, t0
+
+
+def check_command(host, line, resets_ok=False):
+    """Runs one command line with ExtCheck, then repeats it as the console loop mode (*Command) does:
+    CHECK_RESEND after its EOT and the 1 ms clear. (status, text, secs, findings); findings: see ExtCheck.end.
+    Python core only (findings [] on the C core)."""
+    L = host.core.lib
+    chk = ExtCheck(host.core)
+    ext = host.find(line.split()[0]) if line.split() else None
+    typ = ext[2] if ext else TYPE_VOID
+    chk.begin()
+    st, text, secs, _ = _run_to_eot(host, line)
+    values = host.last_values if st != "error" else []
+    if st != "error":
+        chk.after()
+    findings = chk.end(typ, st, secs, values, resets_ok)
+    if not chk.ok or st != "eot" or resets_ok or chk.eot is None:
+        return st, text, secs, findings
+    # loop mode: the same command again, CHECK_RESEND after the EOT (and after the 1 ms clear)
+    t0 = L.neo_cycles()
+    if host.start(line):
+        return st, text, secs, findings
+    near = t0 + max(0, round(secs * CPU_HZ) - 24000)          # the first run took secs: big slices until 2 ms before
+    while L.neo_host_state() in (H_SENT, H_WAIT) and L.neo_cycles() - t0 < 4 * CPU_HZ:
+        L.neo_run(1200 if L.neo_cycles() < near else 12)
+    r = host.poll() or ("timeout", "", 3.0)
+    if r[0] == "eot":
+        ready = max(L.neo_cycles(), t0 + CPU_HZ // 1000 + 12) + round(CHECK_RESEND * CPU_HZ)
+        L.neo_run(ready - L.neo_cycles())
+        if _run_to_eot(host, line)[0] == "timeout":
+            findings.append(("FAIL", f"a repeat sent {CHECK_RESEND * 1e6:.0f} us after the EOT (console loop mode "
+                                     f"*{line.split()[0]}) is missed: the 68000 is not back waiting for a command"))
+        chk.after()                    # settle: a flaw here must not spill over the next command
+    return st, text, secs, findings
 
 
 # ---------------------------------------------------------------------------

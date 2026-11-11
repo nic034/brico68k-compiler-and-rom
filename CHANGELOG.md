@@ -4,6 +4,28 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-11 - Emulator 1.20: testing new extensions (rule check), one test table
+
+**Emulator 1.20** (ROM unchanged: 1.35-nic034-09)
+- `--test [COMMAND ...]`: runs the tests (all, as Run all, or the given command lines) with their
+  verdict and a check against the Brico16Bits rules, on the Python core; exit code 1 on a FAIL.
+  The window's **Check rules** button runs it in a separate process and fills the badges and
+  reports. What is checked: output with interrupts enabled or from code outside the ROM, P1-P3
+  read after the 1 ms clear, no EOT or several, output after the EOT, more than 2047 words, a
+  result that does not fit the declared type, over 1.5 s, a watchdog reset, the command block not
+  polled after the EOT, and a loop-mode repeat (`*Command`) sent 20 us after the EOT being missed.
+- Python core: `neo_watch` hook (off by default; on, the emulation is unchanged: lockstep test
+  and an on/off comparison give identical results). The C core has no hook.
+- One `TESTS` table in `emulator_main.py` replaces the separate category, LOOK, "varies" and
+  Run-all lists (same Run all plan and badges as 1.19, checked). A new extension needs no entry.
+- `emulator/test/test_ext_check.py` + `ExtCheckBad.s`: a fixture extension breaking one rule per
+  P1 (12 cases); each finding fires.
+- Found on the ROM (not changed here): **TestBus misses a command sent within ~2.7 ms of its EOT**
+  (screen cleared before the polling starts; `*TestBus` loop mode times out), and TestVRAM takes
+  1.77 s of the 3 s. Only 18 bytes of code space are left in the NeoDiag layout.
+- Brico68k Compiler: prints the free code space before `$7FFA` when the NeoDiag flag is set.
+- TestAudio's PASS text no longer says the beeps are not emulated (they are since 1.19).
+
 ## 2026-11-11 - Emulator 1.19: sound (YM2610 SSG tones)
 
 **Emulator 1.19** (ROM unchanged: 1.35-nic034-09)

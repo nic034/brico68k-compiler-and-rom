@@ -95,6 +95,7 @@ def _make_neo():
     h_values = [0] * HOST_WORDS
     h_count = h_overflow = 0
     h_done_cycles = 0
+    watch = None                # extension checker hook (emu_host.ExtCheck): watch(offset, cycle)
     # faults: list of (region, kind, bit, value)
     faults = []
     # cartridge
@@ -442,6 +443,10 @@ def _make_neo():
 
     def host_port_read(o):
         nonlocal h_armed, h_count, h_overflow, h_state, h_done_cycles
+        if watch:
+            watch(o, now())
+            if o < 0xA0 and not h_armed:        # a command block read, seen only because of the hook
+                return
         if h_armed:
             h_armed -= 1
             if h_armed:
@@ -465,7 +470,7 @@ def _make_neo():
         a &= 0xFFFFFE
         if 0xC00000 <= a < 0xD00000:                                  # BIOS socket (most accesses)
             o = socket_addr(a & 0x1FFFE) if faults else (a & 0x1FFFE)
-            if h_armed or o == 0x1FF02 or o == 0x1FF00:
+            if h_armed or o == 0x1FF02 or o == 0x1FF00 or (o < 0xA0 and watch):
                 host_port_read(o)
             return (bios[o] << 8) | bios[o + 1]
         if a < 0x000080:
@@ -867,6 +872,12 @@ def _make_neo():
         out[:16] = ssg
         return ssg_writes & 0xFFFFFFFF
 
+    def neo_watch(fn):
+        """Python core only: fn(offset, cycle) on every read of the host ports ($1FF00 / $1FF02 and the
+        armed reads after them) and of the command block $90-$9F; None to stop."""
+        nonlocal watch
+        watch = fn
+
     def neo_test_inputs(p1, dip, p2, sa, sb, sys_, mvs):
         """Test hook (as build_test_core.py's core): input ports, MVS backup RAM."""
         nonlocal t_p1, t_dip, t_p2, t_sa, t_sb, t_sys, t_mvs
@@ -885,7 +896,7 @@ def _make_neo():
         neo_peek16=lambda a: read16(a & 0xFFFFFFFF, 0) & 0xFFFF,
         neo_cart_load=neo_cart_load, neo_cart_bank=lambda: cart_bank, neo_cart_writes=lambda: cart_writes,
         neo_cart_latch_writes=lambda: cart_latch_writes, neo_fault_clear=neo_fault_clear,
-        neo_fault_count=lambda: len(faults), neo_fault_add=neo_fault_add, neo_test_inputs=neo_test_inputs)
+        neo_fault_count=lambda: len(faults), neo_fault_add=neo_fault_add, neo_test_inputs=neo_test_inputs, neo_watch=neo_watch)
 
     def attach(c):
         nonlocal cpu

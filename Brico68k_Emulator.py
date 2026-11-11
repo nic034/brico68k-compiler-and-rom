@@ -65,7 +65,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.19"
+APP_VERSION = "1.20"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -1616,6 +1616,7 @@ def _make_neo():
     h_values = [0] * HOST_WORDS
     h_count = h_overflow = 0
     h_done_cycles = 0
+    watch = None                # extension checker hook (emu_host.ExtCheck): watch(offset, cycle)
     # faults: list of (region, kind, bit, value)
     faults = []
     # cartridge
@@ -1963,6 +1964,10 @@ def _make_neo():
 
     def host_port_read(o):
         nonlocal h_armed, h_count, h_overflow, h_state, h_done_cycles
+        if watch:
+            watch(o, now())
+            if o < 0xA0 and not h_armed:        # a command block read, seen only because of the hook
+                return
         if h_armed:
             h_armed -= 1
             if h_armed:
@@ -1986,7 +1991,7 @@ def _make_neo():
         a &= 0xFFFFFE
         if 0xC00000 <= a < 0xD00000:                                  # BIOS socket (most accesses)
             o = socket_addr(a & 0x1FFFE) if faults else (a & 0x1FFFE)
-            if h_armed or o == 0x1FF02 or o == 0x1FF00:
+            if h_armed or o == 0x1FF02 or o == 0x1FF00 or (o < 0xA0 and watch):
                 host_port_read(o)
             return (bios[o] << 8) | bios[o + 1]
         if a < 0x000080:
@@ -2388,6 +2393,12 @@ def _make_neo():
         out[:16] = ssg
         return ssg_writes & 0xFFFFFFFF
 
+    def neo_watch(fn):
+        """Python core only: fn(offset, cycle) on every read of the host ports ($1FF00 / $1FF02 and the
+        armed reads after them) and of the command block $90-$9F; None to stop."""
+        nonlocal watch
+        watch = fn
+
     def neo_test_inputs(p1, dip, p2, sa, sb, sys_, mvs):
         """Test hook (as build_test_core.py's core): input ports, MVS backup RAM."""
         nonlocal t_p1, t_dip, t_p2, t_sa, t_sb, t_sys, t_mvs
@@ -2406,7 +2417,7 @@ def _make_neo():
         neo_peek16=lambda a: read16(a & 0xFFFFFFFF, 0) & 0xFFFF,
         neo_cart_load=neo_cart_load, neo_cart_bank=lambda: cart_bank, neo_cart_writes=lambda: cart_writes,
         neo_cart_latch_writes=lambda: cart_latch_writes, neo_fault_clear=neo_fault_clear,
-        neo_fault_count=lambda: len(faults), neo_fault_add=neo_fault_add, neo_test_inputs=neo_test_inputs)
+        neo_fault_count=lambda: len(faults), neo_fault_add=neo_fault_add, neo_test_inputs=neo_test_inputs, neo_watch=neo_watch)
 
     def attach(c):
         nonlocal cpu
@@ -2611,6 +2622,7 @@ class Host:
         self.exts = parse_extensions(rom)
         self.by_name = {n.lower(): (n, a, t, d) for n, a, t, d in self.exts}
         self.pending = None
+        self.last_values = []           # output words of the last finished command
 
     def find(self, name):
         return self.by_name.get(name.lower())
@@ -2640,6 +2652,7 @@ class Host:
         self.core.lib.neo_host_ack()
         name, _, typ, _ = self.pending
         self.pending = None
+        self.last_values = values
         if st == H_TIMEOUT:
             return "timeout", "[Timeout]\n", 3.0
         exc = format_exception(typ, values)
@@ -2661,6 +2674,182 @@ class Host:
             if r:
                 return r
         return "timeout", "[Timeout]\n", 3.0
+
+
+# ---------------------------------------------------------------------------
+# Extension checker: the Brico16Bits rules a new extension must follow, checked on the bus
+# ---------------------------------------------------------------------------
+CHECK_LONG = 1.5                 # s: half the BricoNeo 3 s timeout
+CHECK_POLL_WARN = 0.75e-3        # s: after the EOT, BRICO_COMMAND_IN read less often than this: little margin
+CHECK_POLL_FAIL = 1e-3           # s: the BricoNeo holds a command 1 ms: a longer gap can miss one
+CHECK_AFTER = 0.1                # s watched after the EOT
+CHECK_RESEND = 20e-6             # s: loop mode (*Command) resends this long after the EOT and the 1 ms clear
+                                 # (assumed Brico16Bits latency: not measured on a real BricoNeo)
+
+
+class ExtCheck:
+    """Watches one command on the Python core (neo_watch hook) and lists what breaks the Brico16Bits
+    rules: output with interrupts on or from RAM, P1-P3 read after the 1 ms clear, no EOT or two,
+    output after the EOT, more than 2047 words, a result that does not fit the declared type, a run
+    close to the 3 s timeout, a watchdog reset, no polling of the next command after the EOT.
+    Usage: check_command(host, line), or chk.begin(); run; chk.after(); chk.end(...)"""
+
+    def __init__(self, core):
+        self.lib = core.lib
+        self.ok = hasattr(core.lib, "neo_watch")       # the C core has no hook
+
+    def begin(self):
+        self.arm = 0
+        self.out_irq = self.out_ram = self.late_param = None
+        self.eot = None
+        self.eots = self.after_eot = 0
+        self.last_poll = None
+        self.gap = 0
+        self.wd0 = self.lib.neo_watchdog_resets()
+        self.wd_before_eot = 0
+        if self.ok:
+            self.lib.neo_watch(self._on)
+
+    def _on(self, o, t):
+        L = self.lib
+        if self.arm:                                   # the 2 reads after $1FF02 (mirrors the core)
+            self.arm -= 1
+            return
+        if o == 0x1FF02:
+            self.arm = 2
+            if self.eot is not None:
+                self.after_eot += 1
+                return
+            sr, pc = L.neo_reg(17), L.neo_reg(29)
+            if (sr & 0x700) < 0x300 and self.out_irq is None:      # an AES interrupt (levels 1-3) can come
+                self.out_irq = (pc, sr)
+            if not 0xC00000 <= pc < 0xD00000 and self.out_ram is None:
+                self.out_ram = pc
+        elif o == 0x1FF00:
+            self.eots += 1
+            if self.eot is None:
+                self.eot = self.last_poll = t
+                self.wd_before_eot = L.neo_watchdog_resets() - self.wd0
+        elif o < 0xA0:
+            if self.eot is not None:
+                if o < 0x94:                           # BRICO_COMMAND_IN: waiting for the next command
+                    self.gap = max(self.gap, t - self.last_poll)
+                    self.last_poll = t
+            elif o >= 0x94 and self.late_param is None and L.neo_host_state() == H_WAIT:
+                self.late_param = L.neo_pc()
+
+    def after(self, seconds=CHECK_AFTER):
+        """Runs a little after the EOT to see the 68000 wait for the next command."""
+        for _ in range(max(1, round(seconds * 60))):
+            self.lib.neo_run_frame()
+
+    def end(self, typ, status, secs, values, resets_ok=False):
+        """[(level 'FAIL' | 'WARN', message)]; stops watching."""
+        L = self.lib
+        if not self.ok:
+            return []
+        L.neo_watch(None)
+        if self.eot is not None and self.last_poll is not None:
+            self.gap = max(self.gap, L.neo_cycles() - self.last_poll)
+        wd = L.neo_watchdog_resets() - self.wd0
+        f = []
+        if self.out_irq:
+            f.append(("FAIL", f"output written with interrupts enabled (SR ${self.out_irq[1]:04x} at "
+                              f"${self.out_irq[0]:06x}): an interrupt between the arming read and the value "
+                              "corrupts it; write with SR = $2700"))
+        if self.out_ram:
+            f.append(("FAIL", f"output written from code outside the BIOS ROM (PC ${self.out_ram:06x}): the "
+                              "BricoNeo skips the next socket access after the arming read, which is the opcode "
+                              "fetch only when the code runs from the ROM"))
+        if self.late_param is not None:
+            f.append(("WARN", f"P1-P3 read after the 1 ms clear (near PC ${self.late_param:06x}): the block "
+                              "reads 0 by then; read the parameters first"))
+        if status == "timeout":
+            f.append(("FAIL", "no end of transmission (EOT) within the 3 s BricoNeo timeout"))
+        elif self.eot is None and status != "error":
+            f.append(("FAIL", "watchdog reset before the EOT: call WatchDog in every loop longer than ~100 ms"
+                      if wd else "the command ended without an EOT read (console reset?)"))
+        if self.eots > 1:
+            f.append(("WARN", f"{self.eots} EOT reads: one per command (the extra ones are ignored)"))
+        if self.after_eot:
+            f.append(("WARN", f"{self.after_eot} word(s) output after the EOT: the BricoNeo ignores them"))
+        if L.neo_host_overflow():
+            f.append(("FAIL", "more than 2047 output words: the BricoNeo ring buffer wrapped, cap the output"))
+        elif typ == TYPE_WORD and self.eot is not None and status == "eot" and len(values) != 1:
+            f.append(("WARN", f"word extension sent {len(values)} words: the console shows only the first"))
+        if typ == TYPE_VOID and values:
+            f.append(("WARN", f"void extension sent {len(values)} word(s): the console shows none"))
+        if typ == TYPE_DUMP and self.eot is not None and status == "eot" and len(values) < 2:
+            f.append(("WARN", "dump extension without its 2 address words"))
+        if secs > CHECK_LONG and status == "eot":
+            f.append(("WARN", f"{secs:.2f} s: close to the 3 s BricoNeo timeout (keep tests well below)"))
+        if self.eot is not None and self.wd_before_eot:
+            f.append(("FAIL", "watchdog reset before the EOT: call WatchDog in every loop longer than ~100 ms"))
+        elif self.eot is not None and wd and not resets_ok:
+            f.append(("WARN", "watchdog reset after the EOT: the code that keeps running must call WatchDog"))
+        if self.eot is not None and not wd and not resets_ok and self.gap > CHECK_POLL_WARN * CPU_HZ:
+            big = self.gap >= CHECK_POLL_FAIL * CPU_HZ
+            f.append(("FAIL" if big else "WARN",
+                      f"after the EOT, BRICO_COMMAND_IN was not read for {self.gap / CPU_HZ * 1000:.2f} ms"
+                      + (": a command sent then is missed (the BricoNeo holds it 1 ms)" if big else
+                         ": little margin on the 1 ms the BricoNeo holds a command")
+                      + "; poll it every ~0.6 ms and jump to DISPATCH_COMMAND"))
+        return f
+
+
+def _run_to_eot(host, line, step=1200):
+    """Host.run_blocking with 0.1 ms slices: stops right after the EOT. (status, text, secs, t_sent)"""
+    L = host.core.lib
+    err = host.start(line)
+    for _ in range(2000):              # busy until the 1 ms clear of a command that ended sooner
+        if not err or not err.startswith("Busy"):
+            break
+        L.neo_run(12)
+        err = host.start(line)
+    t0 = L.neo_cycles()
+    if err:
+        return "error", err + "\n", 0.0, t0
+    while True:
+        L.neo_run(step)
+        r = host.poll()
+        if r:
+            return r + (t0,)
+        if L.neo_cycles() - t0 > 4 * CPU_HZ:             # the host model times out at 3 s
+            return "timeout", "[Timeout]\n", 3.0, t0
+
+
+def check_command(host, line, resets_ok=False):
+    """Runs one command line with ExtCheck, then repeats it as the console loop mode (*Command) does:
+    CHECK_RESEND after its EOT and the 1 ms clear. (status, text, secs, findings); findings: see ExtCheck.end.
+    Python core only (findings [] on the C core)."""
+    L = host.core.lib
+    chk = ExtCheck(host.core)
+    ext = host.find(line.split()[0]) if line.split() else None
+    typ = ext[2] if ext else TYPE_VOID
+    chk.begin()
+    st, text, secs, _ = _run_to_eot(host, line)
+    values = host.last_values if st != "error" else []
+    if st != "error":
+        chk.after()
+    findings = chk.end(typ, st, secs, values, resets_ok)
+    if not chk.ok or st != "eot" or resets_ok or chk.eot is None:
+        return st, text, secs, findings
+    # loop mode: the same command again, CHECK_RESEND after the EOT (and after the 1 ms clear)
+    t0 = L.neo_cycles()
+    if host.start(line):
+        return st, text, secs, findings
+    near = t0 + max(0, round(secs * CPU_HZ) - 24000)          # the first run took secs: big slices until 2 ms before
+    while L.neo_host_state() in (H_SENT, H_WAIT) and L.neo_cycles() - t0 < 4 * CPU_HZ:
+        L.neo_run(1200 if L.neo_cycles() < near else 12)
+    r = host.poll() or ("timeout", "", 3.0)
+    if r[0] == "eot":
+        ready = max(L.neo_cycles(), t0 + CPU_HZ // 1000 + 12) + round(CHECK_RESEND * CPU_HZ)
+        L.neo_run(ready - L.neo_cycles())
+        if _run_to_eot(host, line)[0] == "timeout":
+            findings.append(("FAIL", f"a repeat sent {CHECK_RESEND * 1e6:.0f} us after the EOT (console loop mode "
+                                     f"*{line.split()[0]}) is missed: the 68000 is not back waiting for a command"))
+        chk.after()                    # settle: a flaw here must not spill over the next command
+    return st, text, secs, findings
 
 
 # ---------------------------------------------------------------------------
@@ -3630,13 +3819,62 @@ def parse_script(text):
 
 
 # ---------------------------------------------------------------------------
+# The tests the window knows. A NEW EXTENSION NEEDS NO ENTRY: the list comes from the ROM's extension
+# table; an unknown one goes to "Other", Run all runs it once and its last "=> ..." line is the verdict.
+# Add an entry only to change that: category, wait after it, a LOOK / varies note...
+# ---------------------------------------------------------------------------
+def _t(cat, look=None, varies=None, verdict_only=None, wait=0.0, twice=0.0, resets=False, last=False):
+    """cat: group in the window ("Tools": not run by Run all, needs parameters); look: what to look at or
+    listen to (no automatic verdict); varies / verdict_only: real console log comparison notes; wait: s
+    to let it run after its EOT; twice: run it again after that many s (TestWatchdog); resets: it resets
+    the console on purpose (needs the watchdog); last: Run all runs it last (its screen stays)."""
+    return dict(cat=cat, look=look, varies=varies, verdict_only=verdict_only, wait=wait, twice=twice,
+                resets=resets, last=last)
+
+
+TESTS = {
+    "TestChip": _t("Overview"),
+    "TestBus": _t("Overview"),
+    "TestWRAM": _t("Memory"),
+    "TestBRAM": _t("Memory"),
+    "TestPRAM": _t("Memory"),
+    "TestVRAM": _t("Video"),
+    "TestLSPC": _t("Video"),
+    "TestTiming": _t("Video", verdict_only="the measured cycle counts can differ slightly on a real board"),
+    "TestGfx": _t("Video", look="Look at the screen: labels, fix tiles, flips, 8 x 4 tiles, H and V shrink (drawn "
+                                "from VRAM; V shrink approximated, no L0 ROM). No tiles without a game or the test "
+                                "cartridge."),
+    "TestDAC": _t("Video", last=True,
+                  look="Look at the screen: 16 bands, one colour bit each (a black band = dead bit)."),
+    "TestZ80": _t("Sound"),
+    "TestAudio": _t("Sound", wait=4.0),                            # the 68000 beeps for ~3.5 s
+    "PlayEyeSnd": _t("Sound", wait=1.0,                            # the jingle lasts ~0.6 s
+                     look="Listen: the built-in test M1 plays a short jingle on the YM2610 SSG (C E G C); a real "
+                          "cartridge M1 plays its own eyecatcher music, which is not emulated (FM / ADPCM)."),
+    "TestInp": _t("Inputs and system", varies="depends on the controllers, switches and memory card plugged in"),
+    "TestStatusA": _t("Inputs and system", varies="depends on coins, service button and memory card"),
+    "TestSystype": _t("Inputs and system", varies="depends on the board and its jumpers"),
+    "TestVectors": _t("Inputs and system"),
+    "TestWatchdog": _t("Inputs and system", twice=2.0, resets=True),
+    "CartTest": _t("Cartridge", varies="depends on the cartridge: insert the same game set in the emulator "
+                                       "(Cartridge tab) to compare"),
+    "CartDiag": _t("Cartridge"),
+    **{n: _t("Tools") for n in ("Version", "Echo", "Read", "Write", "WriteB", "Dump", "Color")},
+}
+CATEGORIES = []                       # [(group, [names])] in TESTS order, "Tools" last
+for _n, _s in TESTS.items():
+    if not CATEGORIES or CATEGORIES[-1][0] != _s["cat"]:
+        CATEGORIES.append((_s["cat"], []))
+    CATEGORIES[-1][1].append(_n)
+TOOLS = {n for n, s in TESTS.items() if s["cat"] == "Tools"}
+LOOK = {n: s["look"] for n, s in TESTS.items() if s["look"]}
+VARIES = {n: s["varies"] for n, s in TESTS.items() if s["varies"]}
+VERDICT_ONLY = {n: s["verdict_only"] for n, s in TESTS.items() if s["verdict_only"]}
+
+
+# ---------------------------------------------------------------------------
 # Real console log vs emulator
 # ---------------------------------------------------------------------------
-VARIES = {"TestInp": "depends on the controllers, switches and memory card plugged in",
-          "CartTest": "depends on the cartridge: insert the same game set in the emulator (Cartridge tab) to compare",
-          "TestStatusA": "depends on coins, service button and memory card",
-          "TestSystype": "depends on the board and its jumpers"}
-VERDICT_ONLY = {"TestTiming": "the measured cycle counts can differ slightly on a real board"}
 
 
 def _norm(text):
@@ -3844,6 +4082,9 @@ def main_cli(argv):
     ap.add_argument("--rom", default=None)
     ap.add_argument("--run", nargs="*", default=None, help="commands to run, e.g. \"TestWRAM\" \"Echo 1234\"")
     ap.add_argument("--script", metavar="FILE", help="run a BricoNeo console script (';' comments, 'Delay ms')")
+    ap.add_argument("--test", nargs="*", metavar="COMMAND",
+                    help="test extensions: verdict + Brico16Bits rule check of each one (default: all, as Run all; "
+                         "else command lines, e.g. TestWRAM \"MyTest 3\"); exit code 1 on a FAIL. Python core")
     ap.add_argument("--compare", metavar="LOG",
                     help="compare a session log of the real BricoNeo console with the emulator")
     ap.add_argument("--diagnose", metavar="LOG",
@@ -3908,7 +4149,7 @@ def main_cli(argv):
     except (OSError, ValueError) as e:
         print(f"ERROR: cartridge: {e}")
         return 2
-    core = Core(core_path())
+    core = Core(None if a.test is not None else core_path())     # the rule check needs the Python core
     core.load(rom)
     core.load_cart(cart)
     if cart.kind != "none":
@@ -3921,6 +4162,8 @@ def main_cli(argv):
     for _ in range(60):
         core.lib.neo_run_frame()
     host = Host(core, rom)
+    if a.test is not None:
+        return test_cli(host, a.test, not a.no_watchdog, a.json)
     if a.compare:
         try:
             raw = Path(a.compare).read_bytes()
@@ -3981,24 +4224,8 @@ def main_cli(argv):
 # ---------------------------------------------------------------------------
 # Diagnostic catalogue: how the tests are grouped, run and judged
 # ---------------------------------------------------------------------------
-CATEGORIES = [
-    ("Overview", ["TestChip", "TestBus"]),
-    ("Memory", ["TestWRAM", "TestBRAM", "TestPRAM"]),
-    ("Video", ["TestVRAM", "TestLSPC", "TestTiming", "TestGfx", "TestDAC"]),
-    ("Sound", ["TestZ80", "TestAudio", "PlayEyeSnd"]),
-    ("Inputs and system", ["TestInp", "TestStatusA", "TestSystype", "TestVectors", "TestWatchdog"]),
-    ("Cartridge", ["CartTest", "CartDiag"]),
-    ("Tools", ["Version", "Echo", "Read", "Write", "WriteB", "Dump", "Color"]),
-]
-TOOLS = set(CATEGORIES[-1][1])
 CHK_PROGRESS, CHK_PROG_MAGIC = 0x10FFF0, 0x10FFF2   # TestChip progress word and its magic ($C4EC)
 LAMP_OFF = ("#e6e9ed", "#59636e")     # status bar pill when off: background, text
-# what the emulator cannot judge by itself
-LOOK = {"TestDAC": "Look at the screen: 16 bands, one colour bit each (a black band = dead bit).",
-        "TestGfx": "Look at the screen: labels, fix tiles, flips, 8 x 4 tiles, H and V shrink (drawn from VRAM; "
-                   "V shrink approximated, no L0 ROM). No tiles without a game or the test cartridge.",
-        "PlayEyeSnd": "Listen: the built-in test M1 plays a short jingle on the YM2610 SSG (C E G C); a real "
-                      "cartridge M1 plays its own eyecatcher music, which is not emulated (FM / ADPCM)."}
 STATUS_STYLE = {   # status -> (label, foreground, background)
     "PASS": ("PASS", "#1a7f37", "#dafbe1"), "FAIL": ("FAIL", "#cf222e", "#ffebe9"),
     "WARN": ("CHECK", "#9a6700", "#fff8c5"), "NA": ("N/A", "#59636e", "#eef1f4"),
@@ -4038,7 +4265,7 @@ def classify(name, status, text):
             return "FAIL", v
         return "INFO", v
     if name == "TestAudio" and "ACK $01 received" in text:
-        return "PASS", "Z80 ACK received (the beeps themselves are not emulated)."
+        return "PASS", "Z80 ACK received."
     if name in LOOK:
         return "LOOK", LOOK[name]
     if name in TOOLS:
@@ -4048,27 +4275,85 @@ def classify(name, status, text):
 
 def run_all_plan(names, watchdog):
     """Steps for Run all: ('cmd', line) / ('wait', seconds) / ('skip', name, status, why)."""
-    plan = []
-    order = [n for _, group in CATEGORIES[:-1] for n in group]
-    order += [n for n in names if n not in order and n not in TOOLS]      # extensions added later
+    plan, lasts = [], []
+    order = [n for n in TESTS if n not in TOOLS]
+    order += [n for n in names if n not in order and n not in TOOLS]      # extensions not in TESTS
     for n in order:
-        if n not in names or n == "TestDAC":
+        if n not in names:
             continue
-        if n == "PlayEyeSnd":
-            plan += [("cmd", n), ("wait", 1.0)]            # the jingle lasts ~0.6 s
-        elif n == "TestWatchdog":
-            if watchdog:
-                plan += [("cmd", n), ("wait", 2.0), ("cmd", n)]
-            else:
-                plan.append(("skip", n, "NA", "Watchdog switched off in Settings (as in MAME's aes driver): "
-                                              "enable it in Settings to run this test."))
-        elif n == "TestAudio":
-            plan += [("cmd", n), ("wait", 4.0)]            # the 68000 beeps for ~3.5 s
+        s = TESTS.get(n) or _t("Other")
+        if s["last"]:
+            lasts.append(("cmd", n))
+        elif s["resets"] and not watchdog:
+            plan.append(("skip", n, "NA", "Watchdog switched off in Settings (as in MAME's aes driver): "
+                                          "enable it in Settings to run this test."))
         else:
             plan.append(("cmd", n))
-    if "TestDAC" in names:
-        plan.append(("cmd", "TestDAC"))                     # last: the pattern stays on screen
-    return plan
+            if s["wait"]:
+                plan.append(("wait", s["wait"]))
+            if s["twice"]:
+                plan += [("wait", s["twice"]), ("cmd", n)]
+    return plan + lasts
+
+
+def test_plan(host, lines, watchdog):
+    """--test steps: ('cmd', line, resets) / ('wait', s) / ('skip', name, status, why)."""
+    if not lines:
+        plan = run_all_plan([n for n, *_ in host.exts], watchdog)
+    else:
+        plan = []
+        for line in lines:
+            s = TESTS.get(line.split()[0]) or _t("Other")
+            plan.append(("cmd", line))
+            if s["wait"]:
+                plan.append(("wait", s["wait"]))
+            if s["twice"]:
+                plan += [("wait", s["twice"]), ("cmd", line)]
+    return [(st[0], st[1], (TESTS.get(st[1].split()[0]) or _t("Other"))["resets"]) if st[0] == "cmd" else st
+            for st in plan]
+
+
+def test_cli(host, lines, watchdog, as_json=False):
+    """--test: each command with its verdict (as Run all) and the Brico16Bits rule check (emu_host.ExtCheck)."""
+    lib = host.core.lib
+    rows = []
+    plan = test_plan(host, lines, watchdog)
+    for i, step in enumerate(plan):
+        if as_json:
+            print(f"PROGRESS {i} {len(plan)}", file=sys.stderr, flush=True)
+        if step[0] == "wait":
+            for _ in range(round(step[1] * 60)):
+                lib.neo_run_frame()
+            continue
+        if step[0] == "skip":
+            rows.append(dict(line=step[1], status=step[2], verdict=step[3], ms=0, rules=[], output=""))
+        else:
+            line, resets = step[1], step[2]
+            name = line.split()[0]
+            st, text, secs, rules = check_command(host, line, resets)
+            status, verdict = classify(host.find(name)[0] if host.find(name) else name, st, text)
+            if any(lv == "FAIL" for lv, _ in rules):
+                status = "FAIL"
+            elif rules and status in ("PASS", "INFO", "LOOK"):
+                status = "WARN"
+            rows.append(dict(line=line, status=status, verdict=verdict, ms=round(secs * 1000), output=text,
+                             rules=[dict(level=lv, text=t) for lv, t in rules]))
+        r = rows[-1]
+        if not as_json:
+            print(f"{STATUS_STYLE[r['status']][0]:7s} {r['line']:22s} {r['ms']:6d} ms  {r['verdict']}", flush=True)
+            for f in r["rules"]:
+                print(f"{'':8s}rule {f['level']}: {f['text']}")
+    counts = {}
+    for r in rows:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+    summary = ", ".join(f"{n} {STATUS_STYLE[k][0].lower()}" for k, n in counts.items())
+    if as_json:
+        print(json.dumps({"summary": counts, "rows": rows}))
+    else:
+        print(f"--- {len(rows)} run(s): {summary}. Rules: Brico16Bits protocol as modelled from its source "
+              "(output with IRQs masked from ROM code, P1-P3 read first, one EOT under 3 s, < 2047 words, "
+              "watchdog, polling after the EOT, loop-mode repeat); checked in emulation only.")
+    return 1 if counts.get("FAIL") else 0
 
 
 # ---------------------------------------------------------------------------
@@ -4198,6 +4483,9 @@ def main_gui(rom_arg=None):
     srun = ttk.Frame(side, style="Card.TFrame", borderwidth=0); srun.pack(side="bottom", fill="x", pady=(6, 8))
     b_run = ttk.Button(srun, text="Run selected", command=lambda: run_selected()); b_run.pack(side="left")
     b_stop = ttk.Button(srun, text="Stop", command=lambda: stop_plan()); b_stop.pack(side="left", padx=6)
+    srul = ttk.Frame(side, style="Card.TFrame", borderwidth=0); srul.pack(side="bottom", fill="x", pady=(6, 0))
+    b_rules = ttk.Button(srul, text="Check rules", command=lambda: check_rules()); b_rules.pack(side="left")
+    ttk.Label(srul, text="protocol, each test", style="CardMuted.TLabel").pack(side="left", padx=6)
     tf = ttk.Frame(side, style="Card.TFrame", borderwidth=0); tf.pack(fill="both", expand=True)
     tree = ttk.Treeview(tf, columns=("st",), show="tree headings", selectmode="browse")
     tree.heading("#0", text="Test", anchor="w"); tree.heading("st", text="Result", anchor="w")
@@ -5022,6 +5310,12 @@ def main_gui(rom_arg=None):
         job = st["job"]
         if not job:
             return
+        if job["kind"] == "rules":
+            p = job["progress"]
+            b_rules.configure(text=f"Checking {p[0]}/{p[1]}" if p and not job["done"] else "Checking...",
+                              state="disabled")
+            if not job["done"]:
+                return
         if not job["done"]:
             p = job["progress"]
             cmp_info.set(("Replaying the log under every modelled fault... " + (f"{p[0]}/{p[1]}" if p else ""))
@@ -5032,11 +5326,55 @@ def main_gui(rom_arg=None):
             data = json.loads(job["out"].strip().splitlines()[-1])
         except (ValueError, IndexError, AttributeError):
             msg = (job["out"] or "").strip() or job["err"].strip() or "no output"
+            if job["kind"] == "rules":
+                b_rules.configure(text="Check rules", state="normal")
+                out(f"--- Check rules failed: {msg.splitlines()[-1]} ---\n", "err"); return
             cmp_info.set("Failed: " + msg.splitlines()[-1]); return
         if job["kind"] == "cmp":
             show_compare(data)
+        elif job["kind"] == "rules":
+            show_rules(data)
         else:
             show_diagnosis(data)
+
+    def check_rules():
+        """Run all again in a separate Python core, each test checked against the Brico16Bits rules (--test)."""
+        if st["job"] or not st["host"]:
+            return
+        args = job_args() + ["--test", "--z80", "none" if z80_var.get().startswith("No") else "testm1"]
+        for f in st["faults"]:
+            args += ["--fault", fault_spec(f)]
+        k = cart_var.get()
+        if k == "game" and cart_set_var.get():
+            args += ["--cart", cart_set_var.get()] + (["--cart-list", cart_list_var.get()] if cart_list_var.get() else [])
+        elif k in ("none", "test", "diag"):
+            args += ["--cart", k]
+        st["results"].clear(); fill_tree(); update_summary()
+        out("--- Check rules: every test in a separate Python core, checked against the Brico16Bits rules ---\n",
+            "info")
+        nb.select(rep)
+        start_job("rules", args)
+
+    def show_rules(data):
+        b_rules.configure(text="Check rules", state="normal")
+        for r in data["rows"]:
+            name = r["line"].split()[0]
+            text = r["output"]
+            if r["rules"]:
+                text += "\nBrico16Bits rule check:\n" + "".join(f"  {f['level']}: {f['text']}\n" for f in r["rules"])
+            else:
+                text += "\nBrico16Bits rule check: nothing found.\n"
+            st["results"][name] = {"status": r["status"], "verdict": r["verdict"], "text": text,
+                                   "secs": r["ms"] / 1000, "line": r["line"], "when": time.strftime("%H:%M:%S")}
+            set_row(name, r["status"])
+        update_summary()
+        bad = [r for r in data["rows"] if r["rules"]]
+        out(f"--- Check rules done: {len(data['rows'])} run(s), {len(bad)} with a rule finding"
+            + (": " + ", ".join(r["line"] for r in bad) if bad else "") + " ---\n", "info")
+        first = (bad or data["rows"] or [None])[0]
+        if first and tree.exists(first["line"].split()[0]):
+            n = first["line"].split()[0]
+            tree.selection_set(n); tree.see(n); show_report(n)
 
     def compare_open(path=None):
         p = path or filedialog.askopenfilename(title="Session log of the real BricoNeo console",
@@ -5259,7 +5597,7 @@ def main_gui(rom_arg=None):
                   "fault_clear": fault_clear, "fault_list": flb, "fault_form": (reg_var, kind_var, bit_var, lvl_var,
                   fault_add_form, ferr), "big": big, "thumb": thumb, "console_preview": cprev, "screen_hint": scr_hint,
                   "cart": cart_var, "cart_set": cart_set_var, "cart_list": cart_list_var, "cart_info": cart_info,
-                  "busy_bar": busy_bar, "key_widgets": [b_power, b_reset, b_pause, b_open, b_runall, b_run, b_stop, tree, thumb]}
+                  "busy_bar": busy_bar, "rules": check_rules, "b_rules": b_rules, "key_widgets": [b_power, b_reset, b_pause, b_open, b_runall, b_run, b_stop, tree, thumb, b_rules]}
     return root
 
 

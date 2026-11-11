@@ -417,6 +417,22 @@ check("with the fault applied the log matches", all(ct.item(i, "values")[3] == "
                                                   if ct.item(i, "values")[0] != "TestAudio"))
 b["fault_clear"](); pump(0.1)
 
+# Check rules: Run all in a separate Python core with the Brico16Bits rule check (--test)
+b["cart"].set("none"); pump(0.3)
+b["rules"](); pump(0.5)
+check("Check rules button shows progress", "Checking" in b["b_rules"].cget("text"), b["b_rules"].cget("text"))
+t_end = time.time() + 300
+while time.time() < t_end and b["b_rules"].cget("text") != "Check rules":
+    pump(0.5)
+check("Check rules finished", b["b_rules"].cget("text") == "Check rules")
+check("Check rules: TestBus FAIL (misses a command right after its EOT)", badge("TestBus") == "FAIL", str(badge("TestBus")))
+check("Check rules: TestVRAM CHECK (1.77 s of the 3 s)", badge("TestVRAM") == "CHECK", str(badge("TestVRAM")))
+check("Check rules: TestWRAM PASS", badge("TestWRAM") == "PASS", str(badge("TestWRAM")))
+tree.selection_set("TestBus"); pump(0.2)
+check("Check rules: report lists the rule finding", "Brico16Bits rule check" in report() and "loop mode" in report())
+tree.selection_set("TestWRAM"); pump(0.2)
+check("Check rules: clean test says so", "rule check: nothing found" in report())
+
 # window sizes, every tab
 b["speed"].set("real")
 for geo in ("1000x660", "1280x820", "1600x1000"):

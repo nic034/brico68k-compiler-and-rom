@@ -543,6 +543,10 @@ def check_briconeo(data):
     if len(data) < OFF_TABLE + 8:
         res.append((False, "File too short to hold the BricoNeo header"))
         return res
+    if int.from_bytes(data[0x8C:0x8E], "big") & 4:
+        free = 0x7FFA - len(data)
+        res.append((free >= 0, f"NeoDiag layout (header flag $0004): code ends before $7FFA, {free} bytes free "
+                               "for new code"))
     reset_hi = struct.unpack_from(">H", data, 4)[0]
     pc = struct.unpack_from(">I", data, 4)[0]
     res.append((reset_hi == 0x00C0, f"Reset vector ${pc:08X}: byte order recognised by Brico16Bits "
