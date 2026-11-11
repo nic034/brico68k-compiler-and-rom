@@ -85,7 +85,7 @@ class InventoryTests(unittest.TestCase):
 
     def test_whitespace_command_rejected_new(self):
         with self.assertRaisesRegex(ValueError, 'empty cmd'):
-            inventory_differences({'s': [{'cmd': 'Echo 1'}]}, {'s': [{'cmd': ' \\t '}]})
+            inventory_differences({'s': [{'cmd': 'Echo 1'}]}, {'s': [{'cmd': ' \t '}]})
 
     def test_empty_command_rejected_in_added_scenario(self):
         with self.assertRaisesRegex(ValueError, 'empty cmd'):
@@ -93,7 +93,7 @@ class InventoryTests(unittest.TestCase):
 
     def test_empty_command_rejected_in_removed_scenario(self):
         with self.assertRaisesRegex(ValueError, 'empty cmd'):
-            inventory_differences({'removed': [{'cmd': ' \\n'}]}, {})
+            inventory_differences({'removed': [{'cmd': ' \n'}]}, {})
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
