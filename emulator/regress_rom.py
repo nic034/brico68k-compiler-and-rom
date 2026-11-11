@@ -174,13 +174,25 @@ def compare(a, b):
     diffs = 0
     chaos = defaultdict(int)
     times = defaultdict(lambda: [0.0, 0.0, 0])
+    for sc in sorted(set(b) - set(a)):
+        print("EXTRA scenario", sc)
+        diffs += 1
     for sc in a:
+        if sc not in b:
+            print("MISSING scenario", sc)
+            diffs += 1
+            continue
+        if len(a[sc]) != len(b[sc]):
+            print(f"DIFF command count {sc}: {len(a[sc])} -> {len(b[sc])}")
+            diffs += 1
+        for index, (ra, rb) in enumerate(zip(a[sc], b[sc])):
+            if ra.get("cmd") != rb.get("cmd"):
+                print(f"DIFF command {sc} #{index}: {ra.get('cmd')!r} -> {rb.get('cmd')!r}")
+                diffs += 1
         if "cart:float" in sc:          # random by design (unstable line): status only
             if [r["status"] for r in a[sc]] != [r["status"] for r in b.get(sc, [])]:
                 print("DIFF status", sc); diffs += 1
             continue
-        if sc not in b:
-            print("MISSING scenario", sc); diffs += 1; continue
         wild = False
         for ra, rb in zip(a[sc], b[sc]):
             name = ra["cmd"].split()[0]
