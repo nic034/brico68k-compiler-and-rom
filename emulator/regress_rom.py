@@ -41,10 +41,10 @@ HEALTHY = ["Echo $1234", "Read $320001", "Read $380000", "Read $300000", "Read $
            "TestStatusA", "TestSystype", "TestZ80", "TestTiming", "TestChip",
            "TestDAC", "Echo $77", "TestDAC 1", "Echo $78", "TestDAC $10", "TestDAC $17", "TestDAC $1F",
            "TestDAC $30", "TestDAC $35", "TestDAC 5", "Echo $79",
-           "TestBus", "Echo $66", "Version", "@0xC00001", "Echo $55", "@0xC00000", "Echo $56",
-           "PlayEyeSnd", "TestAudio", "Echo $88",
+           "TestBus", "Echo $66", "Echo $67", "@0xC00001", "Echo $55", "@0xC00000", "Echo $56",
+           "TestFM", "TestSsg", "TestAudio", "Echo $88",
            "TestWatchdog", "Echo $99", "TestWatchdog", "Echo $9A", "TestWatchdog", "TestWatchdog",
-           "Dump $C00000 16", "Read $400000", "CartTest", "CartTest 1", "Dump $100 8", "TestWRAM",
+           "Dump $C00000 16", "Read $400000", "Dump $100 8", "TestWRAM",
            "TestVectors", "TestGfx", "Echo $31", "TestGfx $12345", "TestDAC $15", "TestVectors",
            "TestGfx $12345 1", "TestGfx 0 1", "TestDAC $12"]
 SCREEN = {"testdac", "testbus"}
@@ -134,7 +134,7 @@ def scenarios(rom):
              "pal": ["TestPRAM", "TestChip", "TestDAC", "Echo 3"],
              "vramlo": ["TestVRAM", "TestChip", "TestLSPC"], "vramhi": ["TestVRAM", "TestChip", "TestLSPC"],
              "line": ["TestTiming", "TestChip", "TestDAC", "Echo 4", "TestBus", "Echo 5"],
-             "bios": ["TestBus", "Echo 6", "Version", "Dump $C07FF0 16"],
+             "bios": ["TestBus", "Echo 6", "Echo 7", "Dump $C07FF0 16"],
              "vec": ["TestVectors", "Echo $41", "TestVectors", "TestChip"]}
     for f in E.all_single_faults():
         spec_ = E.fault_spec(f)
@@ -152,8 +152,7 @@ def scenarios(rom):
             sc.append((f"fault/{cart}/vec:stuck:{side}", rom, cart, 1, [f"vec:stuck:{side}"],
                        ["TestVectors", "Echo $41", "TestVectors"]))
     for cf in cart_faults:
-        sc.append((f"fault/test/{cf}", rom, "test", 1, [cf], ["CartTest", "CartTest 1"]))
-        sc.append((f"fault/diag/{cf}", rom, "diag", 1, [cf], ["CartDiag", "CartTest"]))
+        sc.append((f"fault/diag/{cf}", rom, "diag", 1, [cf], ["CartDiag", "Echo $42"]))
     if CORE:
         cmds = ["TestInp", "TestStatusA", "TestSystype", "TestBRAM", "TestChip", "TestWRAM"]
         # p1, dip, p2, status_a, status_b, systype word, MVS backup RAM

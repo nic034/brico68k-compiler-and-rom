@@ -14,7 +14,7 @@
 ; One test suite (RAM_SUITE, described below) per region, and per palette
 ; bank for PRAM: data bus walking 1/0, byte writes, named address lines,
 ; March C-. PRAM then checks bank 0 / bank 1 independence (the bank select
-; line). CartTest reuses RAM_SUITE on the diagnostic PROG board SRAM
+; line). CartDiag reuses RAM_SUITE on the diagnostic PROG board SRAM
 ; (region type 3, cartridge P bus at $200000).
 ;
 ; On the first error the test stops and reports the step, the address, the
@@ -36,7 +36,7 @@
 ;
 ; Registers:  a5 = region start, a4 = region end (exclusive)
 ;             d7.b = 0 WRAM / 1 BRAM / 2 PRAM / 3 cartridge P bus (diagnostic
-;             PROG board SRAM, from CartTest), bit 8 of d7 = palette bank
+;             PROG board SRAM, from CartDiag), bit 8 of d7 = palette bank
 ;             a3 = return address of RAM_SUITE, a2 = return of the helpers
 ;             Print/PrintA1 clobber a0/a1/d0/a6, printWord d0/d2/d4/a0/a6.
 ; =============================================================================

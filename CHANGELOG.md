@@ -4,6 +4,29 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-11 - ROM 1.35-nic034-10: upstream TestFM / TestSsg, CartTest and Version removed
+
+**ROM 1.35-nic034-10** (SHA-256 `66d9e05f8284eb950b3859462facdecfa16dd5fdbd05e82b73f81ac7abd80ce0`, 26 extensions)
+- Upstream `5643191` / `1b72deb` (Aurelien34, 2026-11-08) brought in: **PlayEyeSnd renamed
+  TestFM** (same code: Z80 command `$02`, FM1-FM4) and **TestSsg** added (Z80 command `$7F`, coin
+  chime: timer A, SSG A-C, noise; upstream code as is). On an AES the cartridge M1 decides what
+  `$7F` plays; upstream describes the MVS SM1.
+- **CartTest removed** (game cartridge P bus, read only). CartDiag (PROG board) stays, now in
+  `source/ExtCartDiag.s` with the routines it uses (OE_DEAD, OE_HOLD245).
+- **Version removed**: the fork version is no longer in the image (FORK_VERSION stays in
+  `inc/define.inc` for the build tools); the SHA-256 identifies a build.
+- Code space in the NeoDiag layout: 3158 bytes free (was 18).
+- Checks: regression -09 against -10, 421 scenarios (the CartTest-only cartridge-fault scenarios
+  dropped): every output identical except TestFM and TestSsg, unknown to -09. Rule check
+  (`--test`): TestFM and TestSsg clean; the known TestBus and TestVRAM findings unchanged.
+  Not run on a real console, nor in MAME.
+
+**Emulator** (same 1.20)
+- Test M1: command `$7F` plays a two-note chime on the SSG (1984 Hz then 1563 Hz, ~0.14 s),
+  in the Python and C cores and the MAME bench cartridge; TestSsg is LOOK ("listen") in Run all.
+- Test lists (Run all, guiverify 202/202, lockstep, regression, MAME scripts, the real-console
+  session and its expected outputs) follow the new extension list.
+
 ## 2026-11-11 - Emulator 1.20: testing new extensions (rule check), one test table
 
 **Emulator 1.20** (ROM unchanged: 1.35-nic034-09)

@@ -91,7 +91,7 @@ pump(1.5)
 ext_rows = [i for g in tree.get_children() for i in tree.get_children(g)]
 groups = [tree.item(g, "text") for g in tree.get_children()]
 check("auto power on", st["core"] is not None and st["running"])
-check("27 extensions in the sidebar", len(ext_rows) == 27, str(len(ext_rows)))
+check("26 extensions in the sidebar", len(ext_rows) == 26, str(len(ext_rows)))
 check("grouped by category", groups == ["Overview", "Memory", "Video", "Sound", "Inputs and system", "Cartridge", "Tools"], str(groups))
 check("Tools group collapsed", not tree.item("cat_Tools", "open"))
 check("lamps", "running" in b["lamps"]["cpu"][1].cget("text") and "ready" in b["lamps"]["host"][1].cget("text"))
@@ -106,13 +106,13 @@ check("Run all finished", wait_idle(60))
 pump(0.3)
 expect = {"TestChip": "PASS", "TestBus": "PASS", "TestWRAM": "PASS", "TestBRAM": "N/A", "TestPRAM": "PASS", "TestVRAM": "PASS",
           "TestLSPC": "PASS", "TestTiming": "PASS", "TestGfx": "LOOK", "TestDAC": "LOOK", "TestVectors": "PASS",
-          "TestZ80": "PASS", "TestAudio": "PASS", "PlayEyeSnd": "LOOK", "TestInp": "INFO", "TestStatusA": "INFO",
+          "TestZ80": "PASS", "TestAudio": "PASS", "TestFM": "LOOK", "TestSsg": "LOOK", "TestInp": "INFO", "TestStatusA": "INFO",
           "TestSystype": "INFO", "TestWatchdog": "PASS"}
 for n, e in expect.items():
     check(f"Run all badge {n} = {e}", badge(n) == e, str(badge(n)))
 check("tools not run by Run all", all(badge(n) == "" for n in m.TOOLS))
 check("watchdog on by default", b["wd"].get() is True)
-check("summary line", b["summary"].get().startswith("11 pass") and "3 look" in b["summary"].get(), b["summary"].get())
+check("summary line", b["summary"].get().startswith("11 pass") and "4 look" in b["summary"].get(), b["summary"].get())
 check("console 'Run all done' with summary", "Run all done: 11 pass" in console())
 check("TestDAC last: 16 colours on screen", len(set(st["colours"])) == 16, str(len(set(st["colours"]))))
 check("report shows the last test", "TestDAC" in report() and "LOOK" in b["verdict"].cget("text"))
@@ -128,7 +128,7 @@ check("watchdog verdict after two passes", b["verdict"].cget("text").startswith(
 # GUI result = text mode (--run), for every test and every tool
 cmds = ["Echo $BEEF", "Read 0x320001", "Write $5A $100001", "WriteB $A5 $100000", "Dump $100000 8", "TestInp",
         "TestWRAM", "TestBRAM", "TestPRAM", "TestVRAM", "TestLSPC",
-        "Color $7FFF", "TestStatusA", "TestSystype", "TestZ80", "TestTiming", "PlayEyeSnd", "TestBus", "TestDAC 1"]
+        "Color $7FFF", "TestStatusA", "TestSystype", "TestZ80", "TestTiming", "TestFM", "TestSsg", "TestBus", "TestDAC 1"]
 b["send"]("Power"); pump(0.2)            # fresh RAM, like --run (Run all left test patterns in WRAM)
 b["send"]("Clear"); pump(0.1)
 for c in cmds:
@@ -176,7 +176,7 @@ check("WRAM byte write keeps the other byte", "0x0056" in console()[-40:], conso
 
 # built-ins, errors, history
 b["send"]("Help"); pump(0.2)
-check("Help lists the extensions", "27 extensions in this ROM" in console())
+check("Help lists the extensions", "26 extensions in this ROM" in console())
 b["send"]("Nope"); pump(0.2)
 check("unknown command message", "Unknown command: Nope" in console())
 b["cmd"].set(""); b["history"](-1)
@@ -305,19 +305,19 @@ b["speed"].set("fast")
 b["cart"].set("test"); pump(0.3)
 check("test cartridge inserted (lamp)", "Test cartridge" in b["lamps"]["cart"][1].cget("text"), b["lamps"]["cart"][1].cget("text"))
 check("insert = power cycle", "Cartridge changed" in console() and "Power on" in console()[-2000:])
-b["send"]("CartTest"); wait_idle()
-check("test cartridge: CartTest PASS", badge("CartTest") == "PASS", str(badge("CartTest")))
-reg, kind, bit, lvl, add_form, ferr = b["fault_form"]
-reg.set("Cartridge slot (P bus)"); pump(0.05); kind.set("Data bit stuck"); pump(0.05)
-bit.set("3"); lvl.set("0"); add_form(); pump(0.1)
-check("slot fault from the form", any("D3 stuck at 0" in describe for describe in [b["fault_list"].get(i) for i in range(b["fault_list"].size())]))
-b["send"]("CartTest"); wait_idle()
-check("slot D3 stuck -> CartTest FAIL naming D3", badge("CartTest") == "FAIL" and "D3  never 1" in console()[-900:], console()[-600:])
-b["fault_clear"](); pump(0.1)
+b["send"]("TestGfx $12345"); wait_idle()
+check("test cartridge: TestGfx draws its tiles", badge("TestGfx") == "LOOK", str(badge("TestGfx")))
 b["cart"].set("diag"); pump(0.3)
 check("PROG board inserted (lamp)", "PROG board" in b["lamps"]["cart"][1].cget("text"))
 b["send"]("CartDiag"); wait_idle()
 check("PROG board: CartDiag PASS (write/read test)", badge("CartDiag") == "PASS" and "p-bus test (diag cart)" in console()[-1500:])
+reg, kind, bit, lvl, add_form, ferr = b["fault_form"]
+reg.set("Cartridge slot (P bus)"); pump(0.05); kind.set("Data bit stuck"); pump(0.05)
+bit.set("3"); lvl.set("0"); add_form(); pump(0.1)
+check("slot fault from the form", any("D3 stuck at 0" in describe for describe in [b["fault_list"].get(i) for i in range(b["fault_list"].size())]))
+b["send"]("CartDiag"); wait_idle()
+check("slot D3 stuck -> CartDiag FAIL naming D3", badge("CartDiag") == "FAIL" and "D3" in console()[-900:], console()[-600:])
+b["fault_clear"](); pump(0.1)
 kind.set("Strobe dead"); pump(0.05); lvl.set("ROMOEU"); add_form(); pump(0.1)
 b["send"]("CartDiag"); wait_idle()
 check("PROG board, /ROMOEU dead -> FAIL on the output enable test", badge("CartDiag") == "FAIL" and "P1 D8-D15: output dead" in console()[-400:], console()[-400:])
@@ -327,8 +327,6 @@ if fs:
     b["cart_set"].set(str(Path(fs) / "gameb.zip")); b["cart_list"].set(str(Path(fs) / "neogeo.xml"))
     b["cart"].set("game"); pump(0.5)
     check("game set + official list: every chip OK", "every chip OK" in b["cart_info"].get(), b["cart_info"].get()[:300])
-    b["send"]("CartTest"); wait_idle()
-    check("game set: CartTest PASS", badge("CartTest") == "PASS")
     b["cart_set"].set(str(Path(fs) / "missing.zip")); b["cart"].set("game"); pump(0.3)
     check("bad set path: readable error, console kept", "cartridge:" in console()[-300:] and st["core"] is not None, console()[-300:])
 b["cart"].set("none"); pump(0.3)

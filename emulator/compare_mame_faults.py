@@ -23,12 +23,13 @@ CASES = [
   ("line:data:0:0",   {"BRICO_STUCK": "0x3c0006,0x3c0007,0,0xFF7F"},    ["TestTiming", "TestChip"]),
 ]
 # cartridge slot (needs BRICO_CART = the tools/make_test_cart.py folder; the emulator inserts the
-# same test cartridge). MAME's fault covers $000080-$2FFFFF (WRAM too: CartTest does not use it).
+# same test cartridge). MAME's fault covers $000080-$2FFFFF (WRAM too). Since CartTest was removed
+# (1.35-nic034-10), the slot data faults are seen through a dump of the cartridge header.
 # (A slot address fault is not comparable on a game cartridge: the bench's BRICO_ALIAS is a
 # shadow RAM, so the ROM would read 0 and become writable.)
 CART_CASES = [
-  ("cart:data:3:0",   {"BRICO_STUCK": "0x000080,0x2fffff,0,0xFFF7"},    ["CartTest"]),
-  ("cart:data:12:1",  {"BRICO_STUCK": "0x000080,0x2fffff,0x1000,0xFFFF"},["CartTest"]),
+  ("cart:data:3:0",   {"BRICO_STUCK": "0x000080,0x2fffff,0,0xFFF7"},    ["Dump:0x100:8"]),
+  ("cart:data:12:1",  {"BRICO_STUCK": "0x000080,0x2fffff,0x1000,0xFFFF"},["Dump:0x100:8"]),
 ] if os.environ.get("BRICO_CART") else []
 # Diagnostic PROG board, no cartridge in MAME: BRICO_ALIAS's shadow RAM over $000080-$2FFFFF with
 # A21 masked off is one RAM seen at $0xxxxx and $2xxxxx, written by byte lanes: the board's SRAM

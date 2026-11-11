@@ -49,7 +49,7 @@ Text mode: python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234" [--rom ROM]
            python Brico68k_Emulator.py --compare putty.log     (real console log vs emulator)
            python Brico68k_Emulator.py --diagnose putty.log    (which modelled fault explains it)
            python Brico68k_Emulator.py --check [--rom ROM]
-           python Brico68k_Emulator.py --cart kof98.zip --cart-list neogeo.xml --run CartTest
+           python Brico68k_Emulator.py --cart kof98.zip --cart-list neogeo.xml --run "TestGfx $100"
 Python 3.8+, standard library only: nothing to install with pip. The window
 needs Tkinter, which comes with Python on Windows (python.org installer) and is
 the python3-tk package on Linux distributions that split it out.
@@ -1556,17 +1556,19 @@ H_IDLE, H_SENT, H_WAIT, H_DONE, H_TIMEOUT = range(5)
 #   $0000 boot: di / ld sp,$ffff / xor a / out ($0c),a / out ($08),a (NMI on) / ei / idle: jp idle
 #   $0066 NMI: in a,($00) / cp 3 / jp z,stop / cp 1 / jp nz,other / ld a,1 / out ($0c),a / retn
 #   $0090 stop ($03): SSG mixer $3F (all off), volume A 0 / jp 0 (reboot: reply $00)
-#   $00B0 other: $5C / $5D / $5E: beeps / $02: jingle / else retn
+#   $00B0 other: $5C / $5D / $5E: beeps / $02: jingle / $7F: chime / else retn
 #   $0100 / $0130 / $0160 beep ($5C left 1000 Hz, $5D right 1506 Hz, $5E centre 749 Hz): tone A
 #         period, mixer $3E (tone A on), volume A 15 / retn: the tone lasts until the next command
-#   $0200 jingle ($02, stand-in for the eyecatcher music of a real M1): ld sp,$ffff / C5 E5 G5
-#         (120 ms each) C6 (214 ms): ld d,n / loop: ld b,0 / djnz $ / dec d / jr nz,loop /
+#   $0200 jingle ($02, TestFM; stand-in for the eyecatcher music of a real M1): ld sp,$ffff /
+#         C5 E5 G5 (120 ms each) C6 (214 ms): ld d,n / loop: ld b,0 / djnz $ / dec d / jr nz,loop /
 #         then silence / jp idle
+#   $0290 chime ($7F, TestSsg; stand-in for the coin chime of a real M1): as the jingle, 1984 Hz
+#         (~54 ms) then 1563 Hz (~81 ms), then silence / jp idle
 TEST_M1_PARTS = (
     (0x0000, bytes.fromhex("f331ffffafd30cd308fbc30a00")),
     (0x0066, bytes.fromhex("db00fe03ca9000fe01c2b0003e01d30ced45")),
     (0x0090, bytes.fromhex("3e07d3043e3fd3053e08d3043e00d305c30000")),
-    (0x00B0, bytes.fromhex("fe5cca0001fe5dca3001fe5eca6001fe02ca0002ed45")),
+    (0x00B0, bytes.fromhex("fe5cca0001fe5dca3001fe5eca6001fe02ca0002fe7fca9002ed45")),
     (0x0100, bytes.fromhex("3e00d3043e7dd3053e01d3043e00d3053e07d3043e3ed3053e08d3043e0fd305ed45")),
     (0x0130, bytes.fromhex("3e00d3043e53d3053e01d3043e00d3053e07d3043e3ed3053e08d3043e0fd305ed45")),
     (0x0160, bytes.fromhex("3e00d3043ea7d3053e01d3043e00d3053e07d3043e3ed3053e08d3043e0fd305ed45")),
@@ -1575,6 +1577,9 @@ TEST_M1_PARTS = (
         "3e00d3043ebed3053e01d3043e00d305168f060010fe1520f93e00d3043e9fd3053e01d3043e00d305168f06"
         "0010fe1520f93e00d3043e77d3053e01d3043e00d3051600060010fe1520f93e07d3043e3fd3053e08d3043e"
         "00d305c30a00")),
+    (0x0290, bytes.fromhex(
+        "31ffff3e07d3043e3ed3053e08d3043e0fd3053e00d3043e3fd3053e01d3043e00d3051640060010fe1520f9"
+        "3e00d3043e50d3053e01d3043e00d3051660060010fe1520f93e07d3043e3fd3053e08d3043e00d305c30a00")),
 )
 CART_MAX = 0x1000000
 MAX_FAULTS = 16
@@ -3848,18 +3853,19 @@ TESTS = {
                   look="Look at the screen: 16 bands, one colour bit each (a black band = dead bit)."),
     "TestZ80": _t("Sound"),
     "TestAudio": _t("Sound", wait=4.0),                            # the 68000 beeps for ~3.5 s
-    "PlayEyeSnd": _t("Sound", wait=1.0,                            # the jingle lasts ~0.6 s
+    "TestFM": _t("Sound", wait=1.0,                            # the jingle lasts ~0.6 s
                      look="Listen: the built-in test M1 plays a short jingle on the YM2610 SSG (C E G C); a real "
                           "cartridge M1 plays its own eyecatcher music, which is not emulated (FM / ADPCM)."),
+    "TestSsg": _t("Sound", wait=0.5,                            # the chime lasts ~0.15 s
+                  look="Listen: the built-in test M1 plays a two-note chime on the YM2610 SSG; a real M1 plays "
+                       "its own coin chime (SSG, noise and timer A: only the SSG tones are emulated)."),
     "TestInp": _t("Inputs and system", varies="depends on the controllers, switches and memory card plugged in"),
     "TestStatusA": _t("Inputs and system", varies="depends on coins, service button and memory card"),
     "TestSystype": _t("Inputs and system", varies="depends on the board and its jumpers"),
     "TestVectors": _t("Inputs and system"),
     "TestWatchdog": _t("Inputs and system", twice=2.0, resets=True),
-    "CartTest": _t("Cartridge", varies="depends on the cartridge: insert the same game set in the emulator "
-                                       "(Cartridge tab) to compare"),
     "CartDiag": _t("Cartridge"),
-    **{n: _t("Tools") for n in ("Version", "Echo", "Read", "Write", "WriteB", "Dump", "Color")},
+    **{n: _t("Tools") for n in ("Echo", "Read", "Write", "WriteB", "Dump", "Color")},
 }
 CATEGORIES = []                       # [(group, [names])] in TESTS order, "Tools" last
 for _n, _s in TESTS.items():

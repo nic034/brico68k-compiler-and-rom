@@ -4,12 +4,6 @@ CART:   Tiles for the screen: generated here (S: a 5 x 7 font at the ASCII codes
 ; Brico68k - full session for a real Neo Geo through the BricoNeo console
 ; Paste the whole file into the serial terminal (PuTTY, Tera Term...). Lines starting with ; are ignored.
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
-> Version
-Brico68k 1.35-nic034-09 - Nic034 fork (Nicolas), not an Aurelien34 release
-Based on Aurelien34/Brico68k 1.35 (52c1c92): the BricoNeo shows 1.35
-Source: github.com/nic034/brico68k-compiler-and-rom
-
-[eot, 2 ms emulated]
 > Echo $1234
 0x1234
 [eot, 0 ms emulated]
@@ -107,7 +101,7 @@ Video timing test (LSPC line counter, $3C0006)
 > Auto-animation counter: 8/8 frame steps OK
 => Test success
 
-[eot, 1362 ms emulated]
+[eot, 281 ms emulated]
 > TestZ80
 Z80 handshake test (ACTIVE: stops any sound)
 Needs a standard SM1/M1 sound driver.
@@ -126,6 +120,14 @@ Listen to the audio output. A new command stops the beeps.
 [eot, 154 ms emulated]
 ; the beeps last about 3.5 s: wait to hear them (a new command stops them)
 > Delay 4000
+> TestFM
+[eot, 29 ms emulated]
+; eyecatcher music from the cartridge M1 (AES) / SM1 (MVS)
+> Delay 3000
+> TestSsg
+[eot, 29 ms emulated]
+; coin chime (command $7F): what a cartridge M1 plays for it depends on the game
+> Delay 1000
 > TestInp
   (AES: no DIP bank - bits below are open bus, not real switches)
 87654321 DIP Switches (NEO-F0)
@@ -218,17 +220,6 @@ Watchdog test result:
 => Test success (run again to re-arm)
 
 [eot, 2 ms emulated]
-; cartridge P bus: security code (P1), activity (P2); read only
-> CartTest
-Cartridge P bus data lines D0-D15
-Header   NEO-GEO, NGH 0999, P ROM size $00300000 (as read)
-P1       security code at $00000186
-         61 words exact: D0-D15 OK on P1
-P2       activity $200000-$002FDFFF, 65024 words
-         D0-D15 all take both levels
-=> Test success: P1 security code exact, P2 lines active or untested
-
-[eot, 574 ms emulated]
 ; diagnostic PROG board only (it WRITES its SRAM, never on a game cartridge): CartDiag
 > TestGfx
 Graphics test screen: fix layer and sprites (cartridge tiles)

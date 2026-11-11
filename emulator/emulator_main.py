@@ -49,7 +49,7 @@ Text mode: python Brico68k_Emulator.py --run "TestWRAM" "Echo 1234" [--rom ROM]
            python Brico68k_Emulator.py --compare putty.log     (real console log vs emulator)
            python Brico68k_Emulator.py --diagnose putty.log    (which modelled fault explains it)
            python Brico68k_Emulator.py --check [--rom ROM]
-           python Brico68k_Emulator.py --cart kof98.zip --cart-list neogeo.xml --run CartTest
+           python Brico68k_Emulator.py --cart kof98.zip --cart-list neogeo.xml --run "TestGfx $100"
 Python 3.8+, standard library only: nothing to install with pip. The window
 needs Tkinter, which comes with Python on Windows (python.org installer) and is
 the python3-tk package on Linux distributions that split it out.
@@ -306,18 +306,19 @@ TESTS = {
                   look="Look at the screen: 16 bands, one colour bit each (a black band = dead bit)."),
     "TestZ80": _t("Sound"),
     "TestAudio": _t("Sound", wait=4.0),                            # the 68000 beeps for ~3.5 s
-    "PlayEyeSnd": _t("Sound", wait=1.0,                            # the jingle lasts ~0.6 s
+    "TestFM": _t("Sound", wait=1.0,                            # the jingle lasts ~0.6 s
                      look="Listen: the built-in test M1 plays a short jingle on the YM2610 SSG (C E G C); a real "
                           "cartridge M1 plays its own eyecatcher music, which is not emulated (FM / ADPCM)."),
+    "TestSsg": _t("Sound", wait=0.5,                            # the chime lasts ~0.15 s
+                  look="Listen: the built-in test M1 plays a two-note chime on the YM2610 SSG; a real M1 plays "
+                       "its own coin chime (SSG, noise and timer A: only the SSG tones are emulated)."),
     "TestInp": _t("Inputs and system", varies="depends on the controllers, switches and memory card plugged in"),
     "TestStatusA": _t("Inputs and system", varies="depends on coins, service button and memory card"),
     "TestSystype": _t("Inputs and system", varies="depends on the board and its jumpers"),
     "TestVectors": _t("Inputs and system"),
     "TestWatchdog": _t("Inputs and system", twice=2.0, resets=True),
-    "CartTest": _t("Cartridge", varies="depends on the cartridge: insert the same game set in the emulator "
-                                       "(Cartridge tab) to compare"),
     "CartDiag": _t("Cartridge"),
-    **{n: _t("Tools") for n in ("Version", "Echo", "Read", "Write", "WriteB", "Dump", "Color")},
+    **{n: _t("Tools") for n in ("Echo", "Read", "Write", "WriteB", "Dump", "Color")},
 }
 CATEGORIES = []                       # [(group, [names])] in TESTS order, "Tools" last
 for _n, _s in TESTS.items():

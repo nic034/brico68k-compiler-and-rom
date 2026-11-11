@@ -74,7 +74,7 @@
 	; Magic word - 8 bytes
 	dc.b "BricoNeo"
 	; Version - 4 bytes
-	BRICONEO_VERSION 1,35			; upstream base; the fork version is only in the Version command
+	BRICONEO_VERSION 1,35			; upstream base; the fork version (FORK_VERSION) is not in the image
 	; Special modes
 	dc.w BRICO_SPECIAL_FLAG_ENABLE_EXTENSIONS + BRICO_SPECIAL_FLAG_68K_SENDS_COMMANDS + BRICO_SPECIAL_FLAG_NEODIAG_MIRRORS
 
@@ -98,7 +98,8 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_MEMDUMP, 			BRICO_EXT_OUTPUT_TYPE_DUMP,		"Dump",				"Words from address P1 (even), count P2, max 2045 (BricoNeo buffer). No WRAM."
 	DECLARE_EXTENSION EXT_TEST_INPUTS,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestInp",			"Controllers, memory card detect, AES/MVS (NEO-F0, NEO-C1). No WRAM."
 	DECLARE_EXTENSION EXT_TEST_AUDIO,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestAudio",		"Z80 handshake, then left/right/centre beeps ~1 s each; a new command stops them. Needs WRAM (stack)."
-	DECLARE_EXTENSION EXT_EYE_SND,			BRICO_EXT_OUTPUT_TYPE_VOID,		"PlayEyeSnd",		"Eyecatcher music: Z80 command $02 (SM1 on MVS, cartridge M1 on AES). No WRAM."
+	DECLARE_EXTENSION EXT_TEST_FM,			BRICO_EXT_OUTPUT_TYPE_VOID,		"TestFM",			"Eyecatcher music, Z80 command $02 (SM1 on MVS, cartridge M1 on AES), channels FM1-FM4. No WRAM."
+	DECLARE_EXTENSION EXT_TEST_SSG,			BRICO_EXT_OUTPUT_TYPE_VOID,		"TestSsg",			"Coin chime, Z80 command $7F (SM1 on MVS; on AES the cartridge M1 decides): timer A, SSG A-C, noise. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_WRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestWRAM",			"Work RAM: data walking 1/0, byte writes, each address line, March C-. Names bits and chip. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_BRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBRAM",			"MVS backup RAM, as TestWRAM. ERASES settings. N/A on AES. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_PRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestPRAM",			"Palette RAM, both banks, as TestWRAM (no byte test) + bank select. No WRAM."
@@ -113,20 +114,9 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_TEST_CHIP,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestChip",		"One line per part, < 1 s: WRAM, palette, VRAM, LSPC2, NEO-C1, IRQs, Z80, NEO-D0 clocks. IRQs need WRAM."
 	DECLARE_EXTENSION EXT_TEST_SYSTYPE,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestSystype",		"SYSTYPE: TEST button, JAMMA sense (MVS). No WRAM."
 	DECLARE_EXTENSION EXT_TEST_BUS,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBus",			"BIOS socket 68000 -> BricoNeo: A15/A16 (NeoDiag mirrors), A1-A14/D0-D15 (CRC32); 16 bands. Run at boot. No WRAM."
-	DECLARE_EXTENSION EXT_CART_TEST,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartTest",			"Game cartridge P bus, read only: P1 security code names stuck/open lines, P2 activity (P1=1 forces it). Never writes. No WRAM."
 	DECLARE_EXTENSION EXT_CART_DIAG,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartDiag",			"p-bus test (diag cart), github.com/jwestfall69/neogeo-diag-aes-prog. WRITES the SRAM: /ROMOE, /PORTOE, D0-D15, lanes, A1-A19. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_VECTORS,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestVectors",		"Vector table switch, system ROM / cartridge (REG_SWPBIOS / REG_SWPROM). No WRAM."
 	DECLARE_EXTENSION EXT_TEST_GFX,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestGfx",			"Screen: fix tiles, sprites (flips, 8x4, H/V shrink), cartridge tiles from P1. P2=1: whole screen. No WRAM."
-	; Version: written by hand (not DECLARE_EXTENSION) so that the description
-	; takes the fork version from FORK_VERSION, its only definition
-	dc.l EXT_VERSION
-	dc.w BRICO_EXT_OUTPUT_TYPE_STRING
-	dc.b "Version",0
-	align 1
-	dc.b "Fork version "
-	FORK_VERSION
-	dc.b ": Nic034 fork of Aurelien34/Brico68k 1.35 (header: 1.35). No WRAM.",0
-	align 1
 	dc.l $ffffffff ; No more extensions
 
 START:

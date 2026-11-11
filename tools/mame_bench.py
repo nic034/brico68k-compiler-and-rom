@@ -22,7 +22,7 @@ Environment variables:
   BRICO_STATUSB     "clear,set": forces STATUS_B bits (e.g. 0x00,0x80 = MVS)
   BRICO_STUCK       "start,end,or,and": simulated data fault on reads
   BRICO_ALIAS       "start,end,mask": stuck address / bank line
-  BRICO_WAV         .wav path: records the audio output (TestAudio, PlayEyeSnd)
+  BRICO_WAV         .wav path: records the audio output (TestAudio, TestFM)
   BRICO_SNAP        "i,j,...": PNG screenshot after command number i (1 = first)
                     into BRICO_SNAP_DIR (BRICO_SNAP_FRAMES=30)
   BRICO_LOGREAD     "start,end,max": log CPU reads in that range

@@ -1,7 +1,6 @@
 ; Brico68k - full session for a real Neo Geo through the BricoNeo console
 ; Paste the whole file into the serial terminal (PuTTY, Tera Term...). Lines starting with ; are ignored.
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
-Version
 Echo $1234
 TestChip
 TestBus
@@ -16,6 +15,12 @@ TestZ80
 TestAudio
 ; the beeps last about 3.5 s: wait to hear them (a new command stops them)
 Delay 4000
+TestFM
+; eyecatcher music from the cartridge M1 (AES) / SM1 (MVS)
+Delay 3000
+TestSsg
+; coin chime (command $7F): what a cartridge M1 plays for it depends on the game
+Delay 1000
 TestInp
 TestStatusA
 TestSystype
@@ -24,8 +29,6 @@ TestWatchdog
 ; first pass starves the watchdog: wait for the reset, then read the result
 Delay 2000
 TestWatchdog
-; cartridge P bus: security code (P1), activity (P2); read only
-CartTest
 ; diagnostic PROG board only (it WRITES its SRAM, never on a game cartridge): CartDiag
 TestGfx
 ; TestGfx: labels, fix tiles and sprites (flips, 8x4 tiles, H and V shrink) from the cartridge tiles

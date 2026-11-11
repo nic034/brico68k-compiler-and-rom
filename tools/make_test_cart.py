@@ -6,7 +6,7 @@ MAME only loads Neo Geo cartridges through a software list, so this writes:
   <out>/roms/neogeo/brtest/*      the ROM files (MAME naming and byte order)
 Content (all generated, nothing copyrighted):
   P ROM 3 MB: P1 1 MB + P2 2 MB (2 banks), pseudo-random words, fixed seed,
-              game header and security code (CartTest).
+              game header and security code (as a real cartridge).
   S1 128 KB : fix tiles, tile $20 blank, other tiles striped.
   M1 64 KB  : the emulator's built-in test M1 (emulator/neo_py.py TEST_M1_PARTS): $03 = silence
                + reset (reply $00), $01 = reply $01, $5C/$5D/$5E = SSG beeps, $02 = a jingle.
@@ -40,7 +40,7 @@ SEC_AT = 0x186
 def p_rom():
     """3 MB of P ROM in 68000 (big-endian) order: pseudo-random words (fixed seed) and a
     game header: "NEO-GEO", NGH $0999, P ROM size $300000, security code pointer
-    $182 -> $186 (wiki "68k program header"). CartTest reads it."""
+    $182 -> $186 (wiki "68k program header"). The system ROM reads it."""
     rnd = random.Random(0xB1C068)
     p = bytearray(rnd.getrandbits(8) for _ in range(3 * 0x100000))
     # vectors like a game's (wiki "68k vector table"): SP $10F300, reset $C00402, the exceptions to
