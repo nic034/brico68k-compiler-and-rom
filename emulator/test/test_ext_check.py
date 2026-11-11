@@ -79,9 +79,8 @@ for p1, want in CASES.items():
     print(f"{'ok  ' if ok else 'FAIL'} case {p1:2d} ({st}, {secs * 1000:.0f} ms): "
           + ("; ".join(f"{lv} {msg}" for lv, msg in found) or "no finding"), flush=True)
 
-# the real ROM: only the known findings (TestBus misses a command sent within ~2.7 ms of its EOT;
-# TestVRAM takes 1.77 s of the 3 s)
-known = {"TestBus", "TestVRAM"}
+# the real ROM: only the known finding (TestVRAM takes 1.77 s of the 3 s)
+known = {"TestVRAM"}
 real = (REPO / "rom" / "ROM.BIO").read_bytes()
 host = boot(real)
 for name, *_ in host.exts:

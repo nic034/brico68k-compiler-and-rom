@@ -29,7 +29,7 @@
 ; P2 = 1: the whole screen instead, 20 sprites of 14 tiles (320 x 224), no
 ; label: a fault that depends on the position (line buffer, a column of
 ; pixels) shows wherever it is; the test zones only cover parts of the screen.
-; The screen stays (nothing is animated): TestDAC and TestBus clear it.
+; The screen stays (nothing is animated): TestDAC clears it.
 ; No WRAM: registers, ROM tables, VRAM and palette RAM.
 ; ------------------------------------------------------------------------
 GFX_COUNT    equ 35
@@ -47,7 +47,7 @@ EXT_TEST_GFX:
 	and.l #$000FFFFF,d7					; first C ROM tile, 20 bits
 	move.l (BRICO_COMMAND_PARAM_2).l,d5	; 1 = whole screen
 	; palette bank 0, sprites hidden, fix map = tile $20 on palette 0;
-	; leaves a0 = REG_VRAMRW and REG_VRAMMOD = 1 (ExtTestBus.s)
+	; leaves a0 = REG_VRAMRW and REG_VRAMMOD = 1 (Screen.s)
 	JsrA6 screenBlank
 
 	; --- palettes: backdrop dark blue, palette 0 (fix) all white,
@@ -165,7 +165,7 @@ EXT_TEST_GFX:
 	PrintLn "Zones: flips, 8 x 4 tiles, H shrink $F-$0, V shrink $FF-$3F (L0 ROM),"
 	PrintLn "fix tiles $00-$FF (S ROM). Look for missing, shifted or wrong tiles,"
 	PrintLn "vertical bars, no flip, no shrink. Blank tiles: try another P1."
-	PrintLn "TestDAC or TestBus clear the screen."
+	PrintLn "TestDAC clears the screen."
 	jmp EOT_AND_WAIT(pc)
 
 ; gfxSprite: writes sprite d6 and adds 1 to d6. d3 = x, a4 = y (visible

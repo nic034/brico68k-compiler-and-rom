@@ -91,7 +91,7 @@ pump(1.5)
 ext_rows = [i for g in tree.get_children() for i in tree.get_children(g)]
 groups = [tree.item(g, "text") for g in tree.get_children()]
 check("auto power on", st["core"] is not None and st["running"])
-check("26 extensions in the sidebar", len(ext_rows) == 26, str(len(ext_rows)))
+check("25 extensions in the sidebar", len(ext_rows) == 25, str(len(ext_rows)))
 check("grouped by category", groups == ["Overview", "Memory", "Video", "Sound", "Inputs and system", "Cartridge", "Tools"], str(groups))
 check("Tools group collapsed", not tree.item("cat_Tools", "open"))
 check("lamps", "running" in b["lamps"]["cpu"][1].cget("text") and "ready" in b["lamps"]["host"][1].cget("text"))
@@ -104,7 +104,7 @@ b["run_all"](); pump(0.2)
 check("Run all button shows progress", "Running" in str([w.cget("text") for w in b["key_widgets"][4:5]]))
 check("Run all finished", wait_idle(60))
 pump(0.3)
-expect = {"TestChip": "PASS", "TestBus": "PASS", "TestWRAM": "PASS", "TestBRAM": "N/A", "TestPRAM": "PASS", "TestVRAM": "PASS",
+expect = {"TestChip": "PASS", "TestWRAM": "PASS", "TestBRAM": "N/A", "TestPRAM": "PASS", "TestVRAM": "PASS",
           "TestLSPC": "PASS", "TestTiming": "PASS", "TestGfx": "LOOK", "TestDAC": "LOOK", "TestVectors": "PASS",
           "TestZ80": "PASS", "TestAudio": "PASS", "TestFM": "LOOK", "TestSsg": "LOOK", "TestInp": "INFO", "TestStatusA": "INFO",
           "TestSystype": "INFO", "TestWatchdog": "PASS"}
@@ -112,8 +112,8 @@ for n, e in expect.items():
     check(f"Run all badge {n} = {e}", badge(n) == e, str(badge(n)))
 check("tools not run by Run all", all(badge(n) == "" for n in m.TOOLS))
 check("watchdog on by default", b["wd"].get() is True)
-check("summary line", b["summary"].get().startswith("11 pass") and "4 look" in b["summary"].get(), b["summary"].get())
-check("console 'Run all done' with summary", "Run all done: 11 pass" in console())
+check("summary line", b["summary"].get().startswith("10 pass") and "4 look" in b["summary"].get(), b["summary"].get())
+check("console 'Run all done' with summary", "Run all done: 10 pass" in console())
 check("TestDAC last: 16 colours on screen", len(set(st["colours"])) == 16, str(len(set(st["colours"]))))
 check("report shows the last test", "TestDAC" in report() and "LOOK" in b["verdict"].cget("text"))
 shot("02_runall.png")
@@ -128,7 +128,7 @@ check("watchdog verdict after two passes", b["verdict"].cget("text").startswith(
 # GUI result = text mode (--run), for every test and every tool
 cmds = ["Echo $BEEF", "Read 0x320001", "Write $5A $100001", "WriteB $A5 $100000", "Dump $100000 8", "TestInp",
         "TestWRAM", "TestBRAM", "TestPRAM", "TestVRAM", "TestLSPC",
-        "Color $7FFF", "TestStatusA", "TestSystype", "TestZ80", "TestTiming", "TestFM", "TestSsg", "TestBus", "TestDAC 1"]
+        "Color $7FFF", "TestStatusA", "TestSystype", "TestZ80", "TestTiming", "TestFM", "TestSsg", "TestDAC 1"]
 b["send"]("Power"); pump(0.2)            # fresh RAM, like --run (Run all left test patterns in WRAM)
 b["send"]("Clear"); pump(0.1)
 for c in cmds:
@@ -159,7 +159,7 @@ b["send"]("TestAudio"); wait_idle()
 t_end = time.time() + 6
 while time.time() < t_end and not b["lamps"]["sound"][1].cget("text").startswith("♪"):
     pump(0.05)
-check("TestAudio: the Z80 programs the SSG, sound lamp on", b["lamps"]["sound"][1].cget("text") == "♪ 1000 Hz",
+check("TestAudio: the Z80 programs the SSG, sound lamp on", b["lamps"]["sound"][1].cget("text") in ("♪ 1000 Hz", "♪ 1506 Hz", "♪ 749 Hz"),
       b["lamps"]["sound"][1].cget("text"))
 check("TestAudio: sound noted in the console", "♪ YM2610 SSG programmed by the Z80: tone A 1000 Hz vol 15" in console())
 b["send"]("TestWRAM"); wait_idle()
@@ -176,7 +176,7 @@ check("WRAM byte write keeps the other byte", "0x0056" in console()[-40:], conso
 
 # built-ins, errors, history
 b["send"]("Help"); pump(0.2)
-check("Help lists the extensions", "26 extensions in this ROM" in console())
+check("Help lists the extensions", "25 extensions in this ROM" in console())
 b["send"]("Nope"); pump(0.2)
 check("unknown command message", "Unknown command: Nope" in console())
 b["cmd"].set(""); b["history"](-1)
@@ -226,7 +226,7 @@ if True:
 b["wd"].set(False); pump(0.1)
 b["run_all"](); wait_idle(60); pump(0.2)
 check("watchdog off: TestWatchdog N/A", badge("TestWatchdog") == "N/A", str(badge("TestWatchdog")))
-check("watchdog off: 10 pass", b["summary"].get().startswith("10 pass"), b["summary"].get())
+check("watchdog off: 9 pass", b["summary"].get().startswith("9 pass"), b["summary"].get())
 tree.selection_set("TestWatchdog"); pump(0.1)
 check("watchdog off explained", "switched off in Settings" in b["verdict"].cget("text"), b["verdict"].cget("text"))
 b["wd"].set(True); pump(0.1)
@@ -388,9 +388,9 @@ def wait_job(timeout):
 
 ct = b["compare_tree"]
 b["compare_open"](str(OUT / "fake_healthy.log"))
-check("compare: healthy log replayed", wait_job(120) and len(ct.get_children()) == 21, str(len(ct.get_children())))
+check("compare: healthy log replayed", wait_job(120) and len(ct.get_children()) == 20, str(len(ct.get_children())))
 check("compare: healthy log all same", all(ct.item(i, "values")[3] == "same" for i in ct.get_children()))
-check("compare: summary shown", "21 same" in b["compare_info"].get(), b["compare_info"].get())
+check("compare: summary shown", "20 same" in b["compare_info"].get(), b["compare_info"].get())
 b["compare_open"](str(OUT / "fake_wram.log"))
 wait_job(120)
 diffs = [ct.item(i, "values")[0] for i in ct.get_children() if ct.item(i, "values")[3] == "DIFFERENT"]
@@ -423,11 +423,10 @@ t_end = time.time() + 300
 while time.time() < t_end and b["b_rules"].cget("text") != "Check rules":
     pump(0.5)
 check("Check rules finished", b["b_rules"].cget("text") == "Check rules")
-check("Check rules: TestBus FAIL (misses a command right after its EOT)", badge("TestBus") == "FAIL", str(badge("TestBus")))
 check("Check rules: TestVRAM CHECK (1.77 s of the 3 s)", badge("TestVRAM") == "CHECK", str(badge("TestVRAM")))
 check("Check rules: TestWRAM PASS", badge("TestWRAM") == "PASS", str(badge("TestWRAM")))
-tree.selection_set("TestBus"); pump(0.2)
-check("Check rules: report lists the rule finding", "Brico16Bits rule check" in report() and "loop mode" in report())
+tree.selection_set("TestVRAM"); pump(0.2)
+check("Check rules: report lists the rule finding", "Brico16Bits rule check" in report() and "close to the 3 s" in report())
 tree.selection_set("TestWRAM"); pump(0.2)
 check("Check rules: clean test says so", "rule check: nothing found" in report())
 

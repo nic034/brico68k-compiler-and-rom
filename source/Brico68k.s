@@ -113,7 +113,6 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_TEST_WATCHDOG,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestWatchdog",		"Run 1 stops kicking the watchdog (reset ~0.13 s), run 2 reports it. Uses WRAM $10FFE0."
 	DECLARE_EXTENSION EXT_TEST_CHIP,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestChip",		"One line per part, < 1 s: WRAM, palette, VRAM, LSPC2, NEO-C1, IRQs, Z80, NEO-D0 clocks. IRQs need WRAM."
 	DECLARE_EXTENSION EXT_TEST_SYSTYPE,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestSystype",		"SYSTYPE: TEST button, JAMMA sense (MVS). No WRAM."
-	DECLARE_EXTENSION EXT_TEST_BUS,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBus",			"BIOS socket 68000 -> BricoNeo: A15/A16 (NeoDiag mirrors), A1-A14/D0-D15 (CRC32); 16 bands. Run at boot. No WRAM."
 	DECLARE_EXTENSION EXT_CART_DIAG,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartDiag",			"p-bus test (diag cart), github.com/jwestfall69/neogeo-diag-aes-prog. WRITES the SRAM: /ROMOE, /PORTOE, D0-D15, lanes, A1-A19. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_VECTORS,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestVectors",		"Vector table switch, system ROM / cartridge (REG_SWPBIOS / REG_SWPROM). No WRAM."
 	DECLARE_EXTENSION EXT_TEST_GFX,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestGfx",			"Screen: fix tiles, sprites (flips, 8x4, H/V shrink), cartridge tiles from P1. P2=1: whole screen. No WRAM."
@@ -126,14 +125,7 @@ START:
 	move.w  #$4000,(REG_LSPCMODE).l ; stop animations
 	lea RAM_RESERVED_SYS_ROM,sp		; Set stack pointer to BIOS_WORKRAM
 	DisableInterrupts 				; Interrupts are disabled by default
-	; BIOS socket A15/A16 (TestBus mirror bytes, no WRAM, < 1 ms): on a fault,
-	; show it on screen at once - with A15/A16 stuck at 1 the command block
-	; read lands in a mirror and no command can ever arrive. No mirror
-	; layout (d4 bit 2): nothing shown here, TestBus says it.
-	JsrA6 busCheck
-	tst.l d5
-	beq.s WAIT_FOR_COMMAND
-	jmp BUS_SCREEN(pc)
+	bra.s WAIT_FOR_COMMAND
 
 EOT_AND_WAIT:
 	WriteEOT

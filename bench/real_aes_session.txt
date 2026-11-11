@@ -3,8 +3,6 @@
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
 Echo $1234
 TestChip
-TestBus
-; TestBus: 16 bands on screen until the next command, A1 at the top, all green = OK
 TestWRAM
 TestBRAM
 TestPRAM

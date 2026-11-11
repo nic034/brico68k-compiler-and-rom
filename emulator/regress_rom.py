@@ -6,7 +6,7 @@
 "run" records, for every scenario (no cartridge / test cartridge / PROG board, watchdog on
 or off, each single fault the core models, each cartridge slot fault) and every command:
 status, the raw output words, emulated time, Z80 commands, cartridge writes, and the 224
-backdrop lines after the screen commands (TestDAC, TestBus). About 1 minute on 2 cores.
+backdrop lines after the screen commands (TestDAC). About 1 minute on 2 cores.
 CORE=python runs the built-in Python core (the default when no C core is next to
 Brico68k_Emulator.py). With CORE=python or CORE=emulator/build/libneocore_test.so
 (emulator/build_test_core.py) it also runs
@@ -41,13 +41,13 @@ HEALTHY = ["Echo $1234", "Read $320001", "Read $380000", "Read $300000", "Read $
            "TestStatusA", "TestSystype", "TestZ80", "TestTiming", "TestChip",
            "TestDAC", "Echo $77", "TestDAC 1", "Echo $78", "TestDAC $10", "TestDAC $17", "TestDAC $1F",
            "TestDAC $30", "TestDAC $35", "TestDAC 5", "Echo $79",
-           "TestBus", "Echo $66", "Echo $67", "@0xC00001", "Echo $55", "@0xC00000", "Echo $56",
+           "Echo $66", "Echo $67", "@0xC00001", "Echo $55", "@0xC00000", "Echo $56",
            "TestFM", "TestSsg", "TestAudio", "Echo $88",
            "TestWatchdog", "Echo $99", "TestWatchdog", "Echo $9A", "TestWatchdog", "TestWatchdog",
            "Dump $C00000 16", "Read $400000", "Dump $100 8", "TestWRAM",
            "TestVectors", "TestGfx", "Echo $31", "TestGfx $12345", "TestDAC $15", "TestVectors",
            "TestGfx $12345 1", "TestGfx 0 1", "TestDAC $12"]
-SCREEN = {"testdac", "testbus"}
+SCREEN = {"testdac"}
 
 
 def run_cmd(c, h, line):
@@ -133,8 +133,8 @@ def scenarios(rom):
     tests = {"wram": ["TestWRAM", "TestChip", "TestAudio", "Echo 3", "TestWatchdog", "TestWatchdog"],
              "pal": ["TestPRAM", "TestChip", "TestDAC", "Echo 3"],
              "vramlo": ["TestVRAM", "TestChip", "TestLSPC"], "vramhi": ["TestVRAM", "TestChip", "TestLSPC"],
-             "line": ["TestTiming", "TestChip", "TestDAC", "Echo 4", "TestBus", "Echo 5"],
-             "bios": ["TestBus", "Echo 6", "Echo 7", "Dump $C07FF0 16"],
+             "line": ["TestTiming", "TestChip", "TestDAC", "Echo 4", "Echo 5"],
+             "bios": ["TestChip", "Echo 6", "Echo 7", "Dump $C07FF0 16"],
              "vec": ["TestVectors", "Echo $41", "TestVectors", "TestChip"]}
     for f in E.all_single_faults():
         spec_ = E.fault_spec(f)

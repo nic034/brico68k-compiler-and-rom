@@ -125,7 +125,7 @@ line of the window says which core runs.
   - **Diagnostic PROG board** (jwestfall69 `neogeo-diag-aes-prog`): one 1 MiB 16-bit SRAM read
     in both P windows and written through P2, with the board's byte-lane decoding from its
     KiCad netlist (UB, LB, OE, WE from /ROMOEU-L, /PORTOEU-L, /PORTWEU-L).
-- **Screen**: the backdrop colour of each line (TestDAC, TestBus, Color), and over it the fix
+- **Screen**: the backdrop colour of each line (TestDAC, Color), and over it the fix
   layer and the sprites drawn from VRAM (TestGfx). The tiles are the cartridge's S and C ROMs when
   the ROM set has them (not decrypted: a CMC / PCM set shows noise); the built-in test cartridge
   has generated tiles (a 5 x 7 font at the ASCII codes, numbered sprite tiles with an F); no
@@ -205,8 +205,8 @@ Keys: Enter sends, Up/Down browses the history, F5 resets, F8 pauses, Ctrl+L cle
 ### Writing and testing a new extension
 
 **Space first.** The ROM uses the NeoDiag layout (header flag `$0004`): code must end before
-`$7FFA` (32 KiB, copied 4 times). With the 26 extensions of 1.35-nic034-10, **3158 bytes are
-free** (CartTest and Version removed for room). Brico68k Compiler prints the free space after
+`$7FFA` (32 KiB, copied 4 times). With the 25 extensions of 1.35-nic034-11, **4860 bytes are
+free** (CartTest, Version and TestBus removed). Brico68k Compiler prints the free space after
 each build.
 
 Nothing to add to the emulator: it reads the extension table of the ROM. A new extension:
@@ -237,8 +237,7 @@ The rule check (`emu_host.check_command`, Python core) watches the bus while the
 
 `emulator/test/test_ext_check.py` builds the ROM with `test/ExtCheckBad.s` (one broken rule per
 P1) and shows that each finding fires, and that the real ROM gives only the two known ones:
-TestVRAM takes 1.77 s, and **TestBus misses a command sent within ~2.7 ms of its EOT** (it clears
-the screen before polling; with the console loop mode `*TestBus` the repeat times out). Limits:
+TestVRAM takes 1.77 s. Limits:
 the rules are the Brico16Bits code as modelled here, and the 20 us loop-mode delay is an
 assumption, not measured on a BricoNeo; only a real console confirms a finding.
 
@@ -332,7 +331,7 @@ With `CORE=python` or `CORE=emulator/build/libneocore_test.so` the check adds 10
 buttons, memory card states), which the AES model never reaches otherwise. With the Python core
 the check takes much longer than with the C core.
 
-## ROM contents: 26 extensions
+## ROM contents: 25 extensions
 
 Commands are typed on the Brico16Bits console. "No WRAM" means the test never relies on
 work RAM (no stack), so it still runs on a board with dead WRAM.
@@ -340,7 +339,6 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | Command | No WRAM | What it does |
 |---|:-:|---|
 | **TestChip** | partly | Quick state of the board, one line per part, < 1 s (see below) |
-| **TestBus** | yes | BIOS socket, 68000 -> BricoNeo, as NeoDiag does it: A15/A16 from the mirror bytes, A1-A14/D0-D15 by CRC32; text and 16 screen bands (see below). Also run at boot. |
 | Echo, Read, Write, WriteB, Dump | yes | Link check and raw memory access. Odd addresses are handled. Dump: at most 2045 words (BricoNeo buffer: 2048 words, address included). |
 | TestInp | yes | Controllers, memory card detect, AES/MVS mode |
 | TestWRAM / TestBRAM / TestPRAM | yes | One suite (see below): data bus walking 1/0, byte writes (not palette), each address line named, March C- $5555/$AAAA on every word. PRAM: both banks + bank select. TestBRAM is MVS only and destructive. |
@@ -361,10 +359,13 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 
 Bold entries are new in this repository.
 
-The code ends 3158 bytes under `$7FFA` (fork 1.35-nic034-10). The 32 KB limit is the NeoDiag
+The code ends 4860 bytes under `$7FFA` (fork 1.35-nic034-11). The 32 KB limit is the NeoDiag
 layout (header flag `$0004`), not the BricoNeo.
 
-Removed in 1.35-nic034-10: **CartTest** (game cartridge P bus, read only) and **Version**. The fork
+Removed in 1.35-nic034-11: **TestBus** (BIOS socket path, A15/A16 by the NeoDiag copies, CRC32)
+and its check at boot: nothing tests the socket lines any more; a dead line shows as a console
+that does not answer (BricoNeo `Trace`, continuity meter). Removed in 1.35-nic034-10: **CartTest**
+(game cartridge P bus, read only) and **Version**. The fork
 version is no longer in the ROM image: the SHA-256 in `rom/ROM.BIO.sha256` and this README tell
 the builds apart (Brico16Bits shows the header version, 1.35, as before).
 
@@ -389,7 +390,7 @@ sprites show the C tiles from P1 up through 15 different colours. On screen: `FL
 tile, mirrored / upside down / both), `SPRITES 8X4` (32 tiles in reading order), `H SHRINK F-0`
 (16 down to 1 pixel wide), `V SHRINK FF-3F` (a column of 16 tiles squeezed through the L0 ROM
 table: 4 to 16 tiles show), and the fix tiles `$00-$FF`, 16 per row. Blank tiles: try another P1.
-The screen stays until TestDAC or TestBus. Uses sprites 1-35, palettes 0 and 1.
+The screen stays until TestDAC. Uses sprites 1-35, palettes 0 and 1.
 `TestGfx <tile> 1` fills the whole screen instead: 20 sprites of 14 tiles (320 x 224), no label.
 The zones only cover parts of the screen; a fault that depends on the position (a line buffer
 bit, a column of pixels) shows wherever it is in this mode.
@@ -486,33 +487,13 @@ Limits: the floating-port check can only miss a dead port, not flag a healthy on
 to a fixed value would hide it). Absolute frequencies: BricoNeo `Freq`. Failures of several parts at once (e.g. WRAM chip or NEO-C1 select) are listed
 together: the test cannot tell them apart.
 
-### TestBus: the BIOS socket path
-
-The BricoNeo already knows the NeoDiag layout: with header flag `$0004` it writes, at load
-time, the CRC-32 of `$0000-$7FFA` at `$7FFC` and copies the 32 KB to `$8000`, `$10000` and
-`$18000` with the copy number (1, 2, 3) in the byte at `$7FFA` (Brico16Bits
-`NeoDiagImageBuilder.cpp`). The ROM sets that flag, keeps its code below `$7FFA`, and our build
-tools (`build.py`, CMake, the Compiler, `tools/neodiag_image.py`) write the same 128 KB, so a
-`SendROMPart` upload (which skips the BricoNeo builder), MAME and the emulator see the same bytes.
-
-| Lines | How | Result |
-|---|---|---|
-| A15, A16 | The copy number read at `$C07FFA`, `$C0FFFA`, `$C17FFA`, `$C1FFFA` says which copy the BricoNeo served. The code runs in every copy, so the console still boots with A15/A16 stuck | The line and its level: reads 0 (red band), reads 1 (blue), both in one pass (orange) |
-| A1-A14, D0-D15 | The code itself needs them: a cut stops the boot (then BricoNeo `Trace`, and a continuity meter). A marginal line shows as a CRC32 error (the wiki: "BIOS CRC error could be faulty NEO-E0") | CRC32 OK / FAIL (yellow bands A1-A14); the line cannot be named |
-
-One pass, no retry: `*TestBus` (the BricoNeo loop mode) repeats it and refreshes the output
-when it changes. The command block `$90-$9F`, written live by the BricoNeo, is counted as zeros.
-The screen shows 16 bands, A1 at the top, groups of 4, until the next command. At boot the
-firmware reads the four copy numbers (< 1 ms) and shows the screen only on a fault: with A15 or
-A16 stuck at 1, the command block read lands in a copy and no command can ever arrive.
-
 ### How the ROM must talk to the BricoNeo
 
 Read from the Brico16Bits code (and Aurelien's review):
 
 - **Command block** (`$90` address, `$94-$9F` P1-P3): written by the BricoNeo in 32-bit stores,
   held **1 ms**, then cleared. An extension reads its parameters first; code that keeps running
-  after its EOT (TestDAC, TestBus, TestAudio's beeps) must poll the block at least every ms or the
+  after its EOT (TestDAC, TestAudio's beeps) must poll the block at least every ms or the
   next command is lost and times out. No re-read loops on the 68000 side: the BricoNeo is in
   charge of that timing; `*command` (loop mode) is how a test is repeated.
 - **Output port**: a read at `$C1FF02` arms the watcher, one socket access goes by, the next
@@ -536,7 +517,7 @@ Read from the Brico16Bits code (and Aurelien's review):
   the upstream TRACE debugger.
 - **Command dispatch**: as upstream (`jmp JUMP_TO_COMMAND`). A re-read loop added earlier was
   removed: the torn read it fixed came from the MAME test host, not from the BricoNeo.
-- **Header flag `$0004`** (NeoDiag CRC32 + mirrors) set, for TestBus.
+- **Header flag `$0004`** (NeoDiag CRC32 + mirrors) set: it was there for TestBus (removed in -11); the BricoNeo still builds the copies and the CRC.
 - **Palette bank registers**: `$3A000F` selects bank 0 and `$3A001F` bank 1. This was checked
   in MAME (`snk/neogeo.cpp`, `write_a3`); upstream 1.35 still has them swapped.
 - **TestAudio**: the Brico16Bits host waits for one EOT with a fixed 3 s timeout. The 1.35
@@ -561,7 +542,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `84f7840` (2026-11-09; since `5859d6b` only the byte-swap detection changed, it now also accepts reset vectors above the first 64 KB: no effect here, ours is `$00C0xxxx`). Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd), plus `5643191` / `1b72deb` (2026-11-08: PlayEyeSnd renamed TestFM, new TestSsg). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-10** (not in the image); the header announces **1.35**, the upstream base; 26 extensions, flags `$0007`, SHA-256 `66d9e05f8284eb950b3859462facdecfa16dd5fdbd05e82b73f81ac7abd80ce0` |
+| This ROM | fork version **1.35-nic034-11** (not in the image); the header announces **1.35**, the upstream base; 25 extensions, flags `$0007`, SHA-256 `cbcfdd2422d8e303c5a59752b1cb1d295600bb65c8e505c569e5f05b68060fcb` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
@@ -585,8 +566,7 @@ Brico16Bits recognises the byte order.
 3. Drop `rom/ROM.BIO` at the root of the `BricoNeo` USB drive. The root loads it in RAM only
    and resets the console: your bank 0 is untouched, and the next power cycle brings it back.
    (Put it in a bank folder to keep it.)
-4. Type `?`: the Extensions section must list the 26 commands. All screen bands green after
-   `TestBus` = the BIOS socket path is fine.
+4. Type `?`: the Extensions section must list the 25 commands.
 5. Paste the whole of `bench/real_aes_session.txt` into the terminal. The `;` lines are comments
    and `Delay` waits, both built into the BricoNeo console.
 6. In the emulator, **Compare** tab > **Open real console log...** (or
@@ -622,9 +602,6 @@ each well under the 3 s host limit.
 - TestChip: identical to MAME (`aes`, with and without the test cartridge), and under every
   bench fault but one: the bench's palette address fault shares one store between both banks,
   so MAME also reports a bank-select fault that a real board would not have.
-- TestBus: `emulator/compare_mame_bus.py` injects the same BIOS socket fault in MAME
-  (`BRICO_SOCKET=15,1`) and in the emulator and compares the screen bands: 7/7 identical
-  (healthy, A15/A16 stuck at 0 and 1, two lines at once).
 
 - TestDAC: 16 exact colours on screenshots.
 - TestTiming: 202,724 cycles per frame against 202,752 expected (within the resolution of its 58-cycle measuring loop). Injected stuck counter bits,

@@ -21,11 +21,11 @@ ROM = Path(sys.argv[2] if len(sys.argv) > 2 else HERE.parent.parent / "rom" / "R
 SEQS = [
     ("none", 1, 1, [], None, ["Echo $1234", "Echo $4321", "TestWRAM", "TestChip", "TestZ80", "TestAudio", "TestDAC 1",
                               "RESET", "TestVectors", "TestGfx", "TestWatchdog", "Echo 5"]),
-    ("test", 1, 1, [], None, ["Dump $100 8", "TestGfx $100", "TestZ80", "RESET", "TestBus", "TestGfx $12345 1"]),
+    ("test", 1, 1, [], None, ["Dump $100 8", "TestGfx $100", "TestZ80", "RESET", "TestDAC", "TestGfx $12345 1"]),
     ("diag", 1, 0, [], None, ["CartDiag", "TestWatchdog", "Echo 7", "TestLSPC"]),
     ("none", 0, 1, [], None, ["TestZ80", "TestAudio", "TestChip", "TestFM", "TestSsg", "Echo 3"]),
     ("none", 1, 1, [(0, 0, 3, 1), (2, 1, 5, 0)], None, ["TestWRAM", "TestVRAM", "TestGfx", "TestChip"]),
-    ("test", 1, 1, [(6, 3, 4, 0), (5, 1, 15, 1)], None, ["CartDiag", "TestBus", "Echo 9"]),
+    ("test", 1, 1, [(6, 3, 4, 0), (5, 1, 15, 1)], None, ["CartDiag", "TestChip", "Echo 9"]),
     ("none", 1, 1, [], (0xA5, 0x5A, 0x3C, 0xE7, 0xFF, 0xFFFF, 1), ["TestInp", "TestBRAM", "TestStatusA", "TestSystype"]),
 ]
 

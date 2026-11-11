@@ -46,7 +46,7 @@ EXT_TEST_VECTORS:
 	beq .romOk
 	bset #0,d7
 	JsrA6 vecCount
-	PrintLn "  = still the cartridge, or the BIOS socket (TestBus)"
+	PrintLn "  = still the cartridge, or the BIOS socket"
 	bra .cart
 .romOk:
 	PrintLn "OK"

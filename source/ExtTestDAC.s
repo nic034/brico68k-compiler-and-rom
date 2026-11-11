@@ -24,7 +24,7 @@ BAND_LINES equ 14				; 16 bands x 14 = 224 visible lines
 EXT_TEST_DAC:
 	move.l (BRICO_COMMAND_PARAM_1).l,d7	; read P1 at once (host clears it)
 	; CPU and display on palette bank 0, sprites hidden, fix map = tile $20 on
-	; palette 0 (ExtTestBus.s, shared with the TestBus screen)
+	; palette 0 (Screen.s)
 	JsrA6 screenBlank
 
 	; d6 = $8000 when the dark bit is requested
@@ -69,8 +69,8 @@ EXT_TEST_DAC:
 	move.w (a2)+,d1
 	or.w d7,d1
 	; wait for line d6, polling for the next command (a NEW one: run it),
-	; then backdrop + palette 0 colours 1-15 = d1 (~17 us). ExtTestBus.s.
-	JsrA6 busBand
+	; then backdrop + palette 0 colours 1-15 = d1 (~17 us). Screen.s.
+	JsrA6 screenBand
 	add.w #BAND_LINES<<7,d6
 	dbra d5,.band
 	bra .frame
@@ -84,7 +84,7 @@ EXT_TEST_DAC:
 	lea BAND_COLOURS(pc),a2
 	move.w (a2,d0.w),d1
 	or.w d6,d1
-	JsrA6 bandColour				; backdrop + palette 0 colours 1-15 (ExtTestBus.s)
+	JsrA6 bandColour				; backdrop + palette 0 colours 1-15 (Screen.s)
 	move.w d1,d5					; keep the colour for the message
 	Print "Full screen, band "
 	move.l d7,d0

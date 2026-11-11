@@ -4,6 +4,21 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-11 - ROM 1.35-nic034-11: TestBus removed
+
+**ROM 1.35-nic034-11** (SHA-256 `cbcfdd2422d8e303c5a59752b1cb1d295600bb65c8e505c569e5f05b68060fcb`, 25 extensions)
+- **TestBus removed**, with its check at boot (A15/A16 by the NeoDiag copy numbers). Nothing
+  tests the BIOS socket lines any more. Its screen helpers, used by TestDAC and TestGfx, moved to
+  `source/Screen.s` (`busBand` renamed `screenBand`).
+- Texts that named TestBus: TestGfx "TestDAC clears the screen.", TestVectors "or the BIOS socket".
+- Header flag `$0004` (NeoDiag layout) kept; it no longer serves a test.
+- 4860 bytes free before `$7FFA`.
+- Upstream: nothing newer than `1b72deb` (checked); TestFM and TestSsg are in since -10.
+- Checks: regression -09 against -11 (421 scenarios): differences only in TestFM / TestSsg (new)
+  and the two text lines above. Lockstep 0 differences, guiverify 199/199, rule check: only the
+  known TestVRAM 1.77 s. `emulator/compare_mame_bus.py` removed. Not run on a real console nor in
+  MAME.
+
 ## 2026-11-11 - ROM 1.35-nic034-10: upstream TestFM / TestSsg, CartTest and Version removed
 
 **ROM 1.35-nic034-10** (SHA-256 `66d9e05f8284eb950b3859462facdecfa16dd5fdbd05e82b73f81ac7abd80ce0`, 26 extensions)
