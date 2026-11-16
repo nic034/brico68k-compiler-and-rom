@@ -68,10 +68,12 @@ EXT_TEST_SYSTYPE:
 	; the raw value (might help spot an always-same floating-bus
 	; pattern), but make the "don't trust this" caveat impossible to
 	; miss instead of printing a confident wrong verdict.
-	PrintLn "  Hardware detected          : AES (STATUS_B bit7=0)"
-	PrintLn "  $300080 is NOT a real register on AES (unmapped in MAME's"
-	PrintLn "  aes_main_map - no TEST switch / no JAMMA harness on AES)."
-	Print "  Raw word below is open-bus/undefined, NOT a TEST/JAMMA value: 0x"
+	PrintText
+	dc.b "  Hardware detected          : AES (STATUS_B bit7=0)",10
+	dc.b "  $300080 is NOT a real register on AES (unmapped in MAME's",10
+	dc.b "  aes_main_map - no TEST switch / no JAMMA harness on AES).",10
+	dc.b "  Raw word below is open-bus/undefined, NOT a TEST/JAMMA value: 0x",0
+	even
 	move.w REG_SYSTYPE,d1
 	move.l d1,d0
 	JsrA6 printWord

@@ -100,7 +100,7 @@ REG_STATUS_B equ $380000
 	; Brico16Bits shows "Found BricoNeo ROM version 1.35". build.py and the
 	; Compiler check that the header equals the base of this string.
 	macro FORK_VERSION
-		dc.b "1.35-nic034-11"
+		dc.b "1.35-nic034-12"
 	endm
 
 	macro BRICONEO_VERSION
@@ -194,6 +194,15 @@ REG_STATUS_B equ $380000
 		align 1
 	endm
 
+	; Several lines in one call: the text follows as dc.b (0-terminated), then
+	; "even". Same words as the Print / PrintLn calls it replaces, 8 bytes each
+	; saved.
+	macro PrintText
+		lea .\@StringAddress(pc),a6
+		jmp printInline_JsrA6(pc)
+	.\@StringAddress:
+	endm
+
 	macro PrintA1
 		JsrA6 print_a1
 	endm
@@ -225,6 +234,13 @@ REG_STATUS_B equ $380000
 
 	macro DisableInterrupts
 		move #$2700,sr				; Supervisor mode + all interrupts disabled
+	endm
+
+	; Waits \2 CPU cycles (10 to 24, even) in one 2-byte instruction: lsl.l #n,\1
+	; takes 8 + 2n cycles and its only bus cycle is the opcode prefetch from the
+	; ROM, like a nop. Destroys \1. Nop6 (24 cycles) is 12 bytes, Delay d0,24 is 2.
+	macro Delay
+		lsl.l #(\2-8)/2,\1
 	endm
 
 	macro Nop2

@@ -4,6 +4,51 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-16 - ROM 1.35-nic034-12: smaller and faster extensions, same outputs
+
+**ROM 1.35-nic034-12** (SHA-256 `c70bdf08f01f2bda43a370f9ae73735d08fd906c1136c112c5126526ac732071`, 25 extensions)
+- **Same outputs**: regression -11 against -12 (421 scenarios, 1721 commands, every modelled
+  fault, 10 input sets, C test core): **0 differences**. Only the measured TestWatchdog loop
+  count moves by a few loops (it depends on the print time, as before).
+- **Code**: 27774 -> 26384 bytes; **6250 bytes free** before `$7FFA` (was 4860).
+  - `PrintText` (define.inc): consecutive Print / PrintLn calls merged into one (44 calls, 8
+    bytes each).
+  - `Delay reg,cycles` (define.inc): `lsl.l #n,reg` = 8 + 2n cycles in 2 bytes, only an opcode
+    prefetch on the bus; replaces the Nop4 / Nop6 / Nop8 VRAM waits where d0 is free
+    (TestVRAM, TestChip, TestLSPC; same cycle counts).
+  - Tools.s: `printBitList` (" D3 D12" / " A19" lists), `printMismatch` / `printMismatchL`
+    (Address / Expected / Read / Bad bits block of TestWRAM-BRAM-PRAM, CartDiag's RAM part and
+    TestVRAM), `printFlagNames` (TestChip verdict and floating ports), `printLong` (8 hex digits).
+  - TestZ80 and TestChip share the sound driver handshake (`z80Handshake`, `z80Quiet` in
+    ExtTestZ80.s): same loops, same timing, same classification. TestZ80 prints the reset reply
+    after the handshake instead of in the middle (same text).
+  - TestTiming: the mid-frame wait is a routine instead of a macro expanded 3 times.
+  - TestChip reads the four NEO-C1 ports in the reverse order (SOUND first) so the bit order fits
+    the name table; same result.
+- **Speed** (emulated, healthy AES): TestVRAM 1.77 -> 1.47 s, TestWRAM / TestBRAM 0.42 -> 0.38 s,
+  CartDiag 0.43 -> 0.38 s, TestPRAM 0.16 -> 0.15 s. TestVRAM is no longer flagged by the rule
+  check (it was the only finding: 1.77 s of the 3 s).
+  - TestVRAM March: LSPC2 registers and watchdog through address registers, 8 words per loop,
+    92 cycles per word of a read/write element instead of 114. VRAM gaps, worst case whatever
+    the bus order inside each MOVE: address -> read 24 cycles, data write -> new address 24,
+    data write -> data write 20 (wiki: 16 / 16 / 12, so >= 8 cycles of margin kept). The read ->
+    write gap (no rule in the wiki) is 20 cycles (was 36).
+  - RAM March (WRAM, BRAM, PRAM, CartDiag SRAM): short branches to a local exit, watchdog
+    through a0, background written as longs (any order is allowed in M0).
+  - Unchanged on purpose: the Z80 waits (2 x 130 ms in TestZ80 / TestChip, the driver reset
+    time), the cycle-counted loops of TestTiming / TestChip / TestWatchdog (their results are
+    calibrated on them), upstream TestAudio / TestFM / TestSsg (only two Print calls of TestAudio
+    merged).
+  - TestTiming's duration depends on the auto-animation phase left by the previous commands
+    (up to 64 frames of wait, as before): from the same start it takes exactly as long as -11.
+- Not run: real console, MAME (none on the machine), guiverify (no Tk on the machine). Run:
+  regression (above), `--test` rule check (every extension clean; CartDiag on the PROG board
+  clean), `emulator/test/test_ext_check.py` (12 cases + real ROM: 0 failures), a TestChip run
+  with P2 and SOUND forced to open bus (floating-ports path, not in the regression): identical
+  to -11. The VRAM timing margins are by cycle count only.
+- Tests updated: guiverify and test_ext_check no longer expect the TestVRAM finding; bench
+  expected outputs regenerated (only the emulated times and the watchdog loop count change).
+
 ## 2026-11-11 - ROM 1.35-nic034-11: TestBus removed
 
 **ROM 1.35-nic034-11** (SHA-256 `cbcfdd2422d8e303c5a59752b1cb1d295600bb65c8e505c569e5f05b68060fcb`, 25 extensions)

@@ -157,15 +157,14 @@ EXT_TEST_GFX:
 .hasCart:
 	Print "Sprites (C ROMs) from tile $"
 	move.l d7,d0
-	swap d0
-	JsrA6 printWord
-	move.l d7,d0
-	JsrA6 printWord
-	PrintLn " (P1). P2=1: whole screen, 20 x 14 tiles."
-	PrintLn "Zones: flips, 8 x 4 tiles, H shrink $F-$0, V shrink $FF-$3F (L0 ROM),"
-	PrintLn "fix tiles $00-$FF (S ROM). Look for missing, shifted or wrong tiles,"
-	PrintLn "vertical bars, no flip, no shrink. Blank tiles: try another P1."
-	PrintLn "TestDAC clears the screen."
+	JsrA6 printLong
+	PrintText
+	dc.b " (P1). P2=1: whole screen, 20 x 14 tiles.",10
+	dc.b "Zones: flips, 8 x 4 tiles, H shrink $F-$0, V shrink $FF-$3F (L0 ROM),",10
+	dc.b "fix tiles $00-$FF (S ROM). Look for missing, shifted or wrong tiles,",10
+	dc.b "vertical bars, no flip, no shrink. Blank tiles: try another P1.",10
+	dc.b "TestDAC clears the screen.",10,0
+	even
 	jmp EOT_AND_WAIT(pc)
 
 ; gfxSprite: writes sprite d6 and adds 1 to d6. d3 = x, a4 = y (visible

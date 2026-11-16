@@ -28,9 +28,10 @@
 ;        up(w B) up(r B,w ~B) up(r ~B,w B) dn(r B,w ~B) dn(r ~B,w B) up(r B)
 ;   then the zone is cleared to 0 (no garbage tiles or sprites left).
 ; Access rules (wiki "VRAM"), each kept with >= 8 cycles of margin:
-;   read valid >= 16 CPU cycles after the address write   -> Nop4 (28 here)
-;   new address >= 16 cycles after a data write           -> Nop2 (24 here)
-;   next data write >= 12 cycles after a data write       -> Nop4 (28 here)
+;   read valid >= 16 CPU cycles after the address write   -> Delay 16 (28 here)
+;   new address >= 16 cycles after a data write           -> Delay 16 (28 here)
+;   next data write >= 12 cycles after a data write       -> Delay 16 (28 here)
+;   (Delay d0,16 = lsl.l #4,d0: the 16 cycles of Nop4 in 2 bytes, d0 is free there)
 ;   VRAMMOD is added after writes only; reads never move the address. The
 ;   address is set before every read, so no read-buffer behaviour is
 ;   assumed (the wiki does not describe one).
@@ -51,12 +52,12 @@ BG          equ $5555			; March C- data background
 		move.w \1,(REG_VRAMADD).l
 	endm
 	macro VRead					; read the word at the address just set -> d0
-		Nop4
+		Delay d0,16
 		move.w (REG_VRAMRW).l,d0
 	endm
 	macro VWrite				; \1 = data; then >= 28 cycles before a new address or write
 		move.w \1,(REG_VRAMRW).l
-		Nop4
+		Delay d0,16
 	endm
 	macro CallA3				; WRAM-free call: return address in a3
 		lea .\@(pc),a3
@@ -102,7 +103,7 @@ EXT_TEST_VRAM:
 	move.w d1,d2
 	not.w d2
 	VSet d7
-	Nop4
+	Delay d0,16
 	VWrite d1					; base <- pattern (address -> base + 1)
 	VWrite d2					; base + 1 <- complement: drives the bus
 	VSet d7
@@ -110,7 +111,7 @@ EXT_TEST_VRAM:
 	cmp.w d1,d0
 	bne .errWalk
 	VSet d7
-	Nop4
+	Delay d0,16
 	VWrite d2
 	VWrite d1
 	VSet d7
@@ -133,13 +134,13 @@ EXT_TEST_VRAM:
 	lsl.w d4,d0
 	or.w d7,d0
 	VSet d0
-	Nop4
+	Delay d0,16
 	VWrite d4
 	addq.w #1,d4
 	cmp.w a4,d4
 	bne .a1
 	VSet d7
-	Nop4
+	Delay d0,16
 	VWrite #$A5A5
 	moveq #0,d4
 .a2:							; still k after the base write? else stuck at 1
@@ -163,7 +164,7 @@ EXT_TEST_VRAM:
 	lsl.w d4,d0
 	or.w d7,d0
 	VSet d0
-	Nop4
+	Delay d0,16
 	VWrite #$5A5A
 	VSet d7
 	VRead
@@ -172,7 +173,7 @@ EXT_TEST_VRAM:
 	or.w d0,d6
 	bset d4,d3
 	VSet d7
-	Nop4
+	Delay d0,16
 	VWrite #$A5A5
 .a3ok:
 	addq.w #1,d4
@@ -190,26 +191,26 @@ EXT_TEST_VRAM:
 	PrintLn " OK"
 
 	; --- 3. March C-, background $5555 / $AAAA -------------------------------
+	; Address and data registers through a1 / a2, watchdog through a0, 8 words
+	; per loop (the absolute forms took 114 cycles per word of a read/write
+	; element, 92 now). Gaps between two LSPC2 accesses, counting only the
+	; instructions in between (worst case, whatever the order of the access and
+	; the prefetch inside each MOVE; interrupts masked):
+	;   address write -> read        Delay 24                 = 24 (>= 16 + 8)
+	;   read -> data write           cmp 4 + bne.w 12 + nop 4 = 20 (no rule)
+	;   data write -> new address    addq 4 + Delay 20        = 24 (>= 16 + 8)
+	;   data write -> data write     Delay 20                 = 20 (>= 12 + 8)
+	;   address write -> data write  Delay 24                 = 24
+	; Delay = lsl.l on d0 (define.inc): the wait of 5-6 nops in 2 bytes.
 .march:
-	move.w #0,(REG_VRAMMOD).l	; read then write the same word
+	lea (REG_WATCHDOG).l,a0
+	lea (REG_VRAMADD).l,a1
+	lea (REG_VRAMRW).l,a2
 	; M0 up(w B), with VRAMMOD = 1 (auto-increment after each write)
 	Step 10
-	move.w #1,(REG_VRAMMOD).l
-	VSet d7
-	Nop4
-	move.w d6,d3
-	lsr.w #2,d3
-	subq.w #1,d3
 	move.w #BG,d2
-.m0:
-	WatchDog
-	rept 4
-	move.w d2,(REG_VRAMRW).l
-	Nop4
-	endr
-	dbra d3,.m0
-	Nop4
-	move.w #0,(REG_VRAMMOD).l
+	CallA3 .fill
+	move.w #0,(REG_VRAMMOD).l	; read then write the same word
 	; M1 up(r B, w ~B)
 	Step 11
 	move.w #BG,d1
@@ -235,33 +236,22 @@ EXT_TEST_VRAM:
 	move.w #BG,d1
 	move.w d7,d4
 	move.w d6,d3
-	lsr.w #2,d3
+	lsr.w #3,d3
 	subq.w #1,d3
 .m5:
-	WatchDog
-	rept 4
-	VSet d4
-	VRead
+	move.b d0,(a0)				; watchdog
+	rept 8
+	move.w d4,(a1)
+	Delay d0,24
+	move.w (a2),d0
 	cmp.w d1,d0
 	bne .errMarch
 	addq.w #1,d4
 	endr
 	dbra d3,.m5
-	; clear the zone (VRAMMOD = 1)
-	move.w #1,(REG_VRAMMOD).l
-	VSet d7
-	Nop4
-	move.w d6,d3
-	lsr.w #2,d3
-	subq.w #1,d3
-.clr:
-	WatchDog
-	rept 4
-	move.w #0,(REG_VRAMRW).l
-	Nop4
-	endr
-	dbra d3,.clr
-	Nop4
+	; clear the zone (VRAMMOD = 1, left at 1 for the next zone)
+	moveq #0,d2
+	CallA3 .fill
 	ZoneName
 	Print "March C- $"
 	move.w d7,d0
@@ -274,23 +264,41 @@ EXT_TEST_VRAM:
 	PrintLn " OK"
 	bra .zone
 
-; March elements over [d7, d7 + d6): read d1, write d2. Called with CallA3
-; (return address in a3): no stack, no WRAM.
+; March elements over [d7, d7 + d6): read d1, write d2; .fill writes d2 with
+; VRAMMOD = 1. Called with CallA3 (return address in a3): no stack, no WRAM.
+; a0 = REG_WATCHDOG, a1 = REG_VRAMADD, a2 = REG_VRAMRW. d3 = loop counter.
+.fill:
+	move.w d6,d3
+	lsr.w #3,d3
+	subq.w #1,d3
+	move.w #1,(REG_VRAMMOD).l
+	move.w d7,(a1)
+	Delay d0,24
+.f:
+	move.b d0,(a0)
+	rept 8
+	move.w d2,(a2)
+	Delay d0,20
+	endr
+	dbra d3,.f
+	jmp (a3)
 .marchUp:
 	move.w d7,d4
 	move.w d6,d3
-	lsr.w #2,d3
+	lsr.w #3,d3
 	subq.w #1,d3
 .mu:
-	WatchDog
-	rept 4
-	VSet d4
-	VRead
+	move.b d0,(a0)
+	rept 8
+	move.w d4,(a1)
+	Delay d0,24
+	move.w (a2),d0
 	cmp.w d1,d0
 	bne .errMarch
-	Nop2						; read -> write: no rule in the wiki, kept apart anyway
-	VWrite d2
+	nop
+	move.w d2,(a2)
 	addq.w #1,d4
+	Delay d0,20
 	endr
 	dbra d3,.mu
 	jmp (a3)
@@ -298,26 +306,30 @@ EXT_TEST_VRAM:
 	move.w d7,d4
 	add.w d6,d4					; last word + 1
 	move.w d6,d3
-	lsr.w #2,d3
+	lsr.w #3,d3
 	subq.w #1,d3
 .md:
-	WatchDog
-	rept 4
+	move.b d0,(a0)
+	rept 8
 	subq.w #1,d4
-	VSet d4
-	VRead
+	move.w d4,(a1)
+	Delay d0,24
+	move.w (a2),d0
 	cmp.w d1,d0
 	bne .errMarch
-	Nop2						; read -> write: no rule in the wiki, kept apart anyway
-	VWrite d2
+	nop
+	move.w d2,(a2)
+	Delay d0,24
 	endr
 	dbra d3,.md
 	jmp (a3)
 
 .allOk:
 	move.w #1,(REG_VRAMMOD).l
-	PrintLn "Not testable: $8600-$86FF (sprite lists written by the LSPC2 during display)."
-	PrintLn "=> Test success"
+	PrintText
+	dc.b "Not testable: $8600-$86FF (sprite lists written by the LSPC2 during display).",10
+	dc.b "=> Test success",10,0
+	even
 	bra .done
 
 ; --- errors -----------------------------------------------------------------
@@ -329,8 +341,8 @@ EXT_TEST_VRAM:
 	move.w d7,d4				; failing word = base
 .errMarch:						; d4 = address, d1 = expected, d0 = read
 	movea.w d4,a4				; address (sign-extended: only its low word is printed)
-	move.w d0,d7				; read      (d6/d7 no longer needed: printDec/printWord keep them)
-	move.w d1,d6				; expected
+	movea.w d1,a5				; expected (a5 = zone table: no longer needed)
+	move.w d0,d6				; read (d6/d7 no longer needed)
 	PrintLn "=> Test failure"
 	ZoneName
 	swap d5
@@ -343,58 +355,21 @@ EXT_TEST_VRAM:
 	moveq #0,d0
 	move.w d5,d0
 	sub.w #10,d0
-	JsrA6 printDec
+	JsrA6 printDec				; keeps d5, d6, a4, a5
 	PrintLn ""
 .eS:
 	swap d5
-	Print "  Address  : $"
-	move.l a4,d0
-	JsrA6 printWord
-	NlPrint "  Expected : $"
-	move.w d6,d0
-	JsrA6 printWord
-	NlPrint "  Read     : $"
-	move.w d7,d0
-	JsrA6 printWord
-	PrintLn ""
-	eor.w d7,d6					; d6 = bad bits
-	Print "  Bad bits : $"
-	move.w d6,d0
-	JsrA6 printWord
-	Print " ="
-	moveq #0,d4
-.ebL:
-	btst d4,d6
-	beq .ebN
-	Print " D"
-	moveq #0,d0
-	move.w d4,d0
-	JsrA6 printDec				; keeps d4, d6
-.ebN:
-	addq.w #1,d4
-	cmp.w #16,d4
-	bne .ebL
-	PrintLn ""
+	JsrA6 printMismatch			; d6 = bad bits; keeps d5
 	bra .chips
 
 .errAddr:						; d3 = bad lines, d6 = bad bits seen
 	PrintLn "=> Test failure"
 	ZoneName
 	Print "address line(s):"
-	movea.w d3,a4
-	moveq #0,d4
-.eaL:
-	move.l a4,d0
-	btst d4,d0
-	beq .eaN
-	Print " A"
-	moveq #0,d0
-	move.w d4,d0
-	JsrA6 printDec				; keeps d4, a4, d6
-.eaN:
-	addq.w #1,d4
-	cmp.w #16,d4
-	bne .eaL
+	moveq #0,d1
+	move.w d3,d1
+	moveq #'A',d3
+	JsrA6 printBitList			; keeps d5, d6
 	NlPrintLn "  Both chips: the bad bits below show which chip(s) see it."
 
 .chips:							; d6 = bad bits, d5.w = zone

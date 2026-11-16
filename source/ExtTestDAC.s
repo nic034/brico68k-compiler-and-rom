@@ -45,16 +45,20 @@ EXT_TEST_DAC:
 	PrintLn "Unknown P1: showing the bars (P1=0)."
 
 .bars:
-	PrintLn "RGB DAC test pattern, top to bottom:"
-	PrintLn "  R4 R3 R2 R1 R0 | G4 G3 G2 G1 G0 | B4 B3 B2 B1 B0 | white"
+	PrintText
+	dc.b "RGB DAC test pattern, top to bottom:",10
+	dc.b "  R4 R3 R2 R1 R0 | G4 G3 G2 G1 G0 | B4 B3 B2 B1 B0 | white",10,0
+	even
 	tst.w d6
 	beq .legend
 	PrintLn "  with the DARK bit set (each band slightly darker than P1=0)"
 .legend:
-	PrintLn "A black band = that bit never reaches the screen (DAC resistor,"
-	PrintLn "palette RAM data line, buffer/latch, trace). Relative level per"
-	PrintLn "bit, MAME model (220/470/1k/2k2/3k9 ohm): 100/47/22/10/6 %."
-	PrintLn "Shown until the next command."
+	PrintText
+	dc.b "A black band = that bit never reaches the screen (DAC resistor,",10
+	dc.b "palette RAM data line, buffer/latch, trace). Relative level per",10
+	dc.b "bit, MAME model (220/470/1k/2k2/3k9 ohm): 100/47/22/10/6 %.",10
+	dc.b "Shown until the next command.",10,0
+	even
 	WriteEOT
 
 	move.w d6,d7				; d7 = dark bit (P1 no longer needed)

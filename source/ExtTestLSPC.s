@@ -55,12 +55,13 @@ EXT_TEST_LSPC:
     Print "> REG_VRAMADD   "
     move.w #$7F00, REG_VRAMADD
     move.w #1, REG_VRAMMOD
-    Nop4
+    Delay d0,16				; Nop4 (d0 free here)
     move.w #$A5A5, REG_VRAMRW
-    Nop8
+    Delay d0,16				; Nop8: 32 cycles in 4 bytes (d0 free here)
+    Delay d0,16
     move.w #$7F00, REG_VRAMADD
     move.w #0, REG_VRAMMOD
-    Nop4
+    Delay d0,16				; Nop4 (d0 free here)
     move.w REG_VRAMRW, d1
     cmp.w #$A5A5, d1
     bne .failVRAMADD
@@ -84,19 +85,20 @@ EXT_TEST_LSPC:
     Print "> VRAM auto-inc "
     move.w #$7F00, REG_VRAMADD
     move.w #4, REG_VRAMMOD
-    Nop4
+    Delay d0,16				; Nop4 (d0 free here)
     move.w #$1234, REG_VRAMRW   ; -> VRAM[$7F00], addr -> $7F04
-    Nop4
+    Delay d0,16				; Nop4 (d0 free here)
     move.w #$5678, REG_VRAMRW   ; -> VRAM[$7F04], addr -> $7F08
-    Nop8
+    Delay d0,16				; Nop8: 32 cycles in 4 bytes (d0 free here)
+    Delay d0,16
     move.w #0, REG_VRAMMOD
     move.w #$7F00, REG_VRAMADD
-    Nop4
+    Delay d0,16				; Nop4 (d0 free here)
     move.w REG_VRAMRW, d1
     cmp.w #$1234, d1
     bne .failAutoInc
     move.w #$7F04, REG_VRAMADD
-    Nop4
+    Delay d0,16				; Nop4 (d0 free here)
     move.w REG_VRAMRW, d1
     cmp.w #$5678, d1
     bne .failAutoInc

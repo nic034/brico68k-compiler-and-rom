@@ -36,7 +36,7 @@ Work RAM (WRAM) test
 > March C- ($5555/$AAAA) Test Success
 => Test Success
 
-[eot, 422 ms emulated]
+[eot, 380 ms emulated]
 > TestBRAM
 Backup RAM (BRAM) test - DESTRUCTIVE: erases the MVS backup RAM (settings, scores)
   N/A: AES detected (STATUS_B bit7=0): no backup RAM, saves go to the memory card
@@ -56,7 +56,7 @@ Palette RAM (PRAM) test - both banks
 > Bank 0 / bank 1 independence Test Success
 => Test Success
 
-[eot, 163 ms emulated]
+[eot, 152 ms emulated]
 > TestVRAM
 VRAM test: slow $0000-$7FFF, fast $8000-$85FF + $8700-$87FF
 > Slow VRAM: data bus walking 1/0 OK
@@ -69,7 +69,7 @@ VRAM test: slow $0000-$7FFF, fast $8000-$85FF + $8700-$87FF
 Not testable: $8600-$86FF (sprite lists written by the LSPC2 during display).
 => Test success
 
-[eot, 1773 ms emulated]
+[eot, 1468 ms emulated]
 > TestLSPC
 LSPC2-A2 register test
 > REG_VRAMMOD   OK
@@ -87,7 +87,7 @@ Video timing test (LSPC line counter, $3C0006)
 > Auto-animation counter: 8/8 frame steps OK
 => Test success
 
-[eot, 365 ms emulated]
+[eot, 720 ms emulated]
 > TestZ80
 Z80 handshake test (ACTIVE: stops any sound)
 Needs a standard SM1/M1 sound driver.
@@ -194,12 +194,12 @@ Watchdog test ARMED: the 68000 stops kicking the watchdog now.
 Expect a reset in ~0.13 s. Wait 2 s, then run TestWatchdog
 again to read the result (commands sent meanwhile are lost).
 
-[eot, 2 ms emulated]
+[eot, 1 ms emulated]
 ; first pass starves the watchdog: wait for the reset, then read the result
 > Delay 2000
 > TestWatchdog
 Watchdog test result:
-> The watchdog reset the 68000 after ~133 ms (44552 loops of 3 us)
+> The watchdog reset the 68000 after ~133 ms (44578 loops of 3 us)
   MAME MVS: 135 ms. Real boards: about 0.13 s.
 => Test success (run again to re-arm)
 

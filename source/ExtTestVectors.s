@@ -28,10 +28,7 @@ VEC_LONGS equ 32
 
 	macro PrintLongA				; \1 = address register: 8 hex digits
 		move.l \1,d0
-		swap d0
-		JsrA6 printWord
-		move.l \1,d0
-		JsrA6 printWord
+		JsrA6 printLong
 	endm
 
 EXT_TEST_VECTORS:
@@ -73,8 +70,10 @@ EXT_TEST_VECTORS:
 	cmp.w #VEC_LONGS,d6
 	bne .cartPart
 	bset #1,d7
-	PrintLn "FAIL: still the 32 system ROM vectors"
-	PrintLn "  = no switch to the cartridge (latch Q1, decoding): games hang"
+	PrintText
+	dc.b "FAIL: still the 32 system ROM vectors",10
+	dc.b "  = no switch to the cartridge (latch Q1, decoding): games hang",10,0
+	even
 	bra .back
 .cartPart:							; some vectors equal: possible, not a fault
 	PrintLn "OK"

@@ -58,8 +58,10 @@ EXT_TEST_CHIP:
 	move.w #$C4EC,(CHK_PROG_MAGIC).l
 	Progress 5
 
-	PrintLn "Chip check: quick state of the board (details: the long tests)"
-	PrintLn "Part             Result  Detail"
+	PrintText
+	dc.b "Chip check: quick state of the board (details: the long tests)",10
+	dc.b "Part             Result  Detail",10,0
+	even
 
 	; --- Work RAM ---------------------------------------------------------
 	WatchDog
@@ -183,13 +185,13 @@ EXT_TEST_CHIP:
 	or.w #$8000,d0
 	move.w d0,(REG_VRAMADD).l
 	move.w #0,(REG_VRAMRW).l
-	Nop4
+	Delay d0,16
 	addq.w #1,d4
 	cmp.w #11,d4
 	bne .vclr
 	move.w #$8000,(REG_VRAMADD).l
 	move.w #0,(REG_VRAMRW).l
-	Nop4
+	Delay d0,16
 	Progress 45
 
 	; --- LSPC2 registers: VRAMMOD read-back -------------------------------------
@@ -291,22 +293,9 @@ EXT_TEST_CHIP:
 .portsBad:
 	bset #F_PORTS,d7
 	Print "FAIL    floating (open bus):"
-	btst #3,d3
-	beq .p1
-	Print " P1"
-.p1:
-	btst #2,d3
-	beq .p2
-	Print " P2"
-.p2:
-	btst #1,d3
-	beq .p3
-	Print " STATUS_B"
-.p3:
-	btst #0,d3
-	beq .p4
-	Print " SOUND/STATUS_A"
-.p4:
+	move.w d3,d1
+	lea .portNames(pc),a1
+	JsrA6 printFlagNames
 	PrintLn " (NEO-C1 input buffers). Next: TestInp"
 .portsDone:
 	Progress 65
@@ -314,8 +303,10 @@ EXT_TEST_CHIP:
 	; --- interrupts (need WRAM for the stack) ---------------------------------
 	btst #F_WRAM,d7
 	beq .irqGo
-	PrintLn "VBLANK IRQ       SKIP    needs Work RAM (stack)"
-	PrintLn "Timer IRQ        SKIP    needs Work RAM (stack)"
+	PrintText
+	dc.b "VBLANK IRQ       SKIP    needs Work RAM (stack)",10
+	dc.b "Timer IRQ        SKIP    needs Work RAM (stack)",10,0
+	even
 	moveq #0,d4					; no timer measure
 	bra .irqDone
 .irqGo:
@@ -381,51 +372,8 @@ EXT_TEST_CHIP:
 
 	; --- Z80: standard sound driver handshake (as TestZ80, shorter) ----------
 	WatchDog
-	move.b #$03,(REG_SOUND).l
-	move.w #59999,d4			; ~130 ms
-.zr:
-	WatchDog
-	dbra d4,.zr
-	moveq #0,d3
-	move.b (REG_SOUND).l,d3		; reply after the reset
-	moveq #0,d1					; 0 while the latch holds a stale $01
-	cmpi.b #$01,d3
-	beq .zSend
-	moveq #1,d1
-.zSend:
-	moveq #0,d2
-	move.b #$01,(REG_SOUND).l
-	move.w #$FFFF,d4
-.zPoll:
-	WatchDog
-	moveq #0,d0
-	move.b (REG_SOUND).l,d0
-	cmpi.b #$01,d0
-	bne .zNot
-	tst.w d1
-	beq .zNext
-	addq.w #1,d2
-	cmpi.w #16,d2
-	beq .zFresh
-	bra .zNext
-.zNot:
-	moveq #1,d1
-	moveq #0,d2
-.zNext:
-	dbra d4,.zPoll
-	moveq #0,d2					; no answer
-	bra .zClean
-.zFresh:
-	moveq #1,d2
-	cmpi.b #$03,d3				; reply follows the writes: latch echo, not the Z80
-	bne .zClean
-	moveq #2,d2
-.zClean:
-	move.b #$03,(REG_SOUND).l
-	move.w #59999,d4
-.zw:
-	WatchDog
-	dbra d4,.zw
+	JsrA6 z80Handshake			; d2 = 1 OK, 2 latch echo, 0 none (ExtTestZ80.s)
+	JsrA6 z80Quiet
 	Print "Z80              "
 	cmpi.w #1,d2
 	bne .zBad
@@ -469,8 +417,10 @@ EXT_TEST_CHIP:
 	Print "FAIL    "
 	move.l d5,d0
 	JsrA6 printDec
-	PrintLn " cycles/frame instead of 202752"
-	PrintLn "     -> LSPC2-A2 line counter (stuck bit?) or 24 MHz path. Next: TestTiming"
+	PrintText
+	dc.b " cycles/frame instead of 202752",10
+	dc.b "     -> LSPC2-A2 line counter (stuck bit?) or 24 MHz path. Next: TestTiming",10,0
+	even
 .frEnd:
 
 	; 6 MHz pixel clock: CPU cycles per timer tick (x100)
@@ -519,8 +469,10 @@ EXT_TEST_CHIP:
 .zcNo:
 	PrintLn "--      not shown (no Z80 answer)"
 .zcEnd:
-	PrintLn "  YM2610 I/F, 12 MHz > cartridge, memory card bank, joypad outputs:"
-	PrintLn "                 --      not visible from the 68000"
+	PrintText
+	dc.b "  YM2610 I/F, 12 MHz > cartridge, memory card bank, joypad outputs:",10
+	dc.b "                 --      not visible from the 68000",10,0
+	even
 
 	; --- verdict -----------------------------------------------------------------
 	clr.w (CHK_PROG_MAGIC).l
@@ -536,46 +488,23 @@ EXT_TEST_CHIP:
 	bra .notCovered
 .failure:
 	Print "=> Test failure:"
-	btst #F_WRAM,d7
-	beq .v1
-	Print " WRAM"
-.v1:
-	btst #F_PAL,d7
-	beq .v2
-	Print " palette"
-.v2:
-	btst #F_VRAML,d7
-	beq .v3
-	Print " VRAM-slow"
-.v3:
-	btst #F_VRAMU,d7
-	beq .v4
-	Print " VRAM-fast"
-.v4:
-	btst #F_LSPC,d7
-	beq .v5
-	Print " LSPC2"
-.v5:
-	btst #F_IRQ,d7
-	beq .v6
-	Print " IRQ"
-.v6:
-	btst #F_CLOCK,d7
-	beq .v7
-	Print " timing"
-.v7:
-	btst #F_PORTS,d7
-	beq .v8
-	Print " ports"
-.v8:
+	move.w d7,d1
+	lea .partNames(pc),a1
+	JsrA6 printFlagNames		; one word per F_ bit 0-7
 	PrintLn ""
 .notCovered:
 	PrintLn "Not covered: video (TestDAC), watchdog (TestWatchdog), sound (TestAudio)."
 	jmp EOT_AND_WAIT(pc)
 
 	even
-.ports:
-	dc.l REG_P1CNT_REG_DIPSW, REG_P2CNT, REG_STATUS_B, REG_SOUND
+.ports:							; read last first: bit 3 = SOUND ... bit 0 = P1
+	dc.l REG_SOUND, REG_STATUS_B, REG_P2CNT, REG_P1CNT_REG_DIPSW
+.portNames:						; bit 0 first (printFlagNames)
+	dc.b " P1",0," P2",0," STATUS_B",0," SOUND/STATUS_A",0,0
+.partNames:						; F_WRAM ... F_PORTS
+	dc.b " WRAM",0," palette",0," VRAM-slow",0," VRAM-fast",0
+	dc.b " LSPC2",0," IRQ",0," timing",0," ports",0,0
+	even
 
 ; ------------------------------------------------------------------------
 ; memprobe: a3 = base, d5 = highest address line (A1..Ad5, byte offsets 1<<k).
@@ -653,11 +582,11 @@ memprobe_JsrA6:
 	macro VWrite				; \1 = VRAM address (Dn), \2 = data
 		move.w \1,(REG_VRAMADD).l
 		move.w \2,(REG_VRAMRW).l
-		Nop4
+		Delay d0,16
 	endm
 	macro VRead					; \1 = VRAM address (Dn), result in d0
 		move.w \1,(REG_VRAMADD).l
-		Nop4						; wiki "VRAM": read valid >= 16 cycles after the address (28 here)
+		Delay d0,16						; wiki "VRAM": read valid >= 16 cycles after the address (28 here)
 		move.w (REG_VRAMRW).l,d0
 	endm
 	macro VAddr					; d0 = d1 | (1 << d4), no stack (WRAM may be bad)
@@ -726,20 +655,10 @@ vramprobe_JsrA6:
 ; Sets the flag in d7 on failure. Destroys d0-d4, a0-a5 (a5 = saved link,
 ; a4 = data bits, a3 = address lines).
 ; ------------------------------------------------------------------------
-	macro BitList				; \1 = mask register (a3/a4), \2 = prefix string
-		moveq #0,d4
-.\@loop:
-		move.l \1,d0
-		btst d4,d0
-		beq.s .\@next
-		Print \2
-		moveq #0,d0
-		move.w d4,d0
-		JsrA6 printDec			; keeps d4, a3, a4
-.\@next:
-		addq.w #1,d4
-		cmp.w #16,d4
-		bne .\@loop
+	macro BitList				; \1 = mask register (a3/a4), \2 = letter: " D3 D5..."
+		move.l \1,d1
+		moveq #\2,d3
+		JsrA6 printBitList		; keeps a3, a4, a5, d5, d7
 	endm
 memReport_JsrA6:
 	movea.l a6,a5
@@ -757,7 +676,7 @@ memReport_JsrA6:
 	tst.w d0
 	beq .lines
 	Print " data"
-	BitList a4," D"
+	BitList a4,'D'
 .lines:
 	move.l a3,d0
 	bclr #13,d0					; Z = bit 13 was 0
@@ -771,7 +690,7 @@ memReport_JsrA6:
 	tst.w d0
 	beq.s .bank
 	Print " address"
-	BitList a3," A"
+	BitList a3,'A'
 .bank:
 	btst #31,d5
 	beq.s .hint

@@ -66,12 +66,14 @@ EXT_TEST_STATUSA:
 	bne .isMVS
 
 	; --- AES: per MAME's "AUDIO" port, none of these are coin/RTC bits ---
-	PrintLn "  Hardware detected : AES (STATUS_B bit7=0)"
-	PrintLn "  Bits 0-2: N/A on AES (no coin slots - home console, not arcade)"
-	PrintLn "  Bits 3-4: hw-detect bits, exact meaning undocumented even in"
-	PrintLn "            MAME ('what is this?' - UniBIOS uses them for"
-	PrintLn "            AES/MVS sensing). Raw value above, no verdict guessed."
-	PrintLn "  Bits 5-7: N/A on AES (no uPD4990A RTC chip on this board)"
+	PrintText
+	dc.b "  Hardware detected : AES (STATUS_B bit7=0)",10
+	dc.b "  Bits 0-2: N/A on AES (no coin slots - home console, not arcade)",10
+	dc.b "  Bits 3-4: hw-detect bits, exact meaning undocumented even in",10
+	dc.b "            MAME ('what is this?' - UniBIOS uses them for",10
+	dc.b "            AES/MVS sensing). Raw value above, no verdict guessed.",10
+	dc.b "  Bits 5-7: N/A on AES (no uPD4990A RTC chip on this board)",10,0
+	even
 	bra .endOfTest
 
 .isMVS:

@@ -322,55 +322,69 @@ RAM_SUITE:
 
 ; -----------------------------------------------------------------------------
 ; March elements on [a5,a4), word accesses in strict march order. Return
-; through a2. d1 = value read, d2 = value written. Uses a1.
+; through a2. d1 = value read, d2 = value written. Uses a0 (watchdog), a1.
+; 8 words per loop and short branches to a local exit: 27 cycles per word
+; of a read/write element instead of 32 (region sizes are multiples of 32
+; bytes). M0 writes longs: the order inside an up(w) element is free.
 ; -----------------------------------------------------------------------------
 MARCH_W:
+	lea (REG_WATCHDOG).l,a0
 	movea.l a5,a1
+	move.w d2,d1
+	swap d1
+	move.w d2,d1				; d1 = background in both words
 .loop:
-	WatchDog
+	move.b d0,(a0)
 	rept 8
-	move.w d2,(a1)+
+	move.l d1,(a1)+
 	endr
 	cmpa.l a4,a1
 	bne.s .loop
 	jmp (a2)
 
 MARCH_UP:
+	lea (REG_WATCHDOG).l,a0
 	movea.l a5,a1
 .loop:
-	WatchDog
+	move.b d0,(a0)
 	rept 8
 	cmp.w (a1),d1
-	bne MARCH_MISMATCH
+	bne.s .bad
 	move.w d2,(a1)+
 	endr
 	cmpa.l a4,a1
-	bne .loop
+	bne.s .loop
 	jmp (a2)
+.bad:
+	bra.s MARCH_MISMATCH
 
 MARCH_DN:
+	lea (REG_WATCHDOG).l,a0
 	movea.l a4,a1
 .loop:
-	WatchDog
+	move.b d0,(a0)
 	rept 8
 	cmp.w -(a1),d1
-	bne MARCH_MISMATCH
+	bne.s .bad
 	move.w d2,(a1)
 	endr
 	cmpa.l a5,a1
-	bne .loop
+	bne.s .loop
 	jmp (a2)
+.bad:
+	bra.s MARCH_MISMATCH
 
 MARCH_R:
+	lea (REG_WATCHDOG).l,a0
 	movea.l a5,a1
 .loop:
-	WatchDog
+	move.b d0,(a0)
 	rept 8
 	cmp.w (a1)+,d1
-	bne MARCH_MISMATCH_POST
+	bne.s MARCH_MISMATCH_POST
 	endr
 	cmpa.l a4,a1
-	bne .loop
+	bne.s .loop
 	jmp (a2)
 
 MARCH_MISMATCH_POST:
@@ -468,38 +482,8 @@ RAM_ERROR:
 	PrintLn ""
 .stEnd:
 	swap d7
-	Print "  Address  : $"
-	move.l a4,d0
-	swap d0
-	JsrA6 printWord
-	move.l a4,d0
-	JsrA6 printWord
-	NlPrint "  Expected : $"
-	move.w d5,d0
-	JsrA6 printWord
-	NlPrint "  Read     : $"
-	move.w d6,d0
-	JsrA6 printWord
-	NlPrint "  Bad bits : $"
-	move.w d5,d1
-	eor.l d6,d1					; d1.w = bad bits (eor.l: see SIMULATOR NOTE)
-	move.w d1,d0
-	JsrA6 printWord
-	move.w d1,d6				; d6.w = bad bits (read value already printed)
-	Print " ="
-	moveq #0,d4
-.bits:
-	btst d4,d6
-	beq .bitNext
-	Print " D"
-	moveq #0,d0
-	move.w d4,d0
-	JsrA6 printDec				; keeps d4, d6
-.bitNext:
-	addq.w #1,d4
-	cmp.w #16,d4
-	bne .bits
-	PrintLn ""
+	movea.w d5,a5				; expected (a5 = region start: no longer needed)
+	JsrA6 printMismatchL		; d6.w = bad bits; keeps d7, a4
 	cmp.w #$FFFF,d6				; walking test, every bit wrong: what was written
 	bne.s .notA1				; at +2 answered
 	move.l d7,d0
@@ -565,22 +549,13 @@ RAM_FAILED:
 ; ADDR_ERROR: d2 = bad address lines (bit k = Ak), d6 = bad bits seen.
 ; -----------------------------------------------------------------------------
 ADDR_ERROR:
-	PrintLn "Failure"
-	Print "  Address line(s):"
-	movea.l d2,a4
-	moveq #0,d4
-.l:
-	move.l a4,d0
-	btst d4,d0
-	beq .n
-	Print " A"
-	moveq #0,d0
-	move.w d4,d0
-	JsrA6 printDec				; keeps d4, d6, a4
-.n:
-	addq.w #1,d4
-	cmp.w #20,d4
-	bne .l
+	PrintText
+	dc.b "Failure",10
+	dc.b "  Address line(s):",0
+	even
+	move.l d2,d1
+	moveq #'A',d3
+	JsrA6 printBitList			; keeps d6, d7
 	PrintLn ""
 	cmp.b #3,d7
 	bne.s .anotCart

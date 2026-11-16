@@ -45,9 +45,11 @@ EXT_TEST_WATCHDOG:
 	bne .wramBad
 	cmp.l #MAGIC_ARMED_LO,4(a3)
 	bne .wramBad
-	PrintLn "Watchdog test ARMED: the 68000 stops kicking the watchdog now."
-	PrintLn "Expect a reset in ~0.13 s. Wait 2 s, then run TestWatchdog"
-	PrintLn "again to read the result (commands sent meanwhile are lost)."
+	PrintText
+	dc.b "Watchdog test ARMED: the 68000 stops kicking the watchdog now.",10
+	dc.b "Expect a reset in ~0.13 s. Wait 2 s, then run TestWatchdog",10
+	dc.b "again to read the result (commands sent meanwhile are lost).",10,0
+	even
 	WriteEOT
 	lea (WDOG_COUNT).l,a1
 	moveq #0,d7
@@ -67,8 +69,10 @@ EXT_TEST_WATCHDOG:
 .wasReset:
 	clr.l (a3)
 	clr.l 4(a3)
-	PrintLn "Watchdog test result:"
-	Print "> The watchdog reset the 68000 after ~"
+	PrintText
+	dc.b "Watchdog test result:",10
+	dc.b "> The watchdog reset the 68000 after ~",0
+	even
 	move.l (WDOG_COUNT).l,d0
 	move.l d0,d7
 	move.l d0,d1					; loops x 36 cycles / 12 MHz = loops x 3 us
@@ -80,18 +84,22 @@ EXT_TEST_WATCHDOG:
 	Print " ms ("
 	move.l d7,d0
 	JsrA6 printDec
-	PrintLn " loops of 3 us)"
-	PrintLn "  MAME MVS: 135 ms. Real boards: about 0.13 s."
-	PrintLn "=> Test success (run again to re-arm)"
+	PrintText
+	dc.b " loops of 3 us)",10
+	dc.b "  MAME MVS: 135 ms. Real boards: about 0.13 s.",10
+	dc.b "=> Test success (run again to re-arm)",10,0
+	even
 	bra .end
 
 .noReset:
 	clr.l (a3)
 	clr.l 4(a3)
-	PrintLn "Watchdog test result:"
-	PrintLn "=> FAIL: no reset within 1.5 s while the watchdog was starved."
-	PrintLn "  Expected in MAME on AES (watchdog not emulated there). On a"
-	PrintLn "  real board: watchdog circuit, its clock, or the /RESET path."
+	PrintText
+	dc.b "Watchdog test result:",10
+	dc.b "=> FAIL: no reset within 1.5 s while the watchdog was starved.",10
+	dc.b "  Expected in MAME on AES (watchdog not emulated there). On a",10
+	dc.b "  real board: watchdog circuit, its clock, or the /RESET path.",10,0
+	even
 	bra .end
 
 .wramBad:

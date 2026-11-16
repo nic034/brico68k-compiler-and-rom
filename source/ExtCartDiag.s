@@ -90,8 +90,10 @@ OE_HOLD245:
 ; ------------------------------------------------------------------------
 EXT_CART_DIAG:
 CART_BOARD:
-	PrintLn "p-bus test (diag cart): SRAM $200000, ERASED"
-	PrintLn "https://github.com/jwestfall69/neogeo-diag-aes-prog"
+	PrintText
+	dc.b "p-bus test (diag cart): SRAM $200000, ERASED",10
+	dc.b "https://github.com/jwestfall69/neogeo-diag-aes-prog",10,0
+	even
 
 	; --- output enable, as the diag BIOS does first (docs/tests/68k/p_rom_output.md):
 	; pass 0: the byte read must not be the prefetched opcode (OE_DEAD);
@@ -135,8 +137,10 @@ CART_BOARD:
 	bne .oePass
 	bra .ramTests
 .oeDead:
-	PrintLn "Failure"
-	Print "  P"
+	PrintText
+	dc.b "Failure",10
+	dc.b "  P",0
+	even
 	moveq #1,d0
 	btst #1,d5
 	beq.s .p1w
@@ -150,8 +154,10 @@ CART_BOARD:
 .hi:
 	Print " D8-D15"
 .sig:
-	PrintLn ": output dead (/ROMOE or /PORTOE)"
-	PrintLn "=> Test failure: P bus output enable"
+	PrintText
+	dc.b ": output dead (/ROMOE or /PORTOE)",10
+	dc.b "=> Test failure: P bus output enable",10,0
+	even
 	jmp CART_END
 
 .ramTests:
@@ -200,8 +206,10 @@ CART_BOARD:
 	move.w d4,d0
 	or.w d5,d0
 	bne.s .p1Bad
-	PrintLn "Success"
-	PrintLn "=> Test success: P bus D0-D15, A1-A19, strobes, /PORTOE, /ROMOE"
+	PrintText
+	dc.b "Success",10
+	dc.b "=> Test success: P bus D0-D15, A1-A19, strobes, /PORTOE, /ROMOE",10,0
+	even
 	jmp CART_END
 .p1Bad:
 	PrintLn "Failure"
@@ -230,7 +238,9 @@ CART_BOARD:
 	addq.w #1,d7
 	cmp.w #16,d7
 	bne .line
-	PrintLn "  P2 fine: /ROMOEU (D8-D15), /ROMOEL (D0-D7): slot or board U2"
-	PrintLn "=> Test failure: P1 window (/ROMOE)"
+	PrintText
+	dc.b "  P2 fine: /ROMOEU (D8-D15), /ROMOEL (D0-D7): slot or board U2",10
+	dc.b "=> Test failure: P1 window (/ROMOE)",10,0
+	even
 CART_END:
 	jmp EOT_AND_WAIT(pc)

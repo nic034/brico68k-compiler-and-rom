@@ -45,9 +45,11 @@ EXT_TEST_AUDIO:
 	bsr.w SM1_CommandDelay
 	move.b #$07,(REG_SOUND).l
 	bsr.w SM1_ShortWait
-	PrintLn "Z80 init sequence sent ($01, $03, $07)"
-	PrintLn "Now playing: left, right, center beeps (~1 s each)."
-	PrintLn "Listen to the audio output. A new command stops the beeps."
+	PrintText
+	dc.b "Z80 init sequence sent ($01, $03, $07)",10
+	dc.b "Now playing: left, right, center beeps (~1 s each).",10
+	dc.b "Listen to the audio output. A new command stops the beeps.",10,0
+	even
 
 	; Single EOT: the host prints the report now, the beeps follow.
 	WriteEOT

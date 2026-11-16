@@ -173,35 +173,15 @@ EXT_TEST_TIMING:
 	; START set speed $40: the LSPC frame countdown already loaded may run
 	; up to 64 more frames before the first step (MAME: timer reloads the
 	; countdown only when it reaches 0). Wait for one step, then check 8.
-	macro WaitMidFrame			; out: d1 = raw $3C0006 read at line $180
-	or.l #$FFFF0000,d3			; d3 high word = time-out (~0.3 s per wait)
-.\@in:							; (mid-frame: the counter steps at line $F8,
-	WatchDog					;  MAME VSSTART timer - reading there races)
-	sub.l #$10000,d3
-	bcs .animTimeout
-	move.w (REG_LSPCMODE).l,d0
-	and.w d3,d0
-	cmp.w #ANIM_LINE,d0
-	beq .\@in
-.\@until:
-	WatchDog
-	sub.l #$10000,d3
-	bcs .animTimeout
-	move.w (REG_LSPCMODE).l,d0
-	move.w d0,d1
-	and.w d3,d0
-	cmp.w #ANIM_LINE,d0
-	bne .\@until
-	endm
 
 	move.w #$0000,(REG_LSPCMODE).l	; speed 0, auto-animation enabled
 	suba.l a2,a2				; a2 = good steps (out of 8)
-	WaitMidFrame
+	JsrA6 .waitMidFrame
 	move.w d1,d4
 	and.w #7,d4					; d4 = value before the first step
 	moveq #80-1,d2
 .animSync:
-	WaitMidFrame
+	JsrA6 .waitMidFrame
 	and.w #7,d1
 	cmp.w d4,d1
 	bne .animSynced
@@ -211,7 +191,7 @@ EXT_TEST_TIMING:
 	move.w d1,d4				; d4 = previous value
 	moveq #8-1,d2				; 8 more frames -> 8 steps
 .animFrame:
-	WaitMidFrame
+	JsrA6 .waitMidFrame
 	and.w #7,d1
 	addq.w #1,d4
 	and.w #7,d4
@@ -224,6 +204,31 @@ EXT_TEST_TIMING:
 .animTimeout:
 .animDone:
 	bra .measuresDone
+
+	; WaitMidFrame, called with JsrA6 (no prints in this part: a6 is free).
+	; out: d1 = raw $3C0006 read at line $180; a time-out jumps to .animTimeout.
+	; d3 high word = time-out (~0.3 s per wait). (mid-frame: the counter steps
+	; at line $F8, MAME VSSTART timer - reading there races)
+.waitMidFrame_JsrA6:
+	or.l #$FFFF0000,d3
+.wmIn:
+	WatchDog
+	sub.l #$10000,d3
+	bcs .animTimeout
+	move.w (REG_LSPCMODE).l,d0
+	and.w d3,d0
+	cmp.w #ANIM_LINE,d0
+	beq .wmIn
+.wmUntil:
+	WatchDog
+	sub.l #$10000,d3
+	bcs .animTimeout
+	move.w (REG_LSPCMODE).l,d0
+	move.w d0,d1
+	and.w d3,d0
+	cmp.w #ANIM_LINE,d0
+	bne .wmUntil
+	RtsA6
 .skipMeasures:
 	suba.l a5,a5				; no cycle count
 	suba.l a2,a2				; no auto-animation result
@@ -297,8 +302,10 @@ EXT_TEST_TIMING:
 	move.l d0,d1
 	movea.l d0,a5				; a5 = cycles per frame
 	JsrA6 printDec
-	PrintLn " (expected 202752 = 384 x 264 x 2)"
-	Print "> Auto-animation counter: "
+	PrintText
+	dc.b " (expected 202752 = 384 x 264 x 2)",10
+	dc.b "> Auto-animation counter: ",0
+	even
 	move.l d7,d0
 	swap d0
 	and.l #$FFFF,d0
@@ -329,8 +336,10 @@ EXT_TEST_TIMING:
 	PrintLn "=> Test success"
 	bra .end
 .check:
-	PrintLn "=> CHECK: frame length off by more than 0.5% (clock divider? or"
-	PrintLn "   bus wait states on this board: compare with a known good one)"
+	PrintText
+	dc.b "=> CHECK: frame length off by more than 0.5% (clock divider? or",10
+	dc.b "   bus wait states on this board: compare with a known good one)",10,0
+	even
 	bra .end
 .fail:
 	PrintLn "=> Test FAIL"

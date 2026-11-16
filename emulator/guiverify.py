@@ -423,10 +423,12 @@ t_end = time.time() + 300
 while time.time() < t_end and b["b_rules"].cget("text") != "Check rules":
     pump(0.5)
 check("Check rules finished", b["b_rules"].cget("text") == "Check rules")
-check("Check rules: TestVRAM CHECK (1.77 s of the 3 s)", badge("TestVRAM") == "CHECK", str(badge("TestVRAM")))
+# Since 1.35-nic034-12 no extension of the ROM has a rule finding (TestVRAM went from 1.77 s to
+# 1.47 s): the findings themselves are checked by emulator/test/test_ext_check.py.
+check("Check rules: TestVRAM PASS (1.47 s of the 3 s)", badge("TestVRAM") == "PASS", str(badge("TestVRAM")))
 check("Check rules: TestWRAM PASS", badge("TestWRAM") == "PASS", str(badge("TestWRAM")))
 tree.selection_set("TestVRAM"); pump(0.2)
-check("Check rules: report lists the rule finding", "Brico16Bits rule check" in report() and "close to the 3 s" in report())
+check("Check rules: report has the rule check", "Brico16Bits rule check" in report())
 tree.selection_set("TestWRAM"); pump(0.2)
 check("Check rules: clean test says so", "rule check: nothing found" in report())
 

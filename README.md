@@ -205,8 +205,8 @@ Keys: Enter sends, Up/Down browses the history, F5 resets, F8 pauses, Ctrl+L cle
 ### Writing and testing a new extension
 
 **Space first.** The ROM uses the NeoDiag layout (header flag `$0004`): code must end before
-`$7FFA` (32 KiB, copied 4 times). With the 25 extensions of 1.35-nic034-11, **4860 bytes are
-free** (CartTest, Version and TestBus removed). Brico68k Compiler prints the free space after
+`$7FFA` (32 KiB, copied 4 times). With the 25 extensions of 1.35-nic034-12, **6250 bytes are
+free** (CartTest, Version and TestBus removed, code shrunk in -12). Brico68k Compiler prints the free space after
 each build.
 
 Nothing to add to the emulator: it reads the extension table of the ROM. A new extension:
@@ -236,8 +236,8 @@ The rule check (`emu_host.check_command`, Python core) watches the bus while the
 | FAIL loop-mode repeat missed | the same command sent 20 us after the EOT (`*MyTest`) must run |
 
 `emulator/test/test_ext_check.py` builds the ROM with `test/ExtCheckBad.s` (one broken rule per
-P1) and shows that each finding fires, and that the real ROM gives only the two known ones:
-TestVRAM takes 1.77 s. Limits:
+P1) and shows that each finding fires, and that the real ROM gives none (the last one, TestVRAM
+at 1.77 s, is gone since 1.35-nic034-12: 1.47 s). Limits:
 the rules are the Brico16Bits code as modelled here, and the 20 us loop-mode delay is an
 assumption, not measured on a BricoNeo; only a real console confirms a finding.
 
@@ -359,7 +359,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 
 Bold entries are new in this repository.
 
-The code ends 4860 bytes under `$7FFA` (fork 1.35-nic034-11). The 32 KB limit is the NeoDiag
+The code ends 6250 bytes under `$7FFA` (fork 1.35-nic034-12). The 32 KB limit is the NeoDiag
 layout (header flag `$0004`), not the BricoNeo.
 
 Removed in 1.35-nic034-11: **TestBus** (BIOS socket path, A15/A16 by the NeoDiag copies, CRC32)
@@ -446,12 +446,14 @@ words, the bad bits by name (`D3 D12`) and **which chip**: upper, lower or both.
 | Bank 0 / bank 1 independence | Palette bank select (system latch, palette RAM A12) | palette |
 
 The former fixed patterns ($0000/$FFFF/$AAAA/$5555) and the increment test are covered by the
-March C- and the named address lines. Durations (3 s host limit): TestWRAM 0.42 s, TestPRAM
-0.16 s, TestVRAM 1.8 s.
+March C- and the named address lines. Durations (3 s host limit): TestWRAM 0.38 s, TestPRAM
+0.15 s, TestVRAM 1.47 s (1.35-nic034-12; were 0.42 / 0.16 / 1.77 s).
 
-TestVRAM follows the wiki's VRAM rules with at least 8 cycles of margin: a read 28 CPU cycles
-after the address write (16 required), a new address 28 cycles after a data write (16), the
-next data write 28 cycles after the previous one (12). The address is set before every read
+TestVRAM follows the wiki's VRAM rules with at least 8 cycles of margin: a read 24 CPU cycles
+or more after the address write (16 required), a new address 24 cycles after a data write (16),
+the next data write 20 cycles after the previous one (12). These are worst cases, counting only
+the instructions in between (since 1.35-nic034-12; the March loops use address registers, and
+`lsl.l` on a free register as a 2-byte wait, instead of absolute addresses and nops). The address is set before every read
 (the wiki does not describe a read buffer, so none is relied on). It covers $0000-$7FFF,
 $8000-$85FF and $8700-$87FF; $8600-$86FF holds the sprite lists the LSPC2 rewrites during the
 display and cannot be tested from the 68000. Each zone is cleared to 0 afterwards.
@@ -542,7 +544,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `84f7840` (2026-11-09; since `5859d6b` only the byte-swap detection changed, it now also accepts reset vectors above the first 64 KB: no effect here, ours is `$00C0xxxx`). Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd), plus `5643191` / `1b72deb` (2026-11-08: PlayEyeSnd renamed TestFM, new TestSsg). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-11** (not in the image); the header announces **1.35**, the upstream base; 25 extensions, flags `$0007`, SHA-256 `cbcfdd2422d8e303c5a59752b1cb1d295600bb65c8e505c569e5f05b68060fcb` |
+| This ROM | fork version **1.35-nic034-12** (not in the image); the header announces **1.35**, the upstream base; 25 extensions, flags `$0007`, SHA-256 `c70bdf08f01f2bda43a370f9ae73735d08fd906c1136c112c5126526ac732071` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
