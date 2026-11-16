@@ -433,7 +433,11 @@ def test_cart_prom():
     ("NEO-GEO", NGH $0999, P ROM size $300000, security code pointer $182 -> $186)."""
     import random
     rnd = random.Random(0xB1C068)
-    p = bytearray(rnd.getrandbits(8) for _ in range(3 * 0x100000))
+    n = 3 * 0x100000
+    # = bytearray(rnd.getrandbits(8) for _ in range(n)), in 0.1 s instead of 1.5 s: each
+    # getrandbits(8) is the top byte of one 32-bit Mersenne Twister output, and getrandbits(32 * n)
+    # packs n outputs, first one lowest (little-endian), so every 4th byte from byte 3.
+    p = bytearray(rnd.getrandbits(32 * n).to_bytes(4 * n, "little")[3::4])
     # vectors like a game's (wiki "68k vector table"): SP $10F300, reset $C00402, the exceptions to
     # the system ROM entry points, VBLANK and timer to the cartridge. With the vector table switch
     # held on the cartridge the console then starts as with a real game (reset = system ROM $402).
@@ -501,7 +505,7 @@ def make_cart(kind):
     if kind == "diag":
         import random
         rnd = random.Random(0x5EA)       # SRAM power-on content: anything
-        return CartImage("diag", bytes(rnd.getrandbits(8) for _ in range(0x100000)),
+        return CartImage("diag", rnd.getrandbits(32 * 0x100000).to_bytes(4 * 0x100000, "little")[3::4],
                          "Diagnostic PROG board", notes=[
                              "jwestfall69 neogeo-diag-aes-prog: one 1 MiB 16-bit SRAM read in P1 and P2, "
                              "written through P2 (byte lanes by /PORTWEU, /PORTWEL)."])

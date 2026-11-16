@@ -4,6 +4,34 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-16 - Emulator 1.21, Compiler 1.5: faster, ROM unchanged (1.35-nic034-12)
+
+**Emulator 1.21** (pure Python core; the C core is unchanged)
+- **About 1.7 times faster**: 88-102 frames/s idle instead of 46-57 (Python 3.11-3.13, same
+  machine), 68-79 instead of 49-56 during TestWRAM / TestVRAM; real time is 59.2.
+  - Opcode and extension word fetches from the BIOS socket read a word table (`FW`) instead of
+    calling the bus, while nothing has to see those reads (`FAST`: host port not armed, no
+    BIOS socket fault, no rule-check hook). The table is kept equal to the BIOS (ROM load, command
+    block written / cleared by the host). Other faults keep the fast path (`--diagnose`).
+  - Watchdog kick (`move.b d0,$300001`) handled first in the byte write; VRAM read / write without
+    the fault lookups when no fault is set.
+  - Start-up: the test cartridge (3 MB) and the PROG board SRAM (1 MB) are generated in 0.1 s
+    instead of 1.5 s, same bytes (`getrandbits(32 n)` packs the same Mersenne Twister outputs).
+- Checks: lockstep Python vs C core (`test_neo_py.py`): 0 failures; full regression on the
+  Python core (`CORE=python regress_rom.py`, 421 scenarios, every fault, input sets, rule-check
+  hook off) compared with the C test core: 0 differences (5 chaotic scenarios differ, the known
+  C worker reuse issue); same outputs as 1.20 on TestWRAM / TestVRAM / TestChip. guiverify not run
+  (no Tk on the machine).
+
+**Compiler 1.5** (ROM byte-identical: SHA-256 `c70bdf08...2071`)
+- Sources assembled in parallel (one vasm per file, up to 8 at once); link order and log order
+  unchanged. Mostly felt on Windows, where each vasm start is slow.
+- The vasm / vlink self-test runs once per session for unchanged tools, not at every build.
+- Fork version check again: since 1.35-nic034-10 the version is not in the image, so the
+  Compiler now reads `FORK_VERSION` from `inc/define.inc` and checks the header announces its base
+  ("Header version 1.35 = base of the fork version 1.35-nic034-12").
+- `urllib` imported only when something is downloaded (faster start).
+
 ## 2026-11-16 - ROM 1.35-nic034-12: smaller and faster extensions, same outputs
 
 **ROM 1.35-nic034-12** (SHA-256 `c70bdf08f01f2bda43a370f9ae73735d08fd906c1136c112c5126526ac732071`, 25 extensions)

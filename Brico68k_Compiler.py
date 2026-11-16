@@ -39,12 +39,11 @@ import tarfile
 import tempfile
 import threading
 import time
-import urllib.request
 import zipfile
 from pathlib import Path
 
 APP_NAME = "Brico68k Compiler"
-APP_VERSION = "1.4"
+APP_VERSION = "1.5"
 
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_compiler"
@@ -263,12 +262,26 @@ def locate_tools():
     return (_which(VASM_NAMES) or cv), (_which(VLINK_NAMES) or cl)
 
 
+_PROBED = set()                 # (path, size, mtime) of vasm/vlink pairs that passed probe_tools
+
+
 def probe_tools(vasm, vlink, log=None):
-    """Checks that vasm and vlink really work (assemble + link 1 word)."""
+    """Checks that vasm and vlink really work (assemble + link 1 word). A pair that passed is not
+    tested again while this program runs and the two files are unchanged (1.5)."""
     if not vasm or not Path(vasm).is_file():
         return False, f"vasm not found: {vasm}"
     if not vlink or not Path(vlink).is_file():
         return False, f"vlink not found: {vlink}"
+    key = tuple((str(Path(x).resolve()), Path(x).stat().st_size, Path(x).stat().st_mtime_ns) for x in (vasm, vlink))
+    if key in _PROBED:
+        return True, "vasm and vlink work"
+    ok, msg = _probe_tools(vasm, vlink)
+    if ok:
+        _PROBED.add(key)
+    return ok, msg
+
+
+def _probe_tools(vasm, vlink):
     with tempfile.TemporaryDirectory(prefix="b68kprobe_") as t:
         t = Path(t)
         (t / "p.s").write_text("\tsection text,code\n\tdc.w $1234\n")
@@ -316,6 +329,7 @@ def _c_compiler(log):
 
 
 def _download(url, dest, log, progress):
+    import urllib.request        # only when downloading: 40 ms less at start-up
     req = urllib.request.Request(url, headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"})
     with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as f:
         total = int(r.headers.get("Content-Length") or 0)
@@ -511,19 +525,30 @@ def build_firmware(src_root, vasm, vlink, log, progress):
     sources = sorted(src_root.glob("*.s"))
     ld = src_root / f"{TARGET_NAME}.ld"
     flags = ASM_FLAGS + [f"-I{src_root / 'inc'}"]
-    objs = []
+    objs = [str(obj_dir / f"{src.stem}.o") for src in sources]
     steps = len(sources) + 1
-    for i, src in enumerate(sources):
-        progress(i * 100 // steps, f"Assembling {src.name} ({i + 1}/{len(sources)})")
-        obj = obj_dir / f"{src.stem}.o"
-        rc, out = _run([vasm, *flags, "-L", str(lst_dir / f"{src.stem}.lst"), "-o", str(obj), str(src)],
-                       cwd=str(src_root), timeout=120)
-        if rc != 0:
-            for line in out.strip().splitlines()[-30:]:
-                log(line)
-            raise BuildError(f"Assembly error in {src.name} (see the log).")
-        log(f"[asm] {src.name}")
-        objs.append(str(obj))
+
+    def assemble(src):
+        return _run([vasm, *flags, "-L", str(lst_dir / f"{src.stem}.lst"), "-o", str(obj_dir / f"{src.stem}.o"),
+                     str(src)], cwd=str(src_root), timeout=120)
+
+    # One vasm per file, several at once (1.5): each file is assembled on its own, so the
+    # objects are the same; the link keeps the sorted order and the log the source order.
+    from concurrent.futures import ThreadPoolExecutor
+    done = 0
+    with ThreadPoolExecutor(max_workers=max(1, min(8, os.cpu_count() or 1))) as pool:
+        futures = [pool.submit(assemble, src) for src in sources]
+        for src, fut in zip(sources, futures):
+            rc, out = fut.result()
+            done += 1
+            progress(done * 100 // steps, f"Assembled {src.name} ({done}/{len(sources)})")
+            if rc != 0:
+                for line in out.strip().splitlines()[-30:]:
+                    log(line)
+                for f in futures:
+                    f.cancel()
+                raise BuildError(f"Assembly error in {src.name} (see the log).")
+            log(f"[asm] {src.name}")
     progress((steps - 1) * 100 // steps, "Linking (vlink)")
     out_bin = BUILD_DIR / f"{TARGET_NAME}.bin"
     rc, out = _run([vlink, "-brawbin1", "-T", str(ld), "-o", str(out_bin), *objs], cwd=str(src_root), timeout=120)
@@ -640,6 +665,7 @@ def latest_github_release(repo, log):
     m = re.search(r"github\.com[/:]([^/]+)/([^/.]+)", repo)
     if m:
         try:
+            import urllib.request
             req = urllib.request.Request(f"https://api.github.com/repos/{m.group(1)}/{m.group(2)}/releases/latest",
                                          headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}",
                                                   "Accept": "application/vnd.github+json"})
@@ -720,15 +746,18 @@ def full_build(source_mode, source_path, auto, manual_vasm, manual_vlink, out_di
         log(f"vlink: {vlink}")
         built = build_firmware(src_root, vasm, vlink, log, progress)
         data = built.read_bytes()
+        fork = fork_version(src_root)
     checks = check_briconeo(data)
     final = make_sp1_image(data) if sp1 else data
-    fv = re.search(rb"Fork version (\d+)\.(\d+)-[A-Za-z0-9]+-(\d+)", data)
+    # The fork version (FORK_VERSION in inc/define.inc, e.g. "1.35-nic034-12") is not in the image
+    # since 1.35-nic034-10: read from the source, the header must announce its base (1.35).
+    fv = re.match(r"(\d+)\.(\d+)-[A-Za-z0-9]+-(\d+)$", fork or "")
     if fv:
-        log("Fork version: " + fv.group(0)[13:].decode("ascii", "replace"))
+        log("Fork version: " + fork)
         major, minor = struct.unpack_from(">HH", data, OFF_VERSION)
         want = (int(fv.group(1)), int(fv.group(2)))
         checks.append(((major, minor) == want, f"Header version {major}.{minor} = base of the fork version "
-                       f"({want[0]}.{want[1]})"))
+                       f"{fork}"))
     if sp1 and len(final) == SP1_SIZE and final[0x8D] & 4:
         checks.append((len(data) <= 0x7FFA, "NeoDiag layout (flag $0004): code fits below $7FFA, CRC32 + 3 mirrors"))
     out_dir = Path(out_dir)
@@ -749,6 +778,16 @@ def full_build(source_mode, source_path, auto, manual_vasm, manual_vlink, out_di
     for ok, txt in checks:
         log(("  [OK]   " if ok else "  [FAIL] ") + txt)
     return info
+
+
+def fork_version(src_root):
+    """FORK_VERSION of a nic034 fork source (macro in inc/define.inc), or None (upstream source)."""
+    try:
+        text = (Path(src_root) / "inc" / "define.inc").read_text(errors="replace")
+    except OSError:
+        return None
+    m = re.search(r'macro\s+FORK_VERSION\s*\n\s*dc\.b\s+"([^"]+)"', text, re.I)
+    return m.group(1) if m else None
 
 
 # ---------------------------------------------------------------------------

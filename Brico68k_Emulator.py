@@ -65,7 +65,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.20"
+APP_VERSION = "1.21"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -1106,7 +1106,11 @@ def _shift_reg(fam, sz, kind):
 
 
 _RUNTIME = r'''
-def _build(bus16, bus8, wbus16, wbus8, reset_cb, CYC, H_NAMES, H_INDEX):
+def _build(bus16, bus8, wbus16, wbus8, reset_cb, CYC, H_NAMES, H_INDEX, FAST, FW):
+    # FAST[0] true: a 16-bit read at $C00000-$CFFFFF (the BIOS socket, mirrored every 128 KB) is
+    # FW[a & 0x1FFFE], without calling bus16. The bus owner keeps FW equal to its BIOS words and
+    # clears FAST[0] whenever such a read must be seen (host port armed, faults, watch hook).
+    # Used for the opcode and extension word fetches only: same values, same order, no side effect.
     R = [0] * 16                 # D0-D7, A0-A7 (A7 = active stack pointer)
     SPB = [0] * 8                # Musashi REG_SP_BASE: [0] USP, [4] ISP
     SH8 = [0, 0x80, 0xC0, 0xE0, 0xF0, 0xF8, 0xFC, 0xFE] + [0xFF] * 57
@@ -1189,7 +1193,10 @@ def _build(bus16, bus8, wbus16, wbus8, reset_cb, CYC, H_NAMES, H_INDEX):
         if a & 1:
             aerr(a, 0x10, fS | 2)
         pc = (a + 2) & 0xFFFFFFFF
-        return bus16(a & 0xFFFFFF)
+        a &= 0xFFFFFF
+        if FAST[0] and 0xC00000 <= a < 0xD00000:
+            return FW[a & 0x1FFFE]
+        return bus16(a)
 
     def imm32():
         nonlocal pc
@@ -1198,6 +1205,8 @@ def _build(bus16, bus8, wbus16, wbus8, reset_cb, CYC, H_NAMES, H_INDEX):
             aerr(a, 0x10, fS | 2)
         pc = (a + 4) & 0xFFFFFFFF
         a &= 0xFFFFFF
+        if FAST[0] and 0xC00000 <= a < 0xCFFFFE:
+            return (FW[a & 0x1FFFE] << 16) | FW[(a + 2) & 0x1FFFE]
         return (bus16(a) << 16) | bus16((a + 2) & 0xFFFFFF)
 
     def ix(base):                # 68000 brief extension word
@@ -1405,7 +1414,11 @@ def _build(bus16, bus8, wbus16, wbus8, reset_cb, CYC, H_NAMES, H_INDEX):
                     if a & 1:
                         aerr(a, 0x10, fS | 2)
                     pc = (a + 2) & 0xFFFFFFFF
-                    ir = i_ = bus16(a & 0xFFFFFF)
+                    a &= 0xFFFFFF
+                    if FAST[0] and 0xC00000 <= a < 0xD00000:
+                        ir = i_ = FW[a & 0x1FFFE]
+                    else:
+                        ir = i_ = bus16(a)
                     H_[i_]()
                     rem -= C_[i_]
                     if tracing:
@@ -1504,7 +1517,10 @@ def _factory_src(name):
 class M68K:
     """The Python 68000. Methods as Musashi's m68k_* API."""
 
-    def __init__(self, bus16, bus8, wbus16, wbus8, reset_cb=lambda: None, names=None, tables=None):
+    def __init__(self, bus16, bus8, wbus16, wbus8, reset_cb=lambda: None, names=None, tables=None, fast=None):
+        """fast: (FAST, FW) from the bus owner (see _build); None = every fetch through bus16."""
+        if fast is None:
+            fast = ([0], [])
         if names is None:
             names, tables = M68K_NAMES, M68K_TABLES
         raw = _lzma.decompress(_b64.b64decode("".join(tables)))
@@ -1514,7 +1530,7 @@ class M68K:
         g = {}
         exec(compile(src, "<m68k_py>", "exec"), g)
         (self.execute, self.pulse_reset, self.set_irq, self.cycles_run, self.pc, self.get_reg, self.set_reg,
-         self.state) = g["_build"](bus16, bus8, wbus16, wbus8, reset_cb, cyc, names, list(index))
+         self.state) = g["_build"](bus16, bus8, wbus16, wbus8, reset_cb, cyc, names, list(index), fast[0], fast[1])
 
 # ===========================================================================
 # neo_py.py: Python Neo Geo AES model
@@ -1642,6 +1658,18 @@ def _make_neo():
     t_bram = bytearray(0x10000)
 
     cpu = None
+    # Opcode fetch fast path for the 68000 (m68k_py _build): FW = the BIOS as words, at their byte
+    # offset; FAST[0] = 1 while no BIOS socket read has to be seen by the model.
+    FW = [0] * 0x20000
+    FAST = [1]
+
+    def fw_sync(lo=0, hi=0x20000):
+        for o in range(lo & ~1, hi, 2):
+            FW[o] = (bios[o] << 8) | bios[o + 1]
+
+    def upd_fast():
+        # read16 reads the BIOS through socket_addr, which only region 5 (BIOS socket) faults change
+        FAST[0] = 0 if (h_armed or watch or any(f[0] == 5 for f in faults)) else 1
 
     def fault_data(region, w):
         for r, k, b, v in faults:
@@ -1755,6 +1783,8 @@ def _make_neo():
         return fault_addr(2, v & 0x7FFF, 0) & 0x7FFF
 
     def vram_read(v):
+        if not faults:                           # = the line below with no fault
+            return vram[(0x8000 | (v & 0x7FF)) if v & 0x8000 else (v & 0x7FFF)] & 0xFFFF
         return fault_data(3 if v & 0x8000 else 2, vram[vram_phys(v)]) & 0xFFFF
 
     def vpos_now():
@@ -1964,7 +1994,8 @@ def _make_neo():
         vram_read_buffer = vram_read(vram_offset)
 
     def vram_write(d):
-        vram[vram_phys(vram_offset)] = d & 0xFFFF
+        v = vram_offset
+        vram[((0x8000 | (v & 0x7FF)) if v & 0x8000 else (v & 0x7FFF)) if not faults else vram_phys(v)] = d & 0xFFFF
         vram_set_offset((vram_offset & 0x8000) | ((vram_offset + vram_modulo) & 0x7FFF))
 
     def host_port_read(o):
@@ -1977,6 +2008,7 @@ def _make_neo():
             h_armed -= 1
             if h_armed:
                 return
+            upd_fast()
             if h_state == H_SENT or h_state == H_WAIT:
                 h_values[h_count % HOST_WORDS] = (o >> 1) & 0xFFFF
                 h_count += 1
@@ -1985,6 +2017,7 @@ def _make_neo():
             return
         if o == 0x1FF02:
             h_armed = 2
+            FAST[0] = 0
             return
         if o == 0x1FF00:
             if h_state == H_SENT or h_state == H_WAIT:
@@ -2134,6 +2167,10 @@ def _make_neo():
         return (w & 0xFF) if (a & 1) else (w >> 8)
 
     def wbus8(a, v):
+        nonlocal wdog_kick
+        if a == 0x300001:                        # WatchDog macro (move.b d0,$300001): most byte writes
+            wdog_kick = now()
+            return
         if 0x400000 <= a < 0x800000:
             write16(a & ~1, (v & 0xFF) * 0x0101, 0xFFFF)
             return
@@ -2180,6 +2217,7 @@ def _make_neo():
         t = now()
         if h_clear_pending and t - h_t0 >= HOST_CLEAR:
             bios[0x90:0xA0] = bytes(16)
+            fw_sync(0x90, 0xA0)
             h_clear_pending = 0
             if h_state == H_SENT:
                 h_state = H_WAIT
@@ -2196,6 +2234,7 @@ def _make_neo():
             return -1
         bios[:] = b"\xff" * len(bios)
         bios[:n] = bytes(data[:n])
+        fw_sync()
         return 0
 
     def neo_power_on():
@@ -2213,6 +2252,7 @@ def _make_neo():
         z80ram[:] = bytes(0x800)
         z80_load_program()
         h_state = H_IDLE; h_count = 0; h_overflow = 0; h_armed = 0; h_clear_pending = 0
+        upd_fast()
         now_base = 0; last_line = 0; frames = 0; wdog_resets = 0
         irq_vbl = irq_tmr = 0; irq3 = 1; tmr_ctrl = 0; tmr_load = 0; tmr_next = 0
         reset_peripherals()
@@ -2226,6 +2266,7 @@ def _make_neo():
         h_state = H_IDLE
         if h_clear_pending:
             bios[0x90:0xA0] = bytes(16)
+            fw_sync(0x90, 0xA0)
             h_clear_pending = 0
         cpu.pulse_reset()
         update_irq()
@@ -2300,7 +2341,9 @@ def _make_neo():
             return -1
         for i, v in enumerate((addr, p1, p2, p3)):
             bios[0x90 + 4 * i:0x94 + 4 * i] = (v & 0xFFFFFFFF).to_bytes(4, "big")
+        fw_sync(0x90, 0xA0)
         h_count = 0; h_overflow = 0; h_armed = 0
+        upd_fast()
         h_t0 = now_base
         h_state = H_SENT
         h_clear_pending = 1
@@ -2367,6 +2410,7 @@ def _make_neo():
 
     def neo_fault_clear():
         faults.clear()
+        upd_fast()
 
     def neo_fault_add(region, kind, bit, value):
         data_bits = (15, 15, 15, 15, 8, -1, 15, 0)
@@ -2391,6 +2435,7 @@ def _make_neo():
         if kind == 3 and region != 5 and region != 6:
             return -1
         faults.append((region, kind, bit, value))
+        upd_fast()
         return 0
 
     def neo_ssg_regs(out):
@@ -2403,6 +2448,7 @@ def _make_neo():
         armed reads after them) and of the command block $90-$9F; None to stop."""
         nonlocal watch
         watch = fn
+        upd_fast()
 
     def neo_test_inputs(p1, dip, p2, sa, sb, sys_, mvs):
         """Test hook (as build_test_core.py's core): input ports, MVS backup RAM."""
@@ -2428,15 +2474,15 @@ def _make_neo():
         nonlocal cpu
         cpu = c
 
-    return api, attach, read16, bus8, write16, wbus8
+    return api, attach, read16, bus8, write16, wbus8, (FAST, FW)
 
 
 class PyNeoLib:
     """The neocore.c API in Python: lib.neo_xxx(...) as with the ctypes library."""
 
     def __init__(self):
-        api, attach, bus16, bus8, wbus16, wbus8 = _make_neo()
-        attach(M68K(bus16, bus8, wbus16, wbus8))
+        api, attach, bus16, bus8, wbus16, wbus8, fast = _make_neo()
+        attach(M68K(bus16, bus8, wbus16, wbus8, fast=fast))
         self.__dict__.update(api)
 
 # ===========================================================================
@@ -2877,7 +2923,11 @@ def test_cart_prom():
     ("NEO-GEO", NGH $0999, P ROM size $300000, security code pointer $182 -> $186)."""
     import random
     rnd = random.Random(0xB1C068)
-    p = bytearray(rnd.getrandbits(8) for _ in range(3 * 0x100000))
+    n = 3 * 0x100000
+    # = bytearray(rnd.getrandbits(8) for _ in range(n)), in 0.1 s instead of 1.5 s: each
+    # getrandbits(8) is the top byte of one 32-bit Mersenne Twister output, and getrandbits(32 * n)
+    # packs n outputs, first one lowest (little-endian), so every 4th byte from byte 3.
+    p = bytearray(rnd.getrandbits(32 * n).to_bytes(4 * n, "little")[3::4])
     # vectors like a game's (wiki "68k vector table"): SP $10F300, reset $C00402, the exceptions to
     # the system ROM entry points, VBLANK and timer to the cartridge. With the vector table switch
     # held on the cartridge the console then starts as with a real game (reset = system ROM $402).
@@ -2945,7 +2995,7 @@ def make_cart(kind):
     if kind == "diag":
         import random
         rnd = random.Random(0x5EA)       # SRAM power-on content: anything
-        return CartImage("diag", bytes(rnd.getrandbits(8) for _ in range(0x100000)),
+        return CartImage("diag", rnd.getrandbits(32 * 0x100000).to_bytes(4 * 0x100000, "little")[3::4],
                          "Diagnostic PROG board", notes=[
                              "jwestfall69 neogeo-diag-aes-prog: one 1 MiB 16-bit SRAM read in P1 and P2, "
                              "written through P2 (byte lanes by /PORTWEU, /PORTWEL)."])

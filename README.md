@@ -10,8 +10,8 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 
 | Path | What it is |
 |---|---|
-| `Brico68k_Compiler.py` | Brico68k Compiler 1.4 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.20 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
+| `Brico68k_Compiler.py` | Brico68k Compiler 1.5 (Python 3.8+, standard library only, Tk window) |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.21 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
 | `rom/ROM.BIO` | Ready-to-use ROM, 128 KB: 32 KB of code + CRC32 + 3 mirrors, exactly what the BricoNeo builds itself for header flag `$0004` (SHA-256 in `rom/ROM.BIO.sha256`) |
 | `brico16bits/` | Optional Brico16Bits patch (EXCPT: 68000 exception reports). Syntax-checked only, not built for the Pico, not run |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
@@ -65,10 +65,11 @@ of the superzazu/z80 Z80 that the model's Z80 programs use, and a Neo Geo AES mo
 MAME's driver. The port gives the same results as the C Musashi word for word (see "Checking the
 Python core" below).
 
-Speed, measured (one core of a cloud x86 server): 53 to 60 frames/s for 59.2 in real time with
-Python 3.11 to 3.13, 38 frames/s with Python 3.8; TestWRAM (0.42 s emulated) takes 0.4 to 0.7 s.
-Slow with this core: `--diagnose` (and the same search in the window), which replays a log on 290
-simulated faults: hours instead of a few minutes, so use the C core for it. For speed, the
+Speed, measured (one core of a cloud x86 server, 1.21): 88 to 102 frames/s idle and 68 to 79
+during TestWRAM / TestVRAM, for 59.2 in real time, with Python 3.11 to 3.13 (1.20 on the same
+machine: 46 to 57 idle, 49 to 56 in the tests). TestWRAM (0.38 s emulated) takes 0.3 s. Slow with
+this core: `--diagnose` (and the same search in the window), which replays a log on 290 simulated
+faults: much longer than with the C core, so use the C core for it. For speed, the
 C build of the same core is still supported: put `neocore.dll` (Windows) or `libneocore.so`
 (Linux) built by `emulator/build_core.py` next to the script, or give its path in the
 `BRICO68K_CORE` environment variable (`BRICO68K_CORE=python` forces the Python core). The first

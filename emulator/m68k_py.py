@@ -755,7 +755,11 @@ def _shift_reg(fam, sz, kind):
 
 
 _RUNTIME = r'''
-def _build(bus16, bus8, wbus16, wbus8, reset_cb, CYC, H_NAMES, H_INDEX):
+def _build(bus16, bus8, wbus16, wbus8, reset_cb, CYC, H_NAMES, H_INDEX, FAST, FW):
+    # FAST[0] true: a 16-bit read at $C00000-$CFFFFF (the BIOS socket, mirrored every 128 KB) is
+    # FW[a & 0x1FFFE], without calling bus16. The bus owner keeps FW equal to its BIOS words and
+    # clears FAST[0] whenever such a read must be seen (host port armed, faults, watch hook).
+    # Used for the opcode and extension word fetches only: same values, same order, no side effect.
     R = [0] * 16                 # D0-D7, A0-A7 (A7 = active stack pointer)
     SPB = [0] * 8                # Musashi REG_SP_BASE: [0] USP, [4] ISP
     SH8 = [0, 0x80, 0xC0, 0xE0, 0xF0, 0xF8, 0xFC, 0xFE] + [0xFF] * 57
@@ -838,7 +842,10 @@ def _build(bus16, bus8, wbus16, wbus8, reset_cb, CYC, H_NAMES, H_INDEX):
         if a & 1:
             aerr(a, 0x10, fS | 2)
         pc = (a + 2) & 0xFFFFFFFF
-        return bus16(a & 0xFFFFFF)
+        a &= 0xFFFFFF
+        if FAST[0] and 0xC00000 <= a < 0xD00000:
+            return FW[a & 0x1FFFE]
+        return bus16(a)
 
     def imm32():
         nonlocal pc
@@ -847,6 +854,8 @@ def _build(bus16, bus8, wbus16, wbus8, reset_cb, CYC, H_NAMES, H_INDEX):
             aerr(a, 0x10, fS | 2)
         pc = (a + 4) & 0xFFFFFFFF
         a &= 0xFFFFFF
+        if FAST[0] and 0xC00000 <= a < 0xCFFFFE:
+            return (FW[a & 0x1FFFE] << 16) | FW[(a + 2) & 0x1FFFE]
         return (bus16(a) << 16) | bus16((a + 2) & 0xFFFFFF)
 
     def ix(base):                # 68000 brief extension word
@@ -1054,7 +1063,11 @@ def _build(bus16, bus8, wbus16, wbus8, reset_cb, CYC, H_NAMES, H_INDEX):
                     if a & 1:
                         aerr(a, 0x10, fS | 2)
                     pc = (a + 2) & 0xFFFFFFFF
-                    ir = i_ = bus16(a & 0xFFFFFF)
+                    a &= 0xFFFFFF
+                    if FAST[0] and 0xC00000 <= a < 0xD00000:
+                        ir = i_ = FW[a & 0x1FFFE]
+                    else:
+                        ir = i_ = bus16(a)
                     H_[i_]()
                     rem -= C_[i_]
                     if tracing:
@@ -1153,7 +1166,10 @@ def _factory_src(name):
 class M68K:
     """The Python 68000. Methods as Musashi's m68k_* API."""
 
-    def __init__(self, bus16, bus8, wbus16, wbus8, reset_cb=lambda: None, names=None, tables=None):
+    def __init__(self, bus16, bus8, wbus16, wbus8, reset_cb=lambda: None, names=None, tables=None, fast=None):
+        """fast: (FAST, FW) from the bus owner (see _build); None = every fetch through bus16."""
+        if fast is None:
+            fast = ([0], [])
         if names is None:
             names, tables = M68K_NAMES, M68K_TABLES
         raw = _lzma.decompress(_b64.b64decode("".join(tables)))
@@ -1163,4 +1179,4 @@ class M68K:
         g = {}
         exec(compile(src, "<m68k_py>", "exec"), g)
         (self.execute, self.pulse_reset, self.set_irq, self.cycles_run, self.pc, self.get_reg, self.set_reg,
-         self.state) = g["_build"](bus16, bus8, wbus16, wbus8, reset_cb, cyc, names, list(index))
+         self.state) = g["_build"](bus16, bus8, wbus16, wbus8, reset_cb, cyc, names, list(index), fast[0], fast[1])
