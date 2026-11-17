@@ -126,6 +126,7 @@ static uint64_t h_done_cycles;
  *         6 cartridge slot P bus (D0-D15, A1-A19, strobes)
  *         7 vector table switch (system latch Q1): kind 0, bit 0, held at
  *           `value` (0 = system ROM, 1 = cartridge) whatever the 68000 writes
+ *         8 LSPC registers $3C0000-$3C000F (address decoding only: kind 4)
  * kind:   0 data bit stuck at `value` (what the CPU - and for the palette
  *           the DAC - reads; the cell cannot hold the other level)
  *         1 address line stuck at `value` (accesses fold onto the other half)
@@ -138,6 +139,10 @@ static uint64_t h_done_cycles;
  *           word it prefetched; 6-9 the same output (ROMOEL, ROMOEU, PORTOEL, PORTOEU)
  *           behind a 245 / NEO-G0 / NEO-BUF: the lane gives back the last value
  *           written to the cartridge side, as the diag BIOS assumes)
+ *         4 decoder uses an address line it should ignore: the chip answers only
+ *           when A<bit> = `value` (WRAM A16-A19, palette A13-A21, LSPC regs
+ *           A4-A16); elsewhere reads give the open bus and writes are lost
+ *         5 WRAM only: its write strobe also reaches the palette RAM (same A1-A12)
  * Address lines: WRAM A1-A15, palette A1-A12 + 13 = bank select (latch Q7),
  * VRAM lower 0-14, VRAM upper 0-10 (VRAM word address). Faults survive
  * power cycles, as a real hardware fault does. */
@@ -258,6 +263,22 @@ static int lane_dead(int lane)
 {
 	for (int i = 0; i < nfaults; i++)
 		if (faults[i].region == 0 && faults[i].kind == 2 && faults[i].value == lane) return 1;
+	return 0;
+}
+
+/* kind 4: does the decoder of `region` refuse this address (a line it should ignore is at the wrong level)? */
+static int sel_dead(int region, unsigned a)
+{
+	for (int i = 0; i < nfaults; i++)
+		if (faults[i].region == region && faults[i].kind == 4 && (int)((a >> faults[i].bit) & 1) != faults[i].value) return 1;
+	return 0;
+}
+
+/* kind 5: WRAM writes also land in the palette RAM */
+static int wram_leak(void)
+{
+	for (int i = 0; i < nfaults; i++)
+		if (faults[i].region == 0 && faults[i].kind == 5) return 1;
 	return 0;
 }
 
@@ -419,6 +440,7 @@ static unsigned read16(unsigned a, int lsb_only)
 	}
 	if (a < 0x100000) return cart_read(a);                  /* P1 */
 	if (a < 0x200000) {
+		if (nfaults && sel_dead(0, a)) return open_bus();
 		unsigned o = wram_index(a);
 		unsigned w = (wram[o] << 8) | wram[o + 1];
 		if (lane_dead(1)) w |= 0xFF00;
@@ -433,6 +455,7 @@ static unsigned read16(unsigned a, int lsb_only)
 	if (a < 0x3A0000) return 0x7FFF;                        /* STATUS_B: AES, no memory card */
 	if (a < 0x3C0000) return open_bus();
 	if (a < 0x3E0000) {
+		if (nfaults && sel_dead(8, a)) return open_bus();
 		if (lsb_only) return open_bus() & 0xFF;
 		switch ((a >> 1) & 3) {
 		case 0: case 1: return vram_read_buffer;
@@ -441,7 +464,10 @@ static unsigned read16(unsigned a, int lsb_only)
 		}
 	}
 	if (a < 0x400000) return open_bus();
-	if (a < 0x800000) return fault_data(1, pal[pal_index(a)]);
+	if (a < 0x800000) {
+		if (nfaults && sel_dead(1, a)) return open_bus();
+		return fault_data(1, pal[pal_index(a)]);
+	}
 	if (a < 0xC00000) return 0xFFFF;                        /* memory card: none */
 	if (a < 0xD00000) {
 		unsigned o = socket_addr(a & 0x1FFFE);
@@ -456,9 +482,11 @@ static void write16(unsigned a, unsigned d, unsigned mask)  /* mask: 0xFF00 / 0x
 	a &= 0xFFFFFE;
 	if (a < 0x100000) { cart_hold = (cart_hold & ~mask) | (d & mask); return; }   /* P1: no strobe, the lines still move */
 	if (a >= 0x100000 && a < 0x200000) {
+		if (nfaults && sel_dead(0, a)) return;
 		unsigned o = wram_index(a);
 		if ((mask & 0xFF00) && !lane_dead(1)) wram[o] = (uint8_t)(d >> 8);
 		if ((mask & 0x00FF) && !lane_dead(0)) wram[o + 1] = (uint8_t)d;
+		if (nfaults && wram_leak()) { uint16_t *q = &pal[pal_index(a)]; *q = (uint16_t)((*q & ~mask) | (d & mask)); }
 		return;
 	}
 	if (a >= 0x200000 && a < 0x300000) { cart_write(a, d, mask); return; }
@@ -469,6 +497,7 @@ static void write16(unsigned a, unsigned d, unsigned mask)  /* mask: 0xFF00 / 0x
 		return;
 	}
 	if (a >= 0x3C0000 && a < 0x3E0000) {
+		if (nfaults && sel_dead(8, a)) return;
 		switch ((a >> 1) & 7) {
 		case 0: vram_set_offset((uint16_t)d); break;
 		case 1: vram_write((uint16_t)d); break;
@@ -488,6 +517,7 @@ static void write16(unsigned a, unsigned d, unsigned mask)  /* mask: 0xFF00 / 0x
 		return;
 	}
 	if (a >= 0x400000 && a < 0x800000) {
+		if (nfaults && sel_dead(1, a)) return;
 		uint16_t *p = &pal[pal_index(a)];
 		*p = (uint16_t)((*p & ~mask) | (d & mask));
 		return;
@@ -740,10 +770,14 @@ EXPORT void neo_fault_clear(void) { nfaults = 0; }
 EXPORT int neo_fault_count(void) { return nfaults; }
 EXPORT int neo_fault_add(int region, int kind, int bit, int value)
 {
-	static const int data_bits[8] = { 15, 15, 15, 15, 8, -1, 15, 0 };
-	static const int addr_lo[8] = { 1, 1, 0, 0, -1, 1, 1, -1 }, addr_hi[8] = { 15, 13, 14, 10, -1, 16, 19, -1 };
-	if (kind < 0 || kind > 3 || nfaults >= MAX_FAULTS || region < 0 || region > 7) return -1;
+	static const int data_bits[9] = { 15, 15, 15, 15, 8, -1, 15, 0, -1 };
+	static const int addr_lo[9] = { 1, 1, 0, 0, -1, 1, 1, -1, -1 }, addr_hi[9] = { 15, 13, 14, 10, -1, 16, 19, -1, -1 };
+	static const int sel_lo[9] = { 16, 13, 0, 0, 0, 0, 0, 0, 4 }, sel_hi[9] = { 19, 21, -1, -1, -1, -1, -1, -1, 16 };
+	if (kind < 0 || kind > 5 || nfaults >= MAX_FAULTS || region < 0 || region > 8) return -1;
 	if (region == 7 && kind != 0) return -1;
+	if (region == 8 && kind != 4) return -1;
+	if (kind == 4 && (bit < sel_lo[region] || bit > sel_hi[region])) return -1;
+	if (kind == 5 && (region != 0 || bit != 0 || value != 1)) return -1;
 	if (value < 0 || value > ((region == 6 && kind == 2) ? 9 : 1)) return -1;
 	if (kind == 0 && (bit < 0 || bit > data_bits[region])) return -1;
 	if (kind == 1 && (addr_lo[region] < 0 || bit < addr_lo[region] || bit > addr_hi[region])) return -1;

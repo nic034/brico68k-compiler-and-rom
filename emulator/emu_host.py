@@ -734,17 +734,20 @@ def load_cartridge(path, softlist=None):
 
 # Simulated faults
 # ---------------------------------------------------------------------------
-FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4, "bios": 5, "cart": 6, "vec": 7}
+FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4, "bios": 5, "cart": 6, "vec": 7, "lspc": 8}
 REGION_NAMES = {0: "WRAM", 1: "Palette RAM", 2: "VRAM lower (slow)", 3: "VRAM upper (fast)",
                 4: "LSPC line counter", 5: "BIOS socket (68000 -> BricoNeo)", 6: "Cartridge slot P bus",
-                7: "Vector table switch"}
-FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2, "float": 3, "strobe": 2, "stuck": 0}
+                7: "Vector table switch", 8: "LSPC registers (decoding)"}
+FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2, "float": 3, "strobe": 2, "stuck": 0, "sel": 4, "leak": 5}
 # 0-3 strobes; 4-5 /PORTOE (P2 output enable); 6-9 the OE dead behind a 245 / NEO-G0 / NEO-BUF (bus hold)
 STROBES = ["portwel", "portweu", "romoel", "romoeu", "portoel", "portoeu",
            "romoel245", "romoeu245", "portoel245", "portoeu245"]
 # the BIOS socket has no data faults: a bad D line stops the boot, nothing to test
-DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8, 5: -1, 6: 15, 7: 0}
+DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8, 5: -1, 6: 15, 7: 0, 8: -1}
 ADDR_RANGE = {0: (1, 15), 1: (1, 13), 2: (0, 14), 3: (0, 10), 5: (1, 16), 6: (1, 19)}
+# decoding faults (TestDecode): the decoder of the region uses an address line it should ignore, so the
+# chip answers only when that line is at the given level (the mirrors of WRAM, palette RAM, LSPC registers)
+SEL_RANGE = {0: (16, 19), 1: (13, 21), 8: (4, 16)}
 
 FAULT_HELP = ("Fault syntax: REGION:data:BIT:0|1 (data bit stuck), REGION:addr:LINE:0|1 (address line stuck),\n"
               "wram:lane:lower|upper (WRAM chip dead), bios:float:LINE (BIOS socket line unstable).\n"
@@ -755,12 +758,17 @@ FAULT_HELP = ("Fault syntax: REGION:data:BIT:0|1 (data bit stuck), REGION:addr:L
               "cart:strobe:portwel|portweu|romoel|romoeu|portoel|portoeu (strobe dead; the OE ones: the 68000 reads\n"
               "its prefetched word), ...245 suffix (romoel245 ...): OE dead behind a 245, bus hold. Needs --cart test or diag.\n"
               "Vector table switch (system latch Q1) held: vec:stuck:bios (system ROM) or vec:stuck:cart.\n"
+              "Address decoding (TestDecode): wram:sel:LINE:0|1 (A16-A19), pal:sel:LINE:0|1 (A13-A21), lspc:sel:LINE:0|1 (A4-A16):\n"
+              "the chip answers only when that line is at that level (a line the decoder should ignore); wram:leak: WRAM writes\n"
+              "also reach the palette RAM.\n"
               "Example: --fault wram:data:5:1 --fault pal:addr:13:0 --fault bios:addr:15:1")
 
 
 def parse_fault(spec):
     """'wram:data:5:1' -> (region, kind, bit, value). Raises ValueError with a readable reason."""
     parts = spec.strip().lower().split(":")
+    if parts == ["wram", "leak"]:
+        return 0, 5, 0, 1
     if len(parts) < 3 or parts[0] not in FAULT_REGIONS or parts[1] not in FAULT_KINDS:
         raise ValueError(f"bad fault '{spec}'. " + FAULT_HELP.splitlines()[0])
     region, kind = FAULT_REGIONS[parts[0]], FAULT_KINDS[parts[1]]
@@ -768,6 +776,16 @@ def parse_fault(spec):
         if region != 7 or parts[1] != "stuck" or len(parts) != 3 or parts[2] not in ("bios", "cart"):
             raise ValueError("vector table switch: vec:stuck:bios or vec:stuck:cart")
         return region, 0, 0, 1 if parts[2] == "cart" else 0
+    if kind == 4 or region == 8:
+        if kind != 4 or region not in SEL_RANGE or len(parts) != 4 or parts[3] not in ("0", "1") or not parts[2].isdigit():
+            raise ValueError("decoding fault: " + ", ".join(f"{k}:sel:LINE:0|1 (A{a}-A{b})" for k, (a, b) in
+                             ((n, SEL_RANGE[r]) for n, r in (("wram", 0), ("pal", 1), ("lspc", 8)))) + "; or wram:leak")
+        lo, hi = SEL_RANGE[region]
+        if not lo <= int(parts[2]) <= hi:
+            raise ValueError(f"{REGION_NAMES[region]}: address lines {lo}-{hi}")
+        return region, 4, int(parts[2]), int(parts[3])
+    if kind == 5:
+        raise ValueError("only wram:leak")
     if kind == 2 and region == 6:
         if parts[1] != "strobe" or len(parts) != 3 or parts[2] not in STROBES:
             raise ValueError("cartridge strobe: cart:strobe:" + "|".join(STROBES))
@@ -805,6 +823,10 @@ def describe_fault(f):
     name = REGION_NAMES[region]
     if region == 7:
         return f"{name}: held on the {'cartridge' if value else 'system ROM'} (latch Q1)"
+    if kind == 4:
+        return f"{name}: the decoder uses A{bit}, it answers only when A{bit} = {value}"
+    if kind == 5:
+        return f"{name}: its write strobe also reaches the palette RAM"
     if kind == 2 and region == 6:
         return f"{name}: /{STROBES[value].upper()} dead"
     if kind == 3 and region == 6:
@@ -825,6 +847,10 @@ def fault_spec(f):
     r = {v: k for k, v in FAULT_REGIONS.items()}[region]
     if region == 7:
         return f"vec:stuck:{'cart' if value else 'bios'}"
+    if kind == 5:
+        return f"{r}:leak"
+    if kind == 4:
+        return f"{r}:sel:{bit}:{value}"
     if kind == 2 and region == 6:
         return f"{r}:strobe:{STROBES[value]}"
     if kind == 2:

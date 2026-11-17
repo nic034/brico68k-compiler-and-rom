@@ -65,7 +65,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.21"
+APP_VERSION = "1.22"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -1677,6 +1677,13 @@ def _make_neo():
                 w = (w | (1 << b)) if v else (w & ~(1 << b))
         return w
 
+    def sel_dead(region, a):
+        # kind 4: the decoder of this region uses an address line it should ignore
+        for r, k, b, v in faults:
+            if r == region and k == 4 and ((a >> b) & 1) != v:
+                return True
+        return False
+
     def vectors_from_cart():
         for r, k, b, v in faults:
             if r == 7:
@@ -2045,6 +2052,8 @@ def _make_neo():
             if not faults:
                 o = a & 0xFFFE
                 return (wram[o] << 8) | wram[o + 1]
+            if sel_dead(0, a):
+                return open_bus()
             o = wram_index(a)
             w = (wram[o] << 8) | wram[o + 1]
             if lane_dead(1):
@@ -2068,6 +2077,8 @@ def _make_neo():
         if a < 0x3C0000:
             return open_bus()
         if a < 0x3E0000:
+            if faults and sel_dead(8, a):
+                return open_bus()
             if lsb_only:
                 return open_bus() & 0xFF
             r = (a >> 1) & 3
@@ -2079,6 +2090,8 @@ def _make_neo():
         if a < 0x400000:
             return open_bus()
         if a < 0x800000:
+            if faults and sel_dead(1, a):
+                return open_bus()
             return fault_data(1, pal[pal_index(a)]) & 0xFFFF
         if a < 0xC00000:
             return 0xFFFF
@@ -2098,11 +2111,18 @@ def _make_neo():
                 if mask & 0x00FF:
                     wram[o + 1] = d & 0xFF
                 return
+            if sel_dead(0, a):
+                return
             o = wram_index(a)
             if (mask & 0xFF00) and not lane_dead(1):
                 wram[o] = (d >> 8) & 0xFF
             if (mask & 0x00FF) and not lane_dead(0):
                 wram[o + 1] = d & 0xFF
+            for r, k, b, v in faults:                 # kind 5: the WRAM write strobe also reaches the palette RAM
+                if r == 0 and k == 5:
+                    i = pal_index(a)
+                    pal[i] = ((pal[i] & ~mask) | (d & mask)) & 0xFFFF
+                    break
             return
         if a < 0x100000:
             cart_hold = (cart_hold & ~mask) | (d & mask)
@@ -2124,6 +2144,8 @@ def _make_neo():
                 latch[off & 7] = (off & 8) >> 3
             return
         if 0x3C0000 <= a < 0x3E0000:
+            if faults and sel_dead(8, a):
+                return
             r = (a >> 1) & 7
             if r == 0:
                 vram_set_offset(d & 0xFFFF)
@@ -2151,6 +2173,8 @@ def _make_neo():
                 update_irq()
             return
         if 0x400000 <= a < 0x800000:
+            if faults and sel_dead(1, a):
+                return
             i = pal_index(a)
             pal[i] = ((pal[i] & ~mask) | (d & mask)) & 0xFFFF
             return
@@ -2413,12 +2437,20 @@ def _make_neo():
         upd_fast()
 
     def neo_fault_add(region, kind, bit, value):
-        data_bits = (15, 15, 15, 15, 8, -1, 15, 0)
-        addr_lo = (1, 1, 0, 0, -1, 1, 1, -1)
-        addr_hi = (15, 13, 14, 10, -1, 16, 19, -1)
-        if kind < 0 or kind > 3 or len(faults) >= MAX_FAULTS or region < 0 or region > 7:
+        data_bits = (15, 15, 15, 15, 8, -1, 15, 0, -1)
+        addr_lo = (1, 1, 0, 0, -1, 1, 1, -1, -1)
+        addr_hi = (15, 13, 14, 10, -1, 16, 19, -1, -1)
+        sel_lo = (16, 13, 0, 0, 0, 0, 0, 0, 4)
+        sel_hi = (19, 21, -1, -1, -1, -1, -1, -1, 16)
+        if kind < 0 or kind > 5 or len(faults) >= MAX_FAULTS or region < 0 or region > 8:
             return -1
         if region == 7 and kind != 0:
+            return -1
+        if region == 8 and kind != 4:
+            return -1
+        if kind == 4 and (bit < sel_lo[region] or bit > sel_hi[region]):
+            return -1
+        if kind == 5 and (region != 0 or bit != 0 or value != 1):
             return -1
         if value < 0 or value > (9 if (region == 6 and kind == 2) else 1):
             return -1
@@ -3224,17 +3256,20 @@ def load_cartridge(path, softlist=None):
 
 # Simulated faults
 # ---------------------------------------------------------------------------
-FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4, "bios": 5, "cart": 6, "vec": 7}
+FAULT_REGIONS = {"wram": 0, "pal": 1, "vramlo": 2, "vramhi": 3, "line": 4, "bios": 5, "cart": 6, "vec": 7, "lspc": 8}
 REGION_NAMES = {0: "WRAM", 1: "Palette RAM", 2: "VRAM lower (slow)", 3: "VRAM upper (fast)",
                 4: "LSPC line counter", 5: "BIOS socket (68000 -> BricoNeo)", 6: "Cartridge slot P bus",
-                7: "Vector table switch"}
-FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2, "float": 3, "strobe": 2, "stuck": 0}
+                7: "Vector table switch", 8: "LSPC registers (decoding)"}
+FAULT_KINDS = {"data": 0, "addr": 1, "lane": 2, "float": 3, "strobe": 2, "stuck": 0, "sel": 4, "leak": 5}
 # 0-3 strobes; 4-5 /PORTOE (P2 output enable); 6-9 the OE dead behind a 245 / NEO-G0 / NEO-BUF (bus hold)
 STROBES = ["portwel", "portweu", "romoel", "romoeu", "portoel", "portoeu",
            "romoel245", "romoeu245", "portoel245", "portoeu245"]
 # the BIOS socket has no data faults: a bad D line stops the boot, nothing to test
-DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8, 5: -1, 6: 15, 7: 0}
+DATA_BITS = {0: 15, 1: 15, 2: 15, 3: 15, 4: 8, 5: -1, 6: 15, 7: 0, 8: -1}
 ADDR_RANGE = {0: (1, 15), 1: (1, 13), 2: (0, 14), 3: (0, 10), 5: (1, 16), 6: (1, 19)}
+# decoding faults (TestDecode): the decoder of the region uses an address line it should ignore, so the
+# chip answers only when that line is at the given level (the mirrors of WRAM, palette RAM, LSPC registers)
+SEL_RANGE = {0: (16, 19), 1: (13, 21), 8: (4, 16)}
 
 FAULT_HELP = ("Fault syntax: REGION:data:BIT:0|1 (data bit stuck), REGION:addr:LINE:0|1 (address line stuck),\n"
               "wram:lane:lower|upper (WRAM chip dead), bios:float:LINE (BIOS socket line unstable).\n"
@@ -3245,12 +3280,17 @@ FAULT_HELP = ("Fault syntax: REGION:data:BIT:0|1 (data bit stuck), REGION:addr:L
               "cart:strobe:portwel|portweu|romoel|romoeu|portoel|portoeu (strobe dead; the OE ones: the 68000 reads\n"
               "its prefetched word), ...245 suffix (romoel245 ...): OE dead behind a 245, bus hold. Needs --cart test or diag.\n"
               "Vector table switch (system latch Q1) held: vec:stuck:bios (system ROM) or vec:stuck:cart.\n"
+              "Address decoding (TestDecode): wram:sel:LINE:0|1 (A16-A19), pal:sel:LINE:0|1 (A13-A21), lspc:sel:LINE:0|1 (A4-A16):\n"
+              "the chip answers only when that line is at that level (a line the decoder should ignore); wram:leak: WRAM writes\n"
+              "also reach the palette RAM.\n"
               "Example: --fault wram:data:5:1 --fault pal:addr:13:0 --fault bios:addr:15:1")
 
 
 def parse_fault(spec):
     """'wram:data:5:1' -> (region, kind, bit, value). Raises ValueError with a readable reason."""
     parts = spec.strip().lower().split(":")
+    if parts == ["wram", "leak"]:
+        return 0, 5, 0, 1
     if len(parts) < 3 or parts[0] not in FAULT_REGIONS or parts[1] not in FAULT_KINDS:
         raise ValueError(f"bad fault '{spec}'. " + FAULT_HELP.splitlines()[0])
     region, kind = FAULT_REGIONS[parts[0]], FAULT_KINDS[parts[1]]
@@ -3258,6 +3298,16 @@ def parse_fault(spec):
         if region != 7 or parts[1] != "stuck" or len(parts) != 3 or parts[2] not in ("bios", "cart"):
             raise ValueError("vector table switch: vec:stuck:bios or vec:stuck:cart")
         return region, 0, 0, 1 if parts[2] == "cart" else 0
+    if kind == 4 or region == 8:
+        if kind != 4 or region not in SEL_RANGE or len(parts) != 4 or parts[3] not in ("0", "1") or not parts[2].isdigit():
+            raise ValueError("decoding fault: " + ", ".join(f"{k}:sel:LINE:0|1 (A{a}-A{b})" for k, (a, b) in
+                             ((n, SEL_RANGE[r]) for n, r in (("wram", 0), ("pal", 1), ("lspc", 8)))) + "; or wram:leak")
+        lo, hi = SEL_RANGE[region]
+        if not lo <= int(parts[2]) <= hi:
+            raise ValueError(f"{REGION_NAMES[region]}: address lines {lo}-{hi}")
+        return region, 4, int(parts[2]), int(parts[3])
+    if kind == 5:
+        raise ValueError("only wram:leak")
     if kind == 2 and region == 6:
         if parts[1] != "strobe" or len(parts) != 3 or parts[2] not in STROBES:
             raise ValueError("cartridge strobe: cart:strobe:" + "|".join(STROBES))
@@ -3295,6 +3345,10 @@ def describe_fault(f):
     name = REGION_NAMES[region]
     if region == 7:
         return f"{name}: held on the {'cartridge' if value else 'system ROM'} (latch Q1)"
+    if kind == 4:
+        return f"{name}: the decoder uses A{bit}, it answers only when A{bit} = {value}"
+    if kind == 5:
+        return f"{name}: its write strobe also reaches the palette RAM"
     if kind == 2 and region == 6:
         return f"{name}: /{STROBES[value].upper()} dead"
     if kind == 3 and region == 6:
@@ -3315,6 +3369,10 @@ def fault_spec(f):
     r = {v: k for k, v in FAULT_REGIONS.items()}[region]
     if region == 7:
         return f"vec:stuck:{'cart' if value else 'bios'}"
+    if kind == 5:
+        return f"{r}:leak"
+    if kind == 4:
+        return f"{r}:sel:{bit}:{value}"
     if kind == 2 and region == 6:
         return f"{r}:strobe:{STROBES[value]}"
     if kind == 2:
@@ -3892,6 +3950,7 @@ TESTS = {
     "TestWRAM": _t("Memory"),
     "TestBRAM": _t("Memory"),
     "TestPRAM": _t("Memory"),
+    "TestDecode": _t("Memory"),
     "TestVRAM": _t("Video"),
     "TestLSPC": _t("Video"),
     "TestTiming": _t("Video", verdict_only="the measured cycle counts can differ slightly on a real board"),
@@ -4030,7 +4089,10 @@ def all_single_faults():
         if region in ADDR_RANGE:
             lo, hi = ADDR_RANGE[region]
             out += [(region, 1, bit, v) for bit in range(lo, hi + 1) for v in (0, 1)]
-    return out + [(0, 2, 0, 0), (0, 2, 0, 1)]
+    out += [(0, 2, 0, 0), (0, 2, 0, 1)]
+    # address decoding (TestDecode): a mirror line the decoder does not ignore, then WRAM writes into the palette
+    out += [(r, 4, bit, v) for r, (lo, hi) in SEL_RANGE.items() for bit in range(lo, hi + 1) for v in (0, 1)]
+    return out + [(0, 5, 0, 1)]
 
 
 _DX = {}
@@ -4667,7 +4729,7 @@ def main_gui(rom_arg=None):
     REGIONS = [("WRAM", "wram"), ("Palette RAM", "pal"), ("VRAM lower (slow)", "vramlo"),
                ("VRAM upper (fast)", "vramhi"), ("LSPC line counter", "line"),
                ("BIOS socket (68000 -> BricoNeo)", "bios"), ("Cartridge slot (P bus)", "cart"),
-               ("Vector table switch", "vec")]
+               ("Vector table switch", "vec"), ("LSPC registers (decoding)", "lspc")]
     reg_var = tk.StringVar(value=REGIONS[0][0]); kind_var = tk.StringVar(value="Data bit stuck")
     bit_var = tk.StringVar(value="0"); lvl_var = tk.StringVar(value="1"); range_var = tk.StringVar(); ferr = tk.StringVar()
     ttk.Label(flt, text="Component", style="Card.TLabel").grid(row=6, column=0, sticky="w", pady=3)
@@ -5172,11 +5234,16 @@ def main_gui(rom_arg=None):
             return ["Address line stuck", "Address line unstable"]
         if code == "vec":
             return ["Switch held"]
+        if code == "lspc":
+            return ["Decoder uses a line"]
         k = ["Data bit stuck"]
         if code != "line":
             k.append("Address line stuck")
         if code == "wram":
             k.append("Chip dead (byte lane)")
+            k.append("Writes also reach palette")
+        if code in SEL_RANGE:
+            k.append("Decoder uses a line")
         return k
 
     def update_form(*_):
@@ -5204,6 +5271,21 @@ def main_gui(rom_arg=None):
             if not lvl_var.get().startswith(("lower", "upper")):
                 lvl_var.set("upper (D8-D15)")
             range_var.set("Writes to that chip are lost, it reads $FF."); return
+        if k.startswith("Writes"):
+            bit_lbl.configure(text="Chip"); sp_bit.grid_remove(); lvl_lbl.configure(text="Writes")
+            cb_lvl.configure(values=["also palette RAM"]); lvl_var.set("also palette RAM")
+            range_var.set("Every write to the work RAM also changes the palette RAM cell with the same A1-A12 "
+                          "(a decoder output selecting both chips): TestDecode finds it."); return
+        if k.startswith("Decoder"):
+            lo, hi = SEL_RANGE[FAULT_REGIONS[code]]
+            bit_lbl.configure(text="Line A"); sp_bit.grid(); sp_bit.configure(from_=lo, to=hi)
+            lvl_lbl.configure(text="Answers at"); cb_lvl.configure(values=["0", "1"])
+            if lvl_var.get() not in ("0", "1"):
+                lvl_var.set("0")
+            if not bit_var.get().isdigit() or not lo <= int(bit_var.get()) <= hi:
+                bit_var.set(str(lo))
+            range_var.set(f"A{lo}-A{hi} are ignored by a healthy decoder (mirrors). The chip answers only when "
+                          "the line is at that level: open bus elsewhere, writes lost. TestDecode finds it."); return
         sp_bit.grid(); lvl_lbl.configure(text="Stuck at"); cb_lvl.configure(values=["0", "1"])
         if k.endswith("unstable"):
             lvl_lbl.configure(text="Level"); cb_lvl.configure(values=["random"]); lvl_var.set("random")
@@ -5235,6 +5317,10 @@ def main_gui(rom_arg=None):
             fault_add(f"vec:stuck:{'cart' if lvl_var.get() == 'cartridge' else 'bios'}")
         elif k.startswith("Chip"):
             fault_add(f"wram:lane:{lvl_var.get().split()[0]}")
+        elif k.startswith("Writes"):
+            fault_add("wram:leak")
+        elif k.startswith("Decoder"):
+            fault_add(f"{code}:sel:{bit_var.get().strip()}:{lvl_var.get()}")
         elif k.startswith("Strobe"):
             fault_add(f"cart:strobe:{lvl_var.get().lower()}")
         else:

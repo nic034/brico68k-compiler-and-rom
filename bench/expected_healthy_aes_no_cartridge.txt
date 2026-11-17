@@ -78,6 +78,15 @@ LSPC2-A2 register test
 => Test success
 
 [eot, 1 ms emulated]
+> TestDecode
+Address decoding: RAM and LSPC mirrors
+> Work RAM    $100000-$1FFFFF  OK
+> Palette RAM $400000-$7FFFFF  OK
+> LSPC regs   $3C0000-$3DFFFF  OK
+> WRAM / palette independent   OK
+=> Test success
+
+[eot, 2 ms emulated]
 > TestTiming
 Video timing test (LSPC line counter, $3C0006)
 > Lines per frame: 264 (NTSC flag, expected 264)
@@ -87,7 +96,7 @@ Video timing test (LSPC line counter, $3C0006)
 > Auto-animation counter: 8/8 frame steps OK
 => Test success
 
-[eot, 720 ms emulated]
+[eot, 703 ms emulated]
 > TestZ80
 Z80 handshake test (ACTIVE: stops any sound)
 Needs a standard SM1/M1 sound driver.

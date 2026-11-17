@@ -105,7 +105,7 @@ check("Run all button shows progress", "Running" in str([w.cget("text") for w in
 check("Run all finished", wait_idle(60))
 pump(0.3)
 expect = {"TestChip": "PASS", "TestWRAM": "PASS", "TestBRAM": "N/A", "TestPRAM": "PASS", "TestVRAM": "PASS",
-          "TestLSPC": "PASS", "TestTiming": "PASS", "TestGfx": "LOOK", "TestDAC": "LOOK", "TestVectors": "PASS",
+          "TestLSPC": "PASS", "TestDecode": "PASS", "TestTiming": "PASS", "TestGfx": "LOOK", "TestDAC": "LOOK", "TestVectors": "PASS",
           "TestZ80": "PASS", "TestAudio": "PASS", "TestFM": "LOOK", "TestSsg": "LOOK", "TestInp": "INFO", "TestStatusA": "INFO",
           "TestSystype": "INFO", "TestWatchdog": "PASS"}
 for n, e in expect.items():

@@ -42,6 +42,23 @@
 ; =============================================================================
 
 	; Return through a2 / a3 (a6 is used by Print/JsrA6)
+	; End of the "Chip" line, then on to .hint: \1 = text for the WRAM, \2 = for the
+	; palette RAM (AES 3-3 to 3-6, Board-Folk schematic); backup RAM (MVS): none.
+	macro ChipRef
+		tst.b d7
+		beq .\@w
+		cmp.b #2,d7
+		beq .\@p
+		PrintLn ""
+		bra .hint
+.\@w:
+		PrintLn \1
+		bra .hint
+.\@p:
+		PrintLn \2
+		bra .hint
+	endm
+
 	macro CallA2
 		lea .\@(pc),a2
 		jmp \1
@@ -502,19 +519,20 @@ CHIP_REPORT:					; d6.w = bad bits (also reached from ADDR_ERROR)
 	move.w d6,d0
 	and.w #$FF00,d0
 	beq .lowerOnly
-	PrintLn "BOTH chips (D0-D15)"
-	bra .hint
+	Print "BOTH chips (D0-D15)"
+	ChipRef " = AES U1+U2", " = AES U6+U7 (PC0-15)"
 .upperOnly:
-	PrintLn "upper chip (D8-D15)"
-	bra .hint
+	Print "upper chip (D8-D15)"
+	ChipRef " = AES U2", " = AES U6 (PC8-15)"
 .lowerOnly:
-	PrintLn "lower chip (D0-D7)"
+	Print "lower chip (D0-D7)"
+	ChipRef " = AES U1", " = AES U7 (PC0-7)"
 .hint:
 	swap d7						; step id in d7.b
 	cmp.b #2,d7
 	bne .hintPal
 	swap d7
-	PrintLn "  Hint     : that chip's write strobe (WRAM: NEO-C1 WWU/WWL, UDS/LDS)"
+	PrintLn "  Hint     : that chip's write strobe (WRAM: NEO-C1 U4 WWU/WWL)"
 	bra .bank
 .hintPal:						; palette data error (not address, not bank select):
 	cmp.b #3,d7					; the data goes through NEO-G0, which also makes the
@@ -523,8 +541,13 @@ CHIP_REPORT:					; d6.w = bad bits (also reached from ADDR_ERROR)
 	beq .hintEnd
 	swap d7
 	cmp.b #2,d7					; region: palette?
+	bne .hintW
+	PrintLn "  Hint     : that chip, NEO-G0 U5 (D <-> PC buffer, WE), or 74LS273 U9/U10 on PC"
+	bra .bank
+.hintW:
+	tst.b d7					; WRAM only (backup RAM is on the MVS)
 	bne .bank
-	PrintLn "  Hint     : that chip, or NEO-G0 (palette data buffer, write enable)"
+	PrintLn "  Hint     : that chip, or the shared D bus (68000, LSPC2, NEO-G0, ROM U36, slot)"
 	bra .bank
 .hintEnd:
 	swap d7
@@ -564,10 +587,15 @@ ADDR_ERROR:
 .anotCart:
 	cmp.b #2,d7
 	beq .apal
+	tst.b d7
+	bne.s .abram
+	PrintLn "  Both chips: 68000 pin Ak (direct to U1+U2 on AES); one: its pin A(k-1)."
+	bra .aend
+.abram:
 	PrintLn "  Both chips: 68000 address bus or their pins; one chip only: its pin."
 	bra .aend
 .apal:
-	PrintLn "  Both chips: NEO-B1 address switch or their pins; one chip: its pin."
+	PrintLn "  Both chips: NEO-B1 U13 (PA0-PA11, AES) or their pins; one chip: its pin."
 .aend:
 	jmp CHIP_REPORT
 

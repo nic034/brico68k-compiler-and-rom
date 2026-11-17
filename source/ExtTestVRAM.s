@@ -371,6 +371,7 @@ EXT_TEST_VRAM:
 	moveq #'A',d3
 	JsrA6 printBitList			; keeps d5, d6
 	NlPrintLn "  Both chips: the bad bits below show which chip(s) see it."
+	PrintLn "  Chip pins A0-A14 (slow) / A0-A10 (fast) come only from the LSPC2 U21."
 
 .chips:							; d6 = bad bits, d5.w = zone
 	Print "  Chip     : "
@@ -387,13 +388,28 @@ EXT_TEST_VRAM:
 	move.w d6,d0
 	and.w #$00FF,d0
 	beq .cUp
-	PrintLn "BOTH chips (D0-D15): LSPC2-A2 VRAM bus or common lines"
+	cmp.w #ZONE_FAST,d5
+	beq .cBF
+	PrintLn "BOTH chips (D0-D15) = AES U17+U18 (E0-15): LSPC2 U21 or common lines"
+	bra .done
+.cBF:
+	PrintLn "BOTH chips (D0-D15) = AES U19+U20 (F0-15): LSPC2 U21 or common lines"
 	bra .done
 .cUp:
-	PrintLn "upper chip (D8-D15)"
+	cmp.w #ZONE_FAST,d5
+	beq .cUF
+	PrintLn "upper chip (D8-D15) = AES U18 (E8-15)"
+	bra .done
+.cUF:
+	PrintLn "upper chip (D8-D15) = AES U20 (F8-15)"
 	bra .done
 .cLow:
-	PrintLn "lower chip (D0-D7)"
+	cmp.w #ZONE_FAST,d5
+	beq .cLF
+	PrintLn "lower chip (D0-D7) = AES U17 (E0-7)"
+	bra .done
+.cLF:
+	PrintLn "lower chip (D0-D7) = AES U19 (F0-7)"
 
 .done:
 	move.w #1,(REG_VRAMMOD).l

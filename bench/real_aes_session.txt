@@ -8,6 +8,7 @@ TestBRAM
 TestPRAM
 TestVRAM
 TestLSPC
+TestDecode
 TestTiming
 TestZ80
 TestAudio

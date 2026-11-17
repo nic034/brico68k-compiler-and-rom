@@ -4,6 +4,64 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-17 - ROM 1.35-nic034-14: TestDecode, chip references; Emulator 1.22: decoding faults
+
+**ROM 1.35-nic034-14** (SHA-256 `cf4af7837a2a1e56b32f93f467ae9f149e0ab1fb1fb88043a592190b2139afd3`, 26 extensions,
+4324 bytes free before `$7FFA`, was 6250: TestDecode 854 bytes, the chip references about 1 KB)
+- **TestDecode** (new, `source/ExtTestDecode.s`, 854 bytes with its table entry): address decoding,
+  the one thing the March tests cannot see (they walk the lines the chips are wired to, A1-A15 for
+  WRAM and A1-A12 for a palette bank, never A16 and up). For each line n of the mirrors of WRAM
+  (A16-A19, `$100000-$1FFFFF`), palette RAM (A13-A21, `$400000-$7FFFFF`) and the LSPC registers
+  (A4-A16, `$3C0000-$3DFFFF`), a word written at the base must read back at base + 2^n and the
+  other way round: `FAIL: not a mirror on A17` names the line. A base word that holds no value is
+  "the word itself is bad" (a RAM fault: TestWRAM, TestPRAM, TestLSPC). Then a WRAM word and a
+  palette word sharing A1-A12 are written in both orders: neither may change the other (a decoder
+  output selecting two chips). Words are saved and put back, no WRAM, no stack, 2 ms,
+  `=> Test success` / `=> Test failure` like the other tests.
+- Code: a table of three regions walked by one loop, two shared routines (`aliasTest`, `verdict`).
+- **Chip references** (TestWRAM, TestPRAM, TestVRAM, TestDecode), from the Board-Folk NeoGeoAES-3.5
+  schematic (read pin by pin and checked on the rendered PDF; valid for the AES 3-3, 3-5 and 3-6
+  according to Nic034, 3-4 not confirmed): `Chip : lower chip (D0-D7) = AES U1` (WRAM U1/U2, palette
+  U7 (PC0-7) / U6 (PC8-15), slow VRAM U17 (E0-7) / U18 (E8-15), fast VRAM U19 (F0-7) / U20 (F8-15),
+  none for the MVS backup RAM). Hints: the shared D bus for a WRAM data bit, NEO-G0 / 74LS273 for a
+  palette bit, the LSPC2 as the only driver of the VRAM address pins, NEO-B1 for the palette address,
+  the WRAM write strobe as the wiki names it (NEO-C1 U4 WWU/WWL; RAWU/RAWL on the schematic). TestDecode prints one
+  hint line per failing group (e.g. NEO-C1 U4 sees A17-A23, not A16; the LSPC2 sees only A1-A3).
+  Checked against the wiki too (NEO-G0 is a quad 245; NEO-E0 makes A22'/A23'). Not proven (README):
+  the bit pairing inside NEO-G0 (D0-D7 = PC0-7), E0/F0 = VRAM data bit 0.
+- **Not verified on a real console, nor in MAME**: the ranges are those of the wiki's NEO-C1 page
+  (WRAM `$100000-$1FFFFF`, palette `$400000-$7FFFFF`, LSPC `$3C0000-$3DFFFF`) and its decode mask
+  `$FE0001` for the LSPC (the wiki says its masks are not verified); the emulator models them after
+  MAME's `neogeo` address map (not re-read from MAME's source here). A healthy AES that reports a mirror means a wrong assumption.
+  `emulator/compare_mame.py` now runs TestDecode in MAME for that.
+- Regression -12 against -14 (474 scenarios, 2281 commands, every modelled fault, 10 input sets, C test
+  core): 238 differences, every one a text line added by the chip references (Chip / Hint lines of
+  TestWRAM, TestPRAM, TestVRAM), none elsewhere; chaotic scenarios (WRAM stack faults, socket faults)
+  counted apart. `test_chip_hints.py` (15 cases) and `test_decode.py` (hint lines per group): 0 failures.
+
+**Emulator 1.22** (pure Python core and C core)
+- New decoding faults, `wram:sel:LINE:0|1` (A16-A19), `pal:sel:LINE:0|1` (A13-A21),
+  `lspc:sel:LINE:0|1` (A4-A16): the decoder uses an address line it should ignore, the chip answers
+  only when the line is at that level (open bus elsewhere, writes lost); `wram:leak`: WRAM writes
+  also land in the palette RAM cell with the same A1-A12. 53 new faults, 343 in the dictionary for
+  Find the fault (the README said 288; the count was 290). Appended at the end of the list: the
+  ranking of the earlier candidates does not change. Faults tab: "LSPC registers (decoding)",
+  "Decoder uses a line", "Writes also reach palette". `--fault help` lists them.
+- `emulator/test/test_decode.py` (new): TestDecode under all 53, at both levels, and under RAM
+  faults (data bit, dead chip, stuck address line): each gives the expected line and no other.
+- Lockstep `test_neo_py.py`: 4 sequences with the new faults, 0 failures. `regress_rom.py` runs
+  TestDecode in every healthy scenario and in the WRAM, palette and LSPC fault scenarios.
+- `bench/real_aes_session.txt` runs TestDecode after TestLSPC; `bench/expected_healthy_aes*.txt`
+  regenerated (only TestDecode and the measured loops / auto-animation timings move).
+- Python core regression against the C core: 474 scenarios, 2281 commands, 0 differences (10 chaotic scenarios set apart: random unstable lines or a crashed 68000, not word-for-word between the two runs).
+- Bug hunt on -14 (simulation only): output invariants over 393 recorded outputs (max 624 words, under the
+  2047 limit), 300 random fault combinations, 25 combinations compared between the two cores: 0 violations,
+  0 differences. Known gap: a palette bank-independence failure prints the chip line but no hint
+  (the PALBNK latch, 74HC259 U35 Q7, is the likely culprit).
+- Not run: real AES, MAME, guiverify (no Tk), Find the fault on injected-fault logs (too slow on the shared machine). The bench's MAME fault probes (`BRICO_STUCK`,
+  `BRICO_ALIAS`) are shadow stores: they cannot inject a decoding fault, so only the healthy
+  console is compared with MAME (`compare_mame.py`).
+
 ## 2026-11-16 - Emulator 1.21, Compiler 1.5: faster, ROM unchanged (1.35-nic034-12)
 
 **Emulator 1.21** (pure Python core; the C core is unchanged)

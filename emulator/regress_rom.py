@@ -48,6 +48,7 @@ HEALTHY = ["Echo $1234", "Read $320001", "Read $380000", "Read $300000", "Read $
            "TestVectors", "TestGfx", "Echo $31", "TestGfx $12345", "TestDAC $15", "TestVectors",
            "TestGfx $12345 1", "TestGfx 0 1", "TestDAC $12"]
 SCREEN = {"testdac"}
+DECODE = ["TestDecode", "Echo $5B"]       # last in every scenario that has it: older recordings still line up
 
 
 def run_cmd(c, h, line):
@@ -127,11 +128,13 @@ def scenario(args):
 def scenarios(rom):
     sc = []
     for cart in ("none", "test", "diag"):
-        sc.append((f"healthy/{cart}", rom, cart, 1, [], HEALTHY + (["CartDiag", "TestWRAM", "CartDiag"] if cart == "diag" else [])))
+        sc.append((f"healthy/{cart}", rom, cart, 1, [], HEALTHY + (["CartDiag", "TestWRAM", "CartDiag"] if cart == "diag" else [])
+                   + DECODE))
     sc.append(("healthy/none/nowd", rom, "none", 0, [], ["TestWatchdog", "Echo 1", "TestWatchdog", "TestChip"]))
     sc.append(("healthy/test/z80none", rom, "test", 1, [], ["TestZ80", "TestChip", "TestAudio", "Echo 2"]))
-    tests = {"wram": ["TestWRAM", "TestChip", "TestAudio", "Echo 3", "TestWatchdog", "TestWatchdog"],
-             "pal": ["TestPRAM", "TestChip", "TestDAC", "Echo 3"],
+    tests = {"wram": ["TestWRAM", "TestChip", "TestAudio", "Echo 3", "TestWatchdog", "TestWatchdog"] + DECODE,
+             "pal": ["TestPRAM", "TestChip", "TestDAC", "Echo 3"] + DECODE,
+             "lspc": ["TestLSPC", "TestChip", "Echo 3"] + DECODE,
              "vramlo": ["TestVRAM", "TestChip", "TestLSPC"], "vramhi": ["TestVRAM", "TestChip", "TestLSPC"],
              "line": ["TestTiming", "TestChip", "TestDAC", "Echo 4", "Echo 5"],
              "bios": ["TestChip", "Echo 6", "Echo 7", "Dump $C07FF0 16"],

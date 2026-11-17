@@ -140,6 +140,13 @@ def _make_neo():
                 w = (w | (1 << b)) if v else (w & ~(1 << b))
         return w
 
+    def sel_dead(region, a):
+        # kind 4: the decoder of this region uses an address line it should ignore
+        for r, k, b, v in faults:
+            if r == region and k == 4 and ((a >> b) & 1) != v:
+                return True
+        return False
+
     def vectors_from_cart():
         for r, k, b, v in faults:
             if r == 7:
@@ -508,6 +515,8 @@ def _make_neo():
             if not faults:
                 o = a & 0xFFFE
                 return (wram[o] << 8) | wram[o + 1]
+            if sel_dead(0, a):
+                return open_bus()
             o = wram_index(a)
             w = (wram[o] << 8) | wram[o + 1]
             if lane_dead(1):
@@ -531,6 +540,8 @@ def _make_neo():
         if a < 0x3C0000:
             return open_bus()
         if a < 0x3E0000:
+            if faults and sel_dead(8, a):
+                return open_bus()
             if lsb_only:
                 return open_bus() & 0xFF
             r = (a >> 1) & 3
@@ -542,6 +553,8 @@ def _make_neo():
         if a < 0x400000:
             return open_bus()
         if a < 0x800000:
+            if faults and sel_dead(1, a):
+                return open_bus()
             return fault_data(1, pal[pal_index(a)]) & 0xFFFF
         if a < 0xC00000:
             return 0xFFFF
@@ -561,11 +574,18 @@ def _make_neo():
                 if mask & 0x00FF:
                     wram[o + 1] = d & 0xFF
                 return
+            if sel_dead(0, a):
+                return
             o = wram_index(a)
             if (mask & 0xFF00) and not lane_dead(1):
                 wram[o] = (d >> 8) & 0xFF
             if (mask & 0x00FF) and not lane_dead(0):
                 wram[o + 1] = d & 0xFF
+            for r, k, b, v in faults:                 # kind 5: the WRAM write strobe also reaches the palette RAM
+                if r == 0 and k == 5:
+                    i = pal_index(a)
+                    pal[i] = ((pal[i] & ~mask) | (d & mask)) & 0xFFFF
+                    break
             return
         if a < 0x100000:
             cart_hold = (cart_hold & ~mask) | (d & mask)
@@ -587,6 +607,8 @@ def _make_neo():
                 latch[off & 7] = (off & 8) >> 3
             return
         if 0x3C0000 <= a < 0x3E0000:
+            if faults and sel_dead(8, a):
+                return
             r = (a >> 1) & 7
             if r == 0:
                 vram_set_offset(d & 0xFFFF)
@@ -614,6 +636,8 @@ def _make_neo():
                 update_irq()
             return
         if 0x400000 <= a < 0x800000:
+            if faults and sel_dead(1, a):
+                return
             i = pal_index(a)
             pal[i] = ((pal[i] & ~mask) | (d & mask)) & 0xFFFF
             return
@@ -876,12 +900,20 @@ def _make_neo():
         upd_fast()
 
     def neo_fault_add(region, kind, bit, value):
-        data_bits = (15, 15, 15, 15, 8, -1, 15, 0)
-        addr_lo = (1, 1, 0, 0, -1, 1, 1, -1)
-        addr_hi = (15, 13, 14, 10, -1, 16, 19, -1)
-        if kind < 0 or kind > 3 or len(faults) >= MAX_FAULTS or region < 0 or region > 7:
+        data_bits = (15, 15, 15, 15, 8, -1, 15, 0, -1)
+        addr_lo = (1, 1, 0, 0, -1, 1, 1, -1, -1)
+        addr_hi = (15, 13, 14, 10, -1, 16, 19, -1, -1)
+        sel_lo = (16, 13, 0, 0, 0, 0, 0, 0, 4)
+        sel_hi = (19, 21, -1, -1, -1, -1, -1, -1, 16)
+        if kind < 0 or kind > 5 or len(faults) >= MAX_FAULTS or region < 0 or region > 8:
             return -1
         if region == 7 and kind != 0:
+            return -1
+        if region == 8 and kind != 4:
+            return -1
+        if kind == 4 and (bit < sel_lo[region] or bit > sel_hi[region]):
+            return -1
+        if kind == 5 and (region != 0 or bit != 0 or value != 1):
             return -1
         if value < 0 or value > (9 if (region == 6 and kind == 2) else 1):
             return -1

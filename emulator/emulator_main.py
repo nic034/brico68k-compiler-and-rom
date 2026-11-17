@@ -65,7 +65,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.21"
+APP_VERSION = "1.22"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -295,6 +295,7 @@ TESTS = {
     "TestWRAM": _t("Memory"),
     "TestBRAM": _t("Memory"),
     "TestPRAM": _t("Memory"),
+    "TestDecode": _t("Memory"),
     "TestVRAM": _t("Video"),
     "TestLSPC": _t("Video"),
     "TestTiming": _t("Video", verdict_only="the measured cycle counts can differ slightly on a real board"),
@@ -433,7 +434,10 @@ def all_single_faults():
         if region in ADDR_RANGE:
             lo, hi = ADDR_RANGE[region]
             out += [(region, 1, bit, v) for bit in range(lo, hi + 1) for v in (0, 1)]
-    return out + [(0, 2, 0, 0), (0, 2, 0, 1)]
+    out += [(0, 2, 0, 0), (0, 2, 0, 1)]
+    # address decoding (TestDecode): a mirror line the decoder does not ignore, then WRAM writes into the palette
+    out += [(r, 4, bit, v) for r, (lo, hi) in SEL_RANGE.items() for bit in range(lo, hi + 1) for v in (0, 1)]
+    return out + [(0, 5, 0, 1)]
 
 
 _DX = {}
@@ -1070,7 +1074,7 @@ def main_gui(rom_arg=None):
     REGIONS = [("WRAM", "wram"), ("Palette RAM", "pal"), ("VRAM lower (slow)", "vramlo"),
                ("VRAM upper (fast)", "vramhi"), ("LSPC line counter", "line"),
                ("BIOS socket (68000 -> BricoNeo)", "bios"), ("Cartridge slot (P bus)", "cart"),
-               ("Vector table switch", "vec")]
+               ("Vector table switch", "vec"), ("LSPC registers (decoding)", "lspc")]
     reg_var = tk.StringVar(value=REGIONS[0][0]); kind_var = tk.StringVar(value="Data bit stuck")
     bit_var = tk.StringVar(value="0"); lvl_var = tk.StringVar(value="1"); range_var = tk.StringVar(); ferr = tk.StringVar()
     ttk.Label(flt, text="Component", style="Card.TLabel").grid(row=6, column=0, sticky="w", pady=3)
@@ -1575,11 +1579,16 @@ def main_gui(rom_arg=None):
             return ["Address line stuck", "Address line unstable"]
         if code == "vec":
             return ["Switch held"]
+        if code == "lspc":
+            return ["Decoder uses a line"]
         k = ["Data bit stuck"]
         if code != "line":
             k.append("Address line stuck")
         if code == "wram":
             k.append("Chip dead (byte lane)")
+            k.append("Writes also reach palette")
+        if code in SEL_RANGE:
+            k.append("Decoder uses a line")
         return k
 
     def update_form(*_):
@@ -1607,6 +1616,21 @@ def main_gui(rom_arg=None):
             if not lvl_var.get().startswith(("lower", "upper")):
                 lvl_var.set("upper (D8-D15)")
             range_var.set("Writes to that chip are lost, it reads $FF."); return
+        if k.startswith("Writes"):
+            bit_lbl.configure(text="Chip"); sp_bit.grid_remove(); lvl_lbl.configure(text="Writes")
+            cb_lvl.configure(values=["also palette RAM"]); lvl_var.set("also palette RAM")
+            range_var.set("Every write to the work RAM also changes the palette RAM cell with the same A1-A12 "
+                          "(a decoder output selecting both chips): TestDecode finds it."); return
+        if k.startswith("Decoder"):
+            lo, hi = SEL_RANGE[FAULT_REGIONS[code]]
+            bit_lbl.configure(text="Line A"); sp_bit.grid(); sp_bit.configure(from_=lo, to=hi)
+            lvl_lbl.configure(text="Answers at"); cb_lvl.configure(values=["0", "1"])
+            if lvl_var.get() not in ("0", "1"):
+                lvl_var.set("0")
+            if not bit_var.get().isdigit() or not lo <= int(bit_var.get()) <= hi:
+                bit_var.set(str(lo))
+            range_var.set(f"A{lo}-A{hi} are ignored by a healthy decoder (mirrors). The chip answers only when "
+                          "the line is at that level: open bus elsewhere, writes lost. TestDecode finds it."); return
         sp_bit.grid(); lvl_lbl.configure(text="Stuck at"); cb_lvl.configure(values=["0", "1"])
         if k.endswith("unstable"):
             lvl_lbl.configure(text="Level"); cb_lvl.configure(values=["random"]); lvl_var.set("random")
@@ -1638,6 +1662,10 @@ def main_gui(rom_arg=None):
             fault_add(f"vec:stuck:{'cart' if lvl_var.get() == 'cartridge' else 'bios'}")
         elif k.startswith("Chip"):
             fault_add(f"wram:lane:{lvl_var.get().split()[0]}")
+        elif k.startswith("Writes"):
+            fault_add("wram:leak")
+        elif k.startswith("Decoder"):
+            fault_add(f"{code}:sel:{bit_var.get().strip()}:{lvl_var.get()}")
         elif k.startswith("Strobe"):
             fault_add(f"cart:strobe:{lvl_var.get().lower()}")
         else:

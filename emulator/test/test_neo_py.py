@@ -27,6 +27,11 @@ SEQS = [
     ("none", 1, 1, [(0, 0, 3, 1), (2, 1, 5, 0)], None, ["TestWRAM", "TestVRAM", "TestGfx", "TestChip"]),
     ("test", 1, 1, [(6, 3, 4, 0), (5, 1, 15, 1)], None, ["CartDiag", "TestChip", "Echo 9"]),
     ("none", 1, 1, [], (0xA5, 0x5A, 0x3C, 0xE7, 0xFF, 0xFFFF, 1), ["TestInp", "TestBRAM", "TestStatusA", "TestSystype"]),
+    # address decoding faults (kind 4: a line the decoder should ignore; kind 5: WRAM writes reach the palette)
+    ("none", 1, 1, [(0, 4, 17, 0)], None, ["TestDecode", "TestWRAM", "Echo 5"]),
+    ("none", 1, 1, [(1, 4, 15, 1), (8, 4, 6, 0)], None, ["TestDecode", "TestPRAM", "TestLSPC", "TestDAC 1"]),
+    ("none", 1, 1, [(0, 5, 0, 1)], None, ["TestDecode", "TestPRAM", "TestChip"]),
+    ("none", 1, 1, [(8, 4, 9, 1)], None, ["TestDecode", "TestChip", "Echo 6"]),
 ]
 
 

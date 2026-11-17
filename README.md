@@ -11,7 +11,7 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.5 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.21 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.22 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
 | `rom/ROM.BIO` | Ready-to-use ROM, 128 KB: 32 KB of code + CRC32 + 3 mirrors, exactly what the BricoNeo builds itself for header flag `$0004` (SHA-256 in `rom/ROM.BIO.sha256`) |
 | `brico16bits/` | Optional Brico16Bits patch (EXCPT: 68000 exception reports). Syntax-checked only, not built for the Pico, not run |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
@@ -203,11 +203,60 @@ A badge is a reading aid, not a second opinion: the raw output in the Report tab
 said. With the Z80 option set to no program, the Z80 failures are marked as expected.
 Keys: Enter sends, Up/Down browses the history, F5 resets, F8 pauses, Ctrl+L clears the console.
 
+### Which chip? References on the AES (RAM tests and TestDecode)
+
+TestWRAM, TestPRAM and TestVRAM name the chip of the bad data bits and, for TestDecode and address
+lines, the parts in the path. The references come from the **Board-Folk NeoGeoAES-3.5** KiCad
+schematic (BF1.5, a recreation of the AES main board: sheets CPU, GRAPHICS, VIDEO, ROM), read pin by
+pin and checked against the rendered PDF pages and the neogeodev wiki (NEO-C1, NEO-G0, NEO-E0,
+NEO-B1, LSPC2-A2, Palettes, VRAM, Memory mapped registers). Per Nic034 it is valid for the AES 3-3, 3-5 and 3-6
+boards (his message listed 3-5 twice: 3-4 is not confirmed). The messages say "AES" and never a
+revision; on an MVS the references do not apply (backup RAM prints none).
+
+| Data bits | WRAM | Palette RAM | Slow VRAM | Fast VRAM |
+|---|---|---|---|---|
+| D0-D7 (lower chip) | U1 | U7 (PC0-7) | U17 (E0-7) | U19 (F0-7) |
+| D8-D15 (upper chip) | U2 | U6 (PC8-15) | U18 (E8-15) | U20 (F8-15) |
+
+Read off the schematic:
+- WRAM U1/U2 (43256): data pins on the 68000 D0-D7 / D8-D15, address pins on the 68000 A1-A15 (chip
+  pin A(k-1) = 68000 Ak), CE to ground; OE/WE from NEO-C1 U4: RAOL/RAWL to U1, RAOU/RAWU to U2. The
+  D bus is shared with the LSPC2 U21, NEO-G0 U5, the ROM U36 (27C1024) and the cartridge slot.
+- NEO-C1 U4 has address inputs A17-A21 and A22' / A23' (NEO-E0 U34 makes them: on the wiki, "altered address lines for the 68k vector table swap");
+  no A16. The WRAM chips see A1-A15 only, so A16 reaches neither of them.
+- Palette RAM U6/U7 (4364): addresses PA0-PA11 from NEO-B1 U13, A12 = PALBNK (74HC259 U35 output Q7),
+  data PC8-15 / PC0-7. PC goes to NEO-G0 U5 (also on the D bus and the cartridge data bus) and to the
+  74LS273 U9/U10; the RAMs' WE is shared with NEO-G0's WE pin, and NEO-C1's PAL output goes to NEO-G0's G1.
+- VRAM: slow U17/U18 (43256) addresses B0-B14, data E0-E7 / E8-E15; fast U19/U20 (5863 / 5814)
+  addresses C0-C10, data F0-F7 / F8-F15; all of it only to/from the LSPC2 U21. The LSPC2 has
+  address inputs A1-A3 only; its OE/WE come from NEO-C1 (LSPOE, LSPWE).
+
+Cross-check with an independent source, the Delta Island "NeoGeo Pinouts" workbook (traced from a
+board, French labels): it agrees on the nets above (NEO-C1 RAOU/RAWU to the WRAM chip on D8-D15,
+RAOL/RAWL to the one on D0-D7, no A16 on NEO-C1, LSPC2 address inputs A1-A3, LSPOE/LSPWE from NEO-C1,
+palette PA0-PA11 from NEO-B1, A12 from the 74HC259 pin 12, palette WE shared with NEO-G0 pin 41, PC0-7 /
+PC8-15 on the two palette chips). It has no U-numbers: it calls the WRAM chips "WORK RAM 1" (D8-D15,
+the upper one) and "WORK RAM 2" (D0-D7), the opposite order of U1 / U2, so do not read "1" as "U1". It
+also holds a few evident typos (VRAM pins in the LSPC2 sheet), so only its nets were used.
+
+The wiki adds: NEO-G0 is a quad 245 bidirectional buffer (a 245 keeps the bit order), with a lower palette
+bus PALD0-7 and an upper one PAUD0-7, and makes the palette /WE as PAL OR R/W; NEO-C1's WRU/WRL/WWU/WWL
+cover `$100000-$1FFFFF` (the schematic names the same pins RAOU/RAOL/RAWU/RAWL), PAL `$400000-$7FFFFF`,
+LSPOE/LSPWE `$3C0000-$3DFFFF`; slow VRAM is 2x 62256/43256, fast VRAM 2x 5814/5863/6116. The messages use the
+wiki's strobe names.
+
+**Not proven**: the bit pairing inside NEO-G0 (D0-D7 = PC0-PC7: the 245 structure and the wiki's lower /
+upper buses say so, no source lists it pin by pin); that E0 / F0 are VRAM data bit 0 (pin names only); that the
+U-numbers of a given board are those of the KiCad file (it is a reproduction); that A17-A19 are really
+ignored for WRAM, palette and LSPC (inside NEO-C1). The messages show the net names (PC0-7, E0-7...)
+so that each reference can be probed on the board. A bad data bit still points at the chip, its pin,
+its track, or the other parts on that bus: the message cannot tell which.
+
 ### Writing and testing a new extension
 
 **Space first.** The ROM uses the NeoDiag layout (header flag `$0004`): code must end before
-`$7FFA` (32 KiB, copied 4 times). With the 25 extensions of 1.35-nic034-12, **6250 bytes are
-free** (CartTest, Version and TestBus removed, code shrunk in -12). Brico68k Compiler prints the free space after
+`$7FFA` (32 KiB, copied 4 times). With the 26 extensions of 1.35-nic034-14, **4324 bytes are
+free** (TestDecode took 854 bytes and the chip references and hints of the RAM tests about 1 KB; CartTest, Version and TestBus were removed and the code shrunk before). Brico68k Compiler prints the free space after
 each build.
 
 Nothing to add to the emulator: it reads the extension table of the ROM. A new extension:
@@ -254,6 +303,12 @@ in the ways real boards fail, then see how each test reports it:
   lower 0-14 and upper 0-10.
 - **WRAM chip dead**, lower (D0-D7) or upper (D8-D15) byte lane: writes are lost and reads give
   `$FF`.
+- **address decoding** (what TestDecode checks): `wram:sel:17:0`, `pal:sel:15:0`, `lspc:sel:6:0`.
+  The decoder of that chip uses an address line it should ignore (WRAM A16-A19, palette A13-A21,
+  LSPC registers A4-A16), so the chip answers only when the line is at the given level; elsewhere
+  reads give the open bus and writes are lost. At level 1 the chip never answers at its normal
+  addresses. `wram:leak`: every WRAM write also changes the palette RAM cell with the same A1-A12
+  (a decoder output selecting both chips).
 - **BIOS socket address line** A1-A16 between the 68000 and the BricoNeo, stuck at 0 or 1
   (`bios:addr:15:1`) or unstable (`bios:float:15`, a random level on each access). The BricoNeo
   sees the faulty address too (command block, port, EOT). A1-A14 stop the boot, as on a board.
@@ -310,12 +365,17 @@ Checking the Python core:
 - `emulator/test/test_neo_py.py` runs the Python and C AES models in lockstep (commands, reset
   button, Z80 options, cartridges, faults, test inputs) and compares cycles, PC, output words,
   screen lines, VRAM and palette after every slice: 0 differences.
-- `emulator/regress_rom.py` with `CORE=python` against the C core: 517 scenarios, 1937 commands,
+- `emulator/regress_rom.py` with `CORE=python` against the C core: 474 scenarios, 2281 commands,
   0 differences (about 45 minutes on 2 cores, 1 minute with the C core). The scenarios the check
   sets apart as chaotic (random unstable lines, a crashed 68000) are not word-for-word between the
   two runs because the C library keeps its random generator and CPU registers from one scenario
-  to the next in a worker; the 3 deterministic ones that differed are identical when both cores
-  start from a fresh process.
+  to the next in a worker (10 such scenarios in the last run; they were not re-run one by one
+  from a fresh process for this ROM).
+- `emulator/test/test_chip_hints.py`: the chip references and hint lines of TestWRAM, TestPRAM and
+  TestVRAM under data and address faults (U1/U2, U7/U6, U17/U18, U19/U20), and none on a healthy console.
+- `emulator/test/test_decode.py`: TestDecode under every decoding fault (`wram:sel`, `pal:sel`,
+  `lspc:sel` at both levels, `wram:leak`) and a few faults of the RAMs themselves: each one must
+  give exactly the expected line and no other, healthy must say "Test success". 0 failures.
 - `emulator/test/test_ext_check.py`: the rule check sees each of 12 broken cases (see "Writing and
   testing a new extension").
 - `emulator/guiverify.py`: 200/200 with the C core; with the Python core 187/191, the 4 misses
@@ -323,7 +383,7 @@ Checking the Python core:
 
 ROM regression check, for a source change meant to keep every output (a size or speed change):
 `python3 emulator/regress_rom.py run OLD.BIO old.json`, the same for the new ROM, then
-`python3 emulator/regress_rom.py compare old.json new.json`. 517 scenarios (no cartridge, test
+`python3 emulator/regress_rom.py compare old.json new.json`. 474 scenarios (no cartridge, test
 cartridge, PROG board, every single fault the core models, every slot fault), each command's
 output words, screen lines, Z80 commands and cartridge writes; about 1 minute on 2 cores.
 `python3 emulator/build_test_core.py` (Linux, gcc) builds a test-only C core with settable joypad,
@@ -332,7 +392,7 @@ With `CORE=python` or `CORE=emulator/build/libneocore_test.so` the check adds 10
 buttons, memory card states), which the AES model never reaches otherwise. With the Python core
 the check takes much longer than with the C core.
 
-## ROM contents: 25 extensions
+## ROM contents: 26 extensions
 
 Commands are typed on the Brico16Bits console. "No WRAM" means the test never relies on
 work RAM (no stack), so it still runs on a board with dead WRAM.
@@ -345,6 +405,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | TestWRAM / TestBRAM / TestPRAM | yes | One suite (see below): data bus walking 1/0, byte writes (not palette), each address line named, March C- $5555/$AAAA on every word. PRAM: both banks + bank select. TestBRAM is MVS only and destructive. |
 | **TestVRAM** | yes | All VRAM in one test, replaces TestVRAML/U and MarchVRAML/U (see below) |
 | TestLSPC | yes | LSPC2-A2 registers, VRAM auto-increment |
+| **TestDecode** | yes | Address decoding: the mirrors of WRAM (A16-A19), palette RAM (A13-A21) and the LSPC registers (A4-A16) name the line a decoder does not ignore; WRAM and palette RAM must not change each other (see below). Every word is put back |
 | Color | yes | Whole screen in one colour (upstream) |
 | TestStatusA / TestSystype | yes | Coin, service and RTC bits / TEST and JAMMA sense, AES/MVS aware |
 | TestAudio | no | Z80 handshake, then left / right / centre beeps (upstream, reworked). A new command stops the beeps and runs. |
@@ -360,7 +421,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 
 Bold entries are new in this repository.
 
-The code ends 6250 bytes under `$7FFA` (fork 1.35-nic034-12). The 32 KB limit is the NeoDiag
+The code ends 4324 bytes under `$7FFA` (fork 1.35-nic034-14). The 32 KB limit is the NeoDiag
 layout (header flag `$0004`), not the BricoNeo.
 
 Removed in 1.35-nic034-11: **TestBus** (BIOS socket path, A15/A16 by the NeoDiag copies, CRC32)
@@ -371,6 +432,37 @@ version is no longer in the ROM image: the SHA-256 in `rom/ROM.BIO.sha256` and t
 the builds apart (Brico16Bits shows the header version, 1.35, as before).
 
 `ChipCheck` was renamed **TestChip** in 1.35-nic034-07 (same test, same output).
+
+### TestDecode
+
+The March tests walk the lines the RAM chips are wired to (WRAM A1-A15, one palette bank A1-A12).
+The upper lines never reach a RAM chip: the decoders use them to pick which chip answers (on the
+AES, NEO-C1 U4 sees A17-A23 and NEO-E0 U34 sees A1-A23, see the schematic notes below), and ignore some on purpose, so a RAM also answers at mirror addresses. A line
+the decoder ignores badly is invisible to every other test. TestDecode checks the mirrors:
+
+| Region | Mirrors | Lines |
+|---|---|---|
+| Work RAM | `$100000-$10FFFF` up to `$1FFFFF` | A16-A19 |
+| Palette RAM (bank 0) | `$400000-$401FFF` up to `$7FFFFF` | A13-A21 |
+| LSPC registers (`REG_VRAMMOD`) | `$3C0000-$3C000F` up to `$3DFFFF` | A4-A16 |
+
+For each line, a word written at the base address must read back at base + 2^n, and a word written
+there must read back at the base (`> Work RAM ... FAIL: not a mirror on A17`: this address answers
+somewhere else). A base word that does not hold a value at all is reported as "the word itself is
+bad" (a RAM fault, not a decoder one: run TestWRAM, TestPRAM or TestLSPC). The last line writes a
+WRAM word and a palette word that share A1-A12, in both orders: neither may change the other (a
+decoder output selecting two chips at once). Every word is saved and put back; the palette word is
+colour 3072 (palette 192), not the reference colour or the backdrop. No WRAM, no stack, 2 ms.
+
+**What it cannot see**: the lines the decoder uses to choose the region (A20-A23): a fault there
+sends the access to another chip and stops the console much earlier. **Not verified on a real
+console, nor against MAME yet**: the ranges (WRAM `$100000-$1FFFFF`, palette `$400000-$7FFFFF`, LSPC
+`$3C0000-$3DFFFF`) are those of the wiki's NEO-C1 page, the LSPC mirrors follow its decode mask `$FE0001`
+(the wiki says its decode masks are not verified), and the emulator models them after MAME's `neogeo`
+address map (not re-read from MAME's source; `emulator/compare_mame.py` now runs TestDecode in MAME to
+settle it).
+If a healthy AES reports a mirror, the assumption is wrong, not the console: tell which line and on
+which board.
 
 ### TestVectors and TestGfx
 
@@ -545,7 +637,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `84f7840` (2026-11-09; since `5859d6b` only the byte-swap detection changed, it now also accepts reset vectors above the first 64 KB: no effect here, ours is `$00C0xxxx`). Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd), plus `5643191` / `1b72deb` (2026-11-08: PlayEyeSnd renamed TestFM, new TestSsg). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-12** (not in the image); the header announces **1.35**, the upstream base; 25 extensions, flags `$0007`, SHA-256 `c70bdf08f01f2bda43a370f9ae73735d08fd906c1136c112c5126526ac732071` |
+| This ROM | fork version **1.35-nic034-14** (not in the image); the header announces **1.35**, the upstream base; 26 extensions, flags `$0007`, SHA-256 `cf4af7837a2a1e56b32f93f467ae9f149e0ab1fb1fb88043a592190b2139afd3` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
@@ -579,8 +671,9 @@ Brico16Bits recognises the byte order.
    counts may differ slightly) or `DIFFERENT`, with the diff. Look at the screen for TestDAC.
    `bench/expected_healthy_aes.txt` (and `..._no_cartridge.txt`) give the same reference as text.
 7. If something differs: **Find the fault** (or `--diagnose putty.log`). The log is replayed under
-   each of the 288 single faults the emulator models (data bit or address line stuck at 0 or 1 in
-   WRAM, palette RAM, VRAM and the line counter, WRAM chip dead, BIOS socket A1-A16), and the faults are ranked by how
+   each of the 343 single faults the emulator models (data bit or address line stuck at 0 or 1 in
+   WRAM, palette RAM, VRAM and the line counter, WRAM chip dead, BIOS socket A1-A16, decoding of
+   WRAM, palette RAM and the LSPC registers), and the faults are ranked by how
    many commands they explain. **Apply to Faults** puts the best one in the emulator. It takes
    about 1.5 min on 2 cores, much less with more cores (the work is spread over processes).
    Limits: one stuck-at fault at a time, modelled chips only. Intermittent faults, shorts between
@@ -619,7 +712,7 @@ each well under the 3 s host limit.
   and bus hold tests exist nowhere else: MAME and the emulator cannot check them). No console log
   was compared word for word, and no board with a known fault has been tested yet: that the tests
   name a real fault correctly is still shown in simulation only. MAME stays the reference.
-  **1.35-nic034-07 to -09 (TestVectors, TestGfx) have not run on real hardware yet.** In MAME
+  **1.35-nic034-07 to -09 (TestVectors, TestGfx) and -14 (TestDecode, chip references) have not run on real hardware yet.** In MAME
   0.264 both give the same words as in the emulator, and TestGfx the same picture pixel for pixel
   with the test cartridge. Not shown by that: the real L0 ROM (vertical shrink), real S and C
   tiles, and what a real LSPC does with sprite 0 (MAME draws it in the unused sprite slots of

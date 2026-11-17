@@ -105,6 +105,7 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_TEST_PRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestPRAM",			"Palette RAM, both banks, as TestWRAM (no byte test) + bank select. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_VRAM,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestVRAM",		"Slow and fast VRAM, as TestWRAM; names bits and chip. $8600-$86FF skipped. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_LSPC,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestLSPC",			"LSPC2-A2: VRAMMOD read-back, VRAM address/data round trip, auto-increment. No WRAM."
+	DECLARE_EXTENSION EXT_TEST_DECODE,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestDecode",		"Address decoding: mirrors of WRAM, palette RAM and LSPC registers; WRAM and palette independent. No WRAM."
 	DECLARE_EXTENSION EXT_COLOR,			BRICO_EXT_OUTPUT_TYPE_VOID,		"Color",			"Whole screen in colour P1 (palette RAM only), e.g. red $CF00, green $20F0, blue $900F. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_STATUSA,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestStatusA",		"STATUS_A: coins, service, RTC (MVS). No WRAM."
 	DECLARE_EXTENSION EXT_TEST_Z80,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestZ80",			"Z80 handshake 03/01/03, 16 stable replies, latch echo flagged. Stops sound. Needs the SM1/M1 driver. No WRAM."
