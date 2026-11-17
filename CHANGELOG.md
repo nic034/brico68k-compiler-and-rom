@@ -4,6 +4,37 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-17 - Compiler 1.6, test fix: review of the Compiler and the Emulator, ROM unchanged (1.35-nic034-14)
+
+Review only, no new feature. ROM rebuilt by the Compiler: byte-identical
+(SHA-256 `cf4af7837a2a1e56b32f93f467ae9f149e0ab1fb1fb88043a592190b2139afd3`), every Brico16Bits check OK.
+
+**Compiler 1.6**
+- The `.tar.gz` fallback for the vasm / vlink sources (`sun.hasenbraten.de`, plain http) was
+  unpacked with no filter: an altered archive could write outside the work folder (`../`,
+  absolute paths, links). Now `filter="data"` (Python 3.12+ and the 3.8-3.11 security releases);
+  on an older Python every entry is checked first and the archive refused if one points outside.
+  Checked: a normal archive unpacks, one with `../escape.txt` is refused. Only used on systems with
+  no embedded vasm / vlink (macOS...) when the GitHub zip and git both fail. Zip archives were
+  already safe (`zipfile` drops `..` and absolute paths).
+
+**Emulator** (no code change, version stays 1.22)
+- `emulator/test/test_m68k_py.py` looked for the Musashi sources in `build/src` only, which
+  `build_core.py` makes; `build_test_core.py`, named in its docstring, makes `build/src_test`, so
+  after that one the test stopped with a gcc error. It now takes either, or says what to run.
+
+**Checks**
+- `test_m68k_py.py`: 20000 cases, 0 mismatches against Musashi, 1703/1704 handlers covered.
+- `test_neo_py.py` (Python core lockstep with the C core), `test_chip_hints.py`,
+  `test_decode.py`, `test_ext_check.py`: 0 failures. `package_emulator.py` rebuilds
+  `Brico68k_Emulator.py` byte for byte. pyflakes on both tools: nothing.
+- Speed: inlining the hot bus paths of the Python core (watchdog kick, VRAM write, `now()`) was
+  tried and measured: no gain beyond noise (TestVRAM + TestWRAM 1.63-1.72 s CPU against
+  1.52-1.65 s), so it was not kept. The Python core runs about 2 M 68000 instructions per second
+  (TestVRAM: 1.47 s emulated in 1.2 s); a real speed-up would need a different design (block
+  translation), not touch-ups. Not run: full `regress_rom.py` (nothing in the cores changed), real
+  AES, MAME, guiverify (no Tk).
+
 ## 2026-11-17 - ROM 1.35-nic034-14: TestDecode, chip references; Emulator 1.22: decoding faults
 
 **ROM 1.35-nic034-14** (SHA-256 `cf4af7837a2a1e56b32f93f467ae9f149e0ab1fb1fb88043a592190b2139afd3`, 26 extensions,

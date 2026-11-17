@@ -20,6 +20,10 @@ import m68k_py, m68k_tables
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE.parent / "build" / "src"
+if not (SRC / "m68kops.c").exists():                    # build_test_core.py only makes src_test
+    SRC = HERE.parent / "build" / "src_test"
+if not (SRC / "m68kops.c").exists():
+    sys.exit("Musashi sources not found: run emulator/build_test_core.py (or build_core.py) first")
 LIBPATH = HERE.parent / "build" / "libmusashi_test.so"
 import subprocess
 subprocess.run(["gcc", "-O2", "-fPIC", "-shared", "-w", f"-I{SRC}", "-o", str(LIBPATH), str(HERE / "musashi_harness.c")]

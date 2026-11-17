@@ -43,7 +43,7 @@ import zipfile
 from pathlib import Path
 
 APP_NAME = "Brico68k Compiler"
-APP_VERSION = "1.5"
+APP_VERSION = "1.6"
 
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_compiler"
@@ -373,7 +373,15 @@ def _fetch_tool_source(name, marker, log, progress):
                         z.extractall(tmp)
                 else:
                     with tarfile.open(arch) as t:
-                        t.extractall(tmp)
+                        if hasattr(tarfile, "data_filter"):     # Python 3.12+ (and 3.8-3.11 security releases)
+                            t.extractall(tmp, filter="data")    # no absolute path, no "..", no link out of tmp
+                        else:
+                            root = str(tmp.resolve())
+                            for m in t.getmembers():       # Python 3.8: no Path.is_relative_to
+                                p = str((tmp / m.name).resolve())
+                                if not (m.isfile() or m.isdir()) or os.path.commonpath([root, p]) != root:
+                                    raise BuildError(f"unsafe entry in the archive: {m.name}")
+                            t.extractall(tmp)
                 arch.unlink()
             found = [p.parent for p in tmp.rglob(marker)]
             if not found:
