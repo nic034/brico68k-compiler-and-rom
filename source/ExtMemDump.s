@@ -35,11 +35,19 @@ EXT_MEMDUMP:
 	; Now iterate from a2 to a3. The watchdog is kicked on every word:
 	; it never was before, so on MVS (watchdog ~0.135 s) a dump longer
 	; than ~10000 words reset the console in the middle of the dump.
+	; The two BricoNeo output port words ($C1FF00-$C1FF03 and mirrors) are
+	; sent as 0, not read: a read there ends the command (EOT) or arms an
+	; output, and the rest of the dump would land in the next command.
 .loop
 	cmpa.l a2,a3
 	beq.s .endloop
 	WatchDog
-	move.w (a2)+,d0
+	moveq #0,d0
+	IsHostPort a2
+	beq.s .port
+	move.w (a2),d0
+.port:
+	addq.l #2,a2
 	PortWriteD0
 	bra.s .loop
 .endloop:

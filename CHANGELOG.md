@@ -4,6 +4,58 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-18 - ROM 1.35-nic034-15: Read / Dump spare the BricoNeo ports, TestChip survives a dead IRQ acknowledge; bug-hunt and unexpected-input benches
+
+**ROM 1.35-nic034-15** (SHA-256 `8dcd66e4c2f2240032dd022eb6006244a61dded0acdde137abb564bc61bad69a`, 26 extensions,
+4134 bytes free before `$7FFA`, was 4324)
+- **Read / Dump**: reading the BricoNeo output ports is no longer possible by accident. Any read at
+  socket offset `$1FF00` is an EOT for the BricoNeo and `$1FF02` arms an output word (Brico16Bits
+  watches A1-A16, so in `$C00000-$CFFFFF` and every 128 KB mirror). `Read $C1FF00` ended the command
+  before its value (0 words), and `Dump $C1FF00 n` ended it at once while the 68000 kept sending: the
+  rest of the dump went into the next command's answer. Both now send `$0000` for those two words
+  without reading them (new macro `IsHostPort`, 36 bytes). Found by the new bench.
+- **TestChip**: with an LSPC2 register fault on D0-D2 (`lspc:sel:4..16:1` in the emulator: the
+  registers do not answer at `$3C0000`), the write to `REG_IRQACK` is lost, the level 3 interrupt
+  pending since reset is never acknowledged, and the IRQ test aborted TestChip with an exception
+  (vector 24-31) before the Z80, NEO-D0 and verdict lines. When VRAMMOD read-back shows D0, D1 or D2
+  bad, the two IRQ lines now say `SKIP    LSPC2 D0-D2 bad: no IRQ acknowledge` and the report
+  goes to its end (`=> Test failure: ... LSPC2 ...`). 154 bytes. Other faults on VRAMMOD bits keep
+  the IRQ test. Not verified on a real console: the pending level 3 after reset is from the wiki
+  (68k interrupts) and the emulator's model of it.
+- Regression -14 against -15 (C test core, 474 scenarios, 2281 commands, every modelled fault, 10
+  input sets): 13 differences, all TestChip under `lspc:sel:N:1` (the exception replaced by the full
+  report); 3 measured TestWatchdog loop counts move by one (code moved). Nothing else.
+  `bench/expected_healthy_aes.txt` unchanged; `expected_healthy_aes_no_cartridge.txt`: only the
+  watchdog loop count.
+- `test_chip_hints.py`, `test_decode.py`, `test_ext_check.py`, `test_neo_py.py` (lockstep): 0 failures.
+  `--test` (rule check of every extension): no rule broken.
+
+**New bench: `emulator/test/bench_fuzz.py`** (bug hunt and unexpected input)
+- Every command with extreme and random P1-P3 (0, 1, $FFFF, $FFFFFFFF, odd addresses, RAM mirrors,
+  unmapped space, I/O, BIOS socket, counts over the buffer), random sequences, and random sequences
+  under 1-3 random faults. Checked after each command: EOT or exception report, never the 3 s
+  timeout (except a user write into the stack / vectors / I/O, TestWatchdog, BIOS socket faults);
+  at most 2047 words; result fits its type; `Echo` right after returns its value.
+- On -14: the two Read / Dump failures above, nothing else. On -15: 0 failures over 3774 + 3094
+  commands (seeds 7 and 23) including about 350 fault sequences, and 120 random lines under the
+  Brico16Bits rule check.
+
+**Unexpected input to the tools** (no code change needed)
+- Emulator: empty, short, oversize, zeroed, corrupted ROMs; missing files and folders; damaged
+  logs for `--compare` (truncated, garbled lines, holes, CRLF, BOM, binary, UTF-16, unknown
+  commands); 13 malformed `--fault` specs; bad cartridges, cartridge list, PNG path: every case
+  gives a readable message and an exit code, no Python traceback. Parameters are parsed like
+  Brico16Bits (`Read $zz` reads address 0, `Echo 99999999999999999999` gives `$FFFF`).
+  Known: a script `Delay 99999999` really waits that long in emulated time (about 28 h).
+- Compiler: syntax error, unknown symbol, missing include / linker script / main source, empty
+  source file, code over `$7FFA`, CRLF, UTF-8 and Latin-1 comments, paths with spaces: every error
+  names the file and line, no traceback; the good ones build byte-identical ROMs.
+
+**Speed**: nothing new to gain without changing the design (see Compiler 1.6 entry). Dump is
+about 50 cycles per word slower (the port check): 2045 words take 0.1 ms more.
+
+Not run: real AES, MAME (`compare_mame.py`), guiverify (no Tk).
+
 ## 2026-11-17 - Compiler 1.6, test fix: review of the Compiler and the Emulator, ROM unchanged (1.35-nic034-14)
 
 Review only, no new feature. ROM rebuilt by the Compiler: byte-identical

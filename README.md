@@ -255,7 +255,7 @@ its track, or the other parts on that bus: the message cannot tell which.
 ### Writing and testing a new extension
 
 **Space first.** The ROM uses the NeoDiag layout (header flag `$0004`): code must end before
-`$7FFA` (32 KiB, copied 4 times). With the 26 extensions of 1.35-nic034-14, **4324 bytes are
+`$7FFA` (32 KiB, copied 4 times). With the 26 extensions of 1.35-nic034-15, **4134 bytes are
 free** (TestDecode took 854 bytes and the chip references and hints of the RAM tests about 1 KB; CartTest, Version and TestBus were removed and the code shrunk before). Brico68k Compiler prints the free space after
 each build.
 
@@ -378,6 +378,12 @@ Checking the Python core:
   give exactly the expected line and no other, healthy must say "Test success". 0 failures.
 - `emulator/test/test_ext_check.py`: the rule check sees each of 12 broken cases (see "Writing and
   testing a new extension").
+- `emulator/test/bench_fuzz.py` (bug hunt / unexpected input): every command with extreme and random
+  parameters (0, $FFFF, $FFFFFFFF, odd addresses, mirrors, unmapped space, counts over the buffer),
+  random sequences, random combinations of 1-3 faults; after each command: an EOT or an exception
+  report (never the 3 s timeout), at most 2047 words, a result that fits its type, and `Echo` answers
+  right after (the 68000 is back in the dispatcher). `--check N` adds N random lines under the
+  Brico16Bits rule check (Python core). `--seed` replays a failure. C test core by default (`--core python`).
 - `emulator/guiverify.py`: 200/200 with the C core; with the Python core 187/191, the 4 misses
   being the diagnosis step that exceeds its 10 minute limit.
 
@@ -421,7 +427,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 
 Bold entries are new in this repository.
 
-The code ends 4324 bytes under `$7FFA` (fork 1.35-nic034-14). The 32 KB limit is the NeoDiag
+The code ends 4134 bytes under `$7FFA` (fork 1.35-nic034-15). The 32 KB limit is the NeoDiag
 layout (header flag `$0004`), not the BricoNeo.
 
 Removed in 1.35-nic034-11: **TestBus** (BIOS socket path, A15/A16 by the NeoDiag copies, CRC32)
@@ -620,6 +626,10 @@ Read from the Brico16Bits code (and Aurelien's review):
   one EOT before the beeps, polls the command block during them (a new command stops them),
   and no longer leaks stack on the error path.
 - **Dump**: limited to 2045 words, the BricoNeo buffer.
+- **Read / Dump**: the two BricoNeo output port words (`$C1FF00-$C1FF03`, and the same offsets in every
+  128 KB mirror of `$C00000-$CFFFFF`) are sent as `$0000`, not read: reading `$1FF00` is the end of the
+  command (EOT) for the BricoNeo and `$1FF02` arms an output word, so the rest of the answer used to land
+  in the next command.
 - **Write**: odd addresses no longer crash with a 68000 address error.
 - **VRAM tests**: merged into TestVRAM, which follows the wiki's access delays with margin (the
   1.35 tests read 12 cycles after the end of the address write, 16 required; MAME does not
@@ -637,7 +647,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `84f7840` (2026-11-09; since `5859d6b` only the byte-swap detection changed, it now also accepts reset vectors above the first 64 KB: no effect here, ours is `$00C0xxxx`). Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd), plus `5643191` / `1b72deb` (2026-11-08: PlayEyeSnd renamed TestFM, new TestSsg). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-14** (not in the image); the header announces **1.35**, the upstream base; 26 extensions, flags `$0007`, SHA-256 `cf4af7837a2a1e56b32f93f467ae9f149e0ab1fb1fb88043a592190b2139afd3` |
+| This ROM | fork version **1.35-nic034-15** (not in the image); the header announces **1.35**, the upstream base; 26 extensions, flags `$0007`, SHA-256 `8dcd66e4c2f2240032dd022eb6006244a61dded0acdde137abb564bc61bad69a` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 

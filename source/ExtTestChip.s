@@ -42,6 +42,7 @@ F_IRQ       equ 5
 F_CLOCK     equ 6
 F_PORTS     equ 7
 F_Z80       equ 8			; no answer: inconclusive (no cartridge?)
+F_NOACK     equ 9			; LSPC2 register bit D0-D2 bad: REG_IRQACK unusable, IRQ test skipped
 
 CYC_FRAME   equ 64			; addq.l 8 + cmpi.l # 14 + bhs 8 + move.w abs 16 + and 4 + cmp 4 + bcc 10
 CYC_TIMER   equ 56			; addq.l 8 + tst.w abs 16 + bne 8 + cmpi.l # 14 + blo 10
@@ -213,6 +214,11 @@ EXT_TEST_CHIP:
 	bra .lspcDone
 .lspcBad:
 	bset #F_LSPC,d7
+	moveq #7,d0					; REG_IRQACK uses D0-D2: if one is bad, the level 3
+	and.w d3,d0					; IRQ pending since reset can never be acknowledged
+	beq.s .ackOk				; and would abort TestChip at the IRQ test
+	bset #F_NOACK,d7
+.ackOk:
 	Print "FAIL    VRAMMOD bad bits $"
 	move.w d3,d0
 	JsrA6 printWord
@@ -302,11 +308,20 @@ EXT_TEST_CHIP:
 
 	; --- interrupts (need WRAM for the stack) ---------------------------------
 	btst #F_WRAM,d7
+	bne .irqNoWram
+	btst #F_NOACK,d7
 	beq .irqGo
+	PrintText
+	dc.b "VBLANK IRQ       SKIP    LSPC2 D0-D2 bad: no IRQ acknowledge",10
+	dc.b "Timer IRQ        SKIP    LSPC2 D0-D2 bad: no IRQ acknowledge",10,0
+	even
+	bra.s .irqSkip
+.irqNoWram:
 	PrintText
 	dc.b "VBLANK IRQ       SKIP    needs Work RAM (stack)",10
 	dc.b "Timer IRQ        SKIP    needs Work RAM (stack)",10,0
 	even
+.irqSkip:
 	moveq #0,d4					; no timer measure
 	bra .irqDone
 .irqGo:

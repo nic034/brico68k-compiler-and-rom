@@ -100,7 +100,7 @@ REG_STATUS_B equ $380000
 	; Brico16Bits shows "Found BricoNeo ROM version 1.35". build.py and the
 	; Compiler check that the header equals the base of this string.
 	macro FORK_VERSION
-		dc.b "1.35-nic034-14"
+		dc.b "1.35-nic034-15"
 	endm
 
 	macro BRICONEO_VERSION
@@ -117,6 +117,16 @@ REG_STATUS_B equ $380000
 		dc.b \4	; Description (0 terminated)
 		dc.b 0
 		align 1	; Parity
+	endm
+
+	; Z set when address register/Dn \1 points at the BricoNeo output ports: offsets $1FF00-$1FF03
+	; of the BIOS socket, in $C00000-$CFFFFF and every 128 KB mirror (the BricoNeo sees A1-A16 only).
+	; A read there is an EOT ($1FF00) or arms an output word ($1FF02): Read / Dump must not do it.
+	; Destroys d2.
+	macro IsHostPort
+		move.l \1,d2
+		andi.l #$F1FFFC,d2
+		cmpi.l #SYSTEM_ROM+$1FF00,d2
 	endm
 
 	macro WatchDog
