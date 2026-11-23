@@ -8,7 +8,7 @@ CART:   Tiles for the screen: generated here (S: a 5 x 7 font at the ASCII codes
 0x1234
 [eot, 0 ms emulated]
 > Version
-Brico68k 1.35-nic034-18 - Nic034 fork (Nicolas), not an Aurelien34 release
+Brico68k 1.35-nic034-19 - Nic034 fork (Nicolas), not an Aurelien34 release
 Based on Aurelien34/Brico68k 1.35 (1b72deb): the BricoNeo shows 1.35
 Source: github.com/nic034/brico68k-compiler-and-rom
 

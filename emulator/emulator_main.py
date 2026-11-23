@@ -65,7 +65,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.24"
+APP_VERSION = "1.25"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -305,7 +305,8 @@ TESTS = {
                                 "cartridge."),
     "TestGfxRom": _t("Video", look="Look at the screen: one row per C ROM chip pair, one column per tile address bit, "
                                    "colours per bit plane, the S ROM at the bottom. With a game set in the Cartridge tab "
-                                   "this is the reference picture for the real console."),
+                                   "this is the reference picture for the real console. Pictures of the game: run the "
+                                   "script of tools/gfxrom_scan.py (Write commands, then TestGfxRom <table>)."),
     "TestDAC": _t("Video", last=True,
                   look="Look at the screen: 16 bands, one colour bit each (a black band = dead bit)."),
     "TestZ80": _t("Sound"),

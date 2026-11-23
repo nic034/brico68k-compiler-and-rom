@@ -48,7 +48,8 @@ HEALTHY = ["Echo $1234", "Read $320001", "Read $380000", "Read $300000", "Read $
            "TestVectors", "TestGfx", "Echo $31", "TestGfx $12345", "TestDAC $15", "TestVectors",
            "TestGfx $12345 1", "TestGfx 0 1", "TestDAC $12",
            "Version", "TestBus", "Echo $5C", "CartTest", "CartTest 1", "Echo $5D",
-           "TestGfxRom", "TestGfxRom 15 2 $FF", "TestSnd $20 $21 1", "Echo $5E"]  # -17   # back in -16: appended, older recordings still line up
+           "TestGfxRom", "TestGfxRom 15 2 $FF", "TestSnd $20 $21 1", "Echo $5E",
+           "TestGfxRom $10E000", "Write $4752 $10E000", "Write $0001 $10E002", "Write $0020 $10E004", "Write $0000 $10E006", "Write $0000 $10E008", "Write $0100 $10E00A", "Write $0000 $10E00C", "Write $0000 $10E00E", "Write $0004 $10E010", "Write $0000 $10E012", "Write $8000 $10E014", "Write $01E8 $10E016", "Write $02D8 $10E018", "Write $03C8 $10E01A", "Write $04B8 $10E01C", "Write $05A8 $10E01E", "Write $0698 $10E020", "Write $0788 $10E022", "Write $0878 $10E024", "Write $0968 $10E026", "Write $0A58 $10E028", "Write $0B48 $10E02A", "Write $0C38 $10E02C", "Write $0D28 $10E02E", "Write $0E18 $10E030", "Write $0F08 $10E032", "TestGfxRom $10E000", "Echo $5F"]  # -17, -19 picture mode   # back in -16: appended, older recordings still line up
 SCREEN = {"testdac"}
 DECODE = ["TestDecode", "Echo $5B"]       # last in every scenario that has it: older recordings still line up
 

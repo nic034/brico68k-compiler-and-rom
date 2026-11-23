@@ -4,6 +4,42 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-23 - ROM 1.35-nic034-19: TestGfxRom picture mode + tools/gfxrom_scan.py; TestSnd up to 60 s; Emulator 1.25
+
+**ROM 1.35-nic034-19** (SHA-256 `d30ef5728788f5a8a9a978128534bc8ca41ad172f24da9f96de338dcde0bb5e5`, 31 extensions, 92146 bytes free)
+- **TestGfxRom picture mode**: P1 >= `$100000` is the address of a sprite table in WRAM
+  (`$100000-$10EFFF` only: another address could be I/O or the BricoNeo ports, checked:
+  `$C1FF00`, `$400000` refused, the console answers after). Table: "GR", m sprites (1-96), blank
+  fix tile, then per sprite first tile, x, y, height; then 16 palette words. Rule check with a
+  real table (samsho3): nothing; 10 ms.
+- **TestSnd**: P3 up to 600 tenths (a whole piece of music: `TestSnd $code $code 600`).
+
+**tools/gfxrom_scan.py** (new): reads a game set, writes the console script (Write commands +
+`TestGfxRom $10E000`).
+- First attempt, dropped: one column height per game, found by how tiles join. Measured on whp
+  and samsho3: no common height (each picture has its own), the scores were noise (0.01-0.06).
+- Kept: sprite columns cut where the bottom row of a tile and the top row of the next are both
+  transparent; per pair the stretch whose columns look like sprites (4-13 tiles ending with a
+  gap). samsho3: Gaira nearly whole in the C3/C4 band; whp: characters in every band.
+- Palette from the P ROM: runs of 16-word blocks, ranked (`--list`, `--palette N`). samsho3's
+  pick fits its skin tones; whp's is a wrong one for its characters (one palette per screen).
+- Blank fix tile found in the S ROM.
+
+**Emulator 1.25**: TestGfxRom's help mentions the tool. `regress_rom.py`: a picture table of
+one sprite written with Write, then `TestGfxRom $10E000`, and `TestGfxRom $10E000` before it
+(no table: CHECK).
+- `test_neo_py.py` seq 5 (cartridge fault + BIOS A15 stuck at 1) failed: since -16 that fault
+  stops the boot and the 68000 runs random code, where BOTH cores depend on how the run is cut
+  into slices (202752 cycles at once and one by one give different states, in each core). Not a
+  core difference; the sequence now uses A15 stuck at 0 (boots, band screen). Known limit of the
+  emulator: runaway code is not slice-independent.
+
+**Checks**: rule check 25 runs; regression -18 vs -19: same words except Version and ROM dumps;
+`test_chip_hints`, `test_decode`, `test_ext_check`, `test_neo_py` 0 failures; `bench_fuzz.py`
+seed 13: 0 failures (3373 commands); `guiverify.py` 207/207 (one run with 4 jobs in parallel
+missed "Run all button shows progress", a timing check: alone, 207/207).
+Not done: real AES, MAME; the sound of TestSnd is not emulated.
+
 ## 2026-11-23 - ROM 1.35-nic034-18: TestGfx by columns (game pictures)
 
 **ROM 1.35-nic034-18** (SHA-256 `511f6466609ed5c20129af07d63915c4bffe0348ef72d3c0438a3f7fc64a3047`, 31 extensions, 92876 bytes free)

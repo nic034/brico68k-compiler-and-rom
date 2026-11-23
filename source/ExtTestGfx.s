@@ -234,6 +234,16 @@ gfxFixBlank_JsrA6:
 ; 17: 8 MB), P2 = pairs shown (1-8, default 8), P3 = blank fix tile
 ; (default $20, as TestGfx). Rows past the game's last pair: real carts
 ; mirror or float, the emulator shows nothing. No WRAM.
+;
+; Picture mode, P1 >= $100000: P1 is the address of a table (in WRAM)
+; written by the console script of tools/gfxrom_scan.py, which reads the
+; game's C ROMs (where the pictures are, how tall their columns are) and
+; its P ROM (a palette), and lays the screen out: one band per chip pair.
+; Table: word "GR", word m sprites (1-96), word blank fix tile, word 0;
+; m x (long first tile, word x, word y, word height in tiles 1-16,
+; word 0); 16 palette words (palette 1). Tiles go down each sprite one by
+; one. A dead chip / plane / address line spoils its pair's band.
+; Reads WRAM (the table), nothing else.
 ; ------------------------------------------------------------------------
 GROM_X0     equ 32
 GROM_Y0     equ 16
@@ -241,9 +251,11 @@ GROM_COLS   equ 17					; base + 16 address bits
 GROM_FIXROW equ 2+(GROM_Y0+8*16+16)/8	; fix row of the S block (y = 160)
 
 EXT_TEST_GFX_ROM:
-	move.l (BRICO_COMMAND_PARAM_1).l,d5	; tile bits per pair
+	move.l (BRICO_COMMAND_PARAM_1).l,d5	; tile bits per pair, or table address
 	move.l (BRICO_COMMAND_PARAM_2).l,d6	; pairs
 	move.l (BRICO_COMMAND_PARAM_3).l,d7	; blank fix tile
+	cmp.l #$100000,d5
+	bhs .picture
 	tst.l d5
 	bne.s .bitsSet
 	moveq #16,d5
@@ -378,6 +390,64 @@ EXT_TEST_GFX_ROM:
 	dc.b "P1 tile bits per pair: 14 (1 MB chips), 15 (2 MB), 16 (4 MB), 17 (8 MB).",10
 	dc.b "P2 pairs (rows past the last pair differ: no ROM). P3 blank fix tile.",10,0
 	even
+	jmp EOT_AND_WAIT
+
+; --- picture mode: table at P1 (see the header) ---------------------------
+.picture:
+	and.l #$FFFFFE,d5
+	cmp.l #$10F000,d5				; the table must be in WRAM, below the stack: any
+	bhs .noTable					; other address could be I/O or the BricoNeo ports
+	movea.l d5,a5
+	cmp.w #$4752,(a5)				; "GR"
+	bne .noTable
+	move.w 2(a5),d7					; sprites
+	beq .noTable
+	cmp.w #96,d7
+	bhi .noTable
+	JsrA6 screenBlank				; a0 = REG_VRAMRW, REG_VRAMMOD = 1
+	move.w 4(a5),d0
+	JsrA6 gfxFixBlank
+	move.w #$8000,(PALETTE_BACKDROP).l	; black
+	move.w d7,d0
+	mulu #12,d0
+	lea 8(a5,d0.w),a2				; the 16 palette words
+	lea (PALETTE_0+32).l,a1			; palette 1
+	moveq #16-1,d1
+.picPal:
+	move.w (a2)+,(a1)+
+	dbra d1,.picPal
+	lea 8(a5),a2					; first entry
+	moveq #1,d6						; sprite number
+	moveq #1,d5						; tile step down a sprite
+	moveq #0,d2						; no flip
+	movea.w #$0FFF,a3				; full size
+	subq.w #1,d7
+.picSprite:
+	move.l (a2)+,d4
+	and.l #$000FFFFF,d4
+	move.w (a2)+,d3					; x
+	movea.w (a2)+,a4				; y
+	move.w (a2)+,d0
+	and.w #$001F,d0
+	movea.w d0,a1					; height
+	addq.l #2,a2
+	JsrA6 gfxSprite					; destroys d0, d1, d4; sprite number + 1
+	dbra d7,.picSprite
+	WatchDog
+	Print "Graphics ROM pictures: "
+	moveq #0,d0
+	move.w 2(a5),d0
+	JsrA6 printDec
+	PrintText
+	dc.b " sprites from the table (tools/gfxrom_scan.py): one band per",10
+	dc.b "C ROM chip pair, left to right, palette from the game's P ROM.",10
+	dc.b "Compare with the emulator's picture (same script, --png). A band",10
+	dc.b "spoilt or missing: that pair (chip, bit plane, address line).",10,0
+	even
+	jmp EOT_AND_WAIT
+.noTable:
+	PrintLn "=> CHECK: no picture table at P1 (WRAM $100000-$10EFFF, word GR, 1-96"
+	PrintLn "   sprites): run the console script of tools/gfxrom_scan.py first."
 	jmp EOT_AND_WAIT
 
 	even

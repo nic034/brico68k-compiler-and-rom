@@ -11,7 +11,7 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.5 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.24 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.25 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
 | `rom/ROM.BIO` | Ready-to-use ROM, 128 KB, loaded whole by the BricoNeo: the code, each 32 KB quarter padded with its own byte, and the TestBus CRC table filled by Brico68k Compiler (SHA-256 in `rom/ROM.BIO.sha256`) |
 | `brico16bits/` | Optional Brico16Bits patch (EXCPT: 68000 exception reports). Syntax-checked only, not built for the Pico, not run |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
@@ -257,7 +257,7 @@ its track, or the other parts on that bus: the message cannot tell which.
 **Space first.** Since 1.35-nic034-16 the code uses the whole 128 KB image the BricoNeo serves
 (Brico16Bits `FLASH_IMAGE_SIZE`; Aurelien confirmed the 128 KB limit). It must end before `$1FF00`:
 `$1FF00` and `$1FF02` are the BricoNeo output ports (a read there is an EOT / arms an output word).
-With the 31 extensions of 1.35-nic034-18, **about 93 KB are free**. Brico68k Compiler prints the
+With the 31 extensions of 1.35-nic034-19, **about 92 KB are free**. Brico68k Compiler prints the
 free space after each build. Calls between files are absolute (`JsrA6`, `PrintText`, `jmp
 EOT_AND_WAIT`...): a PC-relative jump only reaches +/-32 KB, and vlink stops with "doesn't fit
 into 16 bits" if one is too far. `source/Brico68k.ld` puts the header, the print and screen
@@ -388,7 +388,7 @@ Checking the Python core:
   report (never the 3 s timeout), at most 2047 words, a result that fits its type, and `Echo` answers
   right after (the 68000 is back in the dispatcher). `--check N` adds N random lines under the
   Brico16Bits rule check (Python core). `--seed` replays a failure. C test core by default (`--core python`).
-- `emulator/guiverify.py`: 207/207 with the C core (1.35-nic034-17, Emulator 1.24: `BRICO68K_CORE=emulator/build/libneocore_test.so xvfb-run python3.12 emulator/guiverify.py Brico68k_Emulator.py OUTDIR`); with the Python core the diagnosis step exceeds its 10 minute limit and the checks after it fail with it.
+- `emulator/guiverify.py`: 207/207 with the C core (1.35-nic034-19, Emulator 1.25: `BRICO68K_CORE=emulator/build/libneocore_test.so xvfb-run python3.12 emulator/guiverify.py Brico68k_Emulator.py OUTDIR`); with the Python core the diagnosis step exceeds its 10 minute limit and the checks after it fail with it.
 
 ROM regression check, for a source change meant to keep every output (a size or speed change):
 `python3 emulator/regress_rom.py run OLD.BIO old.json`, the same for the new ROM, then
@@ -428,14 +428,14 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | **TestVectors** | yes | Vector table switch `$000000-$00007F`, system ROM / cartridge (`REG_SWPBIOS`, `REG_SWPROM`): compares the 32 vectors with `$C00000` in both positions and back. Read only |
 | **TestBus** | yes | BIOS socket, 68000 -> BricoNeo: CRC-32 of each 32 KB quarter of the image (table written by Brico68k Compiler), A15 / A16 probes; checked at boot too, 16 screen bands on an A15 / A16 fault (see below) |
 | **CartTest** | yes | Game cartridge P bus D0-D15, read only (never writes): P1 by the security code (names stuck / open lines), P2 activity |
-| **Version** | yes | The fork version (`1.35-nic034-18`), the upstream base and the source. Also in the `?` list |
-| **TestGfxRom** | yes | The game's graphics ROMs through the cartridge port: one row per C ROM chip pair, one column per tile address bit (base tile, then bit 0-15 flipped), the S ROM tile bits 0-11 below, colours coded per bit plane. No pass / fail (the 68000 cannot read the C, S or V ROMs): compare the TV with the emulator's picture of the same game set (`--cart SET --run TestGfxRom --png ref.png`). P1 tile bits per pair (16 = 4 MB chips), P2 pairs (8), P3 blank fix tile |
-| **TestSnd** | yes | The game's M1 / V ROMs through its own sound driver: Z80 commands P1 to P2 (default `$20-$2F`), P3 tenths of a second each, after the EOT; listen (a sound silent, cut or noisy: its V ROM area). A new command stops it. Not heard in the emulator |
+| **Version** | yes | The fork version (`1.35-nic034-19`), the upstream base and the source. Also in the `?` list |
+| **TestGfxRom** | yes | The game's graphics ROMs through the cartridge port: one row per C ROM chip pair, one column per tile address bit (base tile, then bit 0-15 flipped), the S ROM tile bits 0-11 below, colours coded per bit plane. No pass / fail (the 68000 cannot read the C, S or V ROMs): compare the TV with the emulator's picture of the same game set (`--cart SET --run TestGfxRom --png ref.png`). P1 tile bits per pair (16 = 4 MB chips), P2 pairs (8), P3 blank fix tile. **Picture mode**: `TestGfxRom $10E000` after the console script of `tools/gfxrom_scan.py` (see below): one band per chip pair, pictures of the game in a palette of its P ROM |
+| **TestSnd** | yes | The game's M1 / V ROMs through its own sound driver: Z80 commands P1 to P2 (default `$20-$2F`), P3 tenths of a second each (up to 600: a whole piece of music), after the EOT; listen (a sound silent, cut or noisy: its V ROM area). A new command stops it. Not heard in the emulator |
 | **TestGfx** | yes | Test screen for the fix layer and the sprites, with the cartridge tiles (first C tile = P1): labels, fix tiles `$00-$FF`, flips, 8 x 4 tiles, H and V shrink. P2 = 1: the whole screen in tiles, by rows; P2 = N (2-64): by columns of N consecutive tiles, so pieces of the game's characters and scenery come out (8, 16 or 32: try; in TestGfx colours). P3: the fix tile for empty cells (`$20`; World Heroes Perfect needs `$FF`, its `$20` is solid and hides the sprites). Read on the screen (see below) |
 
 Bold entries are new in this repository.
 
-The code ends before `$1FF00` (fork 1.35-nic034-18, 128 KB image, no NeoDiag flag `$0004`).
+The code ends before `$1FF00` (fork 1.35-nic034-19, 128 KB image, no NeoDiag flag `$0004`).
 
 Back in 1.35-nic034-16 (they had been removed for space in -10 and -11): **Version**, **CartTest**
 and **TestBus**. TestBus no longer has the NeoDiag copies of the first 32 KB to read A15/A16 from:
@@ -482,6 +482,30 @@ address map (not re-read from MAME's source; `emulator/compare_mame.py` now runs
 settle it).
 If a healthy AES reports a mirror, the assumption is wrong, not the console: tell which line and on
 which board.
+
+### Pictures of a game's C ROMs (TestGfxRom picture mode)
+
+The 68000 cannot read the C, S or V ROMs, so pictures are prepared on the PC:
+
+    python tools/gfxrom_scan.py whp.zip -o whp_pictures.txt          # the game set (zip or folder)
+    python Brico68k_Emulator.py --cart whp.zip --script whp_pictures.txt --png ref.png
+
+The script (about 140 `Write` commands, then `TestGfxRom $10E000`) is pasted into the BricoNeo
+console with the same game in the slot; the TV is compared with `ref.png`, band by band (C1/C2,
+C3/C4...). What the tool does:
+- **C ROMs**: a game stores its sprites as columns of consecutive tiles, each picture with its own
+  height (no common height: measured on whp and samsho3). A column ends where the bottom row of a
+  tile and the top row of the next are both transparent; the tool cuts there (14 tiles at most)
+  and picks, per pair, the stretch whose columns look most like sprites (4-13 tiles, ending with
+  a gap; full 14-tile columns are mostly scenery textures).
+- **P ROM**: palettes are runs of 16-word blocks (colour 0 = `$0000`/`$8000`, many colours); the
+  best candidate is used (`--list` shows them, `--palette N` picks another). One palette for the
+  whole screen: the right one for some sprites, not all (the game chooses per sprite in code
+  that is not decoded).
+- **S ROM**: the blank fix tile (`$20` if blank, else `$FF`, else the first empty tile).
+The table is in WRAM (`$10E000`, below the stack; `--addr`): run TestWRAM first if in doubt.
+TestGfxRom refuses a table outside `$100000-$10EFFF` (an address in I/O or the BricoNeo ports
+would be read).
 
 ### TestVectors and TestGfx
 
@@ -661,7 +685,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `84f7840` (2026-11-09); re-read at `bf426f9` (2026-11-18, 68000 debugger v2) for -16: 128 KB image (`FLASH_IMAGE_SIZE`), `NeoDiagImageBuilder` only with flag `$0004`, output ports `$1FF00` / `$1FF02` (`DebugLink.cpp`), header offsets unchanged; the debugger patches only the official SNK BIOS. Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd), plus `5643191` / `1b72deb` (2026-11-08: PlayEyeSnd renamed TestFM, new TestSsg). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-18** (also shown by the `Version` command); the header announces **1.35**, the upstream base; 31 extensions, flags `$0003`, SHA-256 `511f6466609ed5c20129af07d63915c4bffe0348ef72d3c0438a3f7fc64a3047` |
+| This ROM | fork version **1.35-nic034-19** (also shown by the `Version` command); the header announces **1.35**, the upstream base; 31 extensions, flags `$0003`, SHA-256 `d30ef5728788f5a8a9a978128534bc8ca41ad172f24da9f96de338dcde0bb5e5` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 

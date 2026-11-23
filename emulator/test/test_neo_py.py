@@ -25,7 +25,9 @@ SEQS = [
     ("diag", 1, 0, [], None, ["CartDiag", "TestWatchdog", "Echo 7", "TestLSPC"]),
     ("none", 0, 1, [], None, ["TestZ80", "TestAudio", "TestChip", "TestFM", "TestSsg", "Echo 3"]),
     ("none", 1, 1, [(0, 0, 3, 1), (2, 1, 5, 0)], None, ["TestWRAM", "TestVRAM", "TestGfx", "TestChip"]),
-    ("test", 1, 1, [(6, 3, 4, 0), (5, 1, 15, 1)], None, ["CartDiag", "TestChip", "Echo 9"]),
+    # BIOS A15 stuck at 0 (since -16 a line stuck at 1 stops the boot: the 68000 then runs random
+    # code, where both cores depend on how the run is cut into slices - not a core difference)
+    ("test", 1, 1, [(6, 3, 4, 0), (5, 1, 15, 0)], None, ["CartDiag", "TestChip", "Echo 9"]),
     ("none", 1, 1, [], (0xA5, 0x5A, 0x3C, 0xE7, 0xFF, 0xFFFF, 1), ["TestInp", "TestBRAM", "TestStatusA", "TestSystype"]),
     # address decoding faults (kind 4: a line the decoder should ignore; kind 5: WRAM writes reach the palette)
     ("none", 1, 1, [(0, 4, 17, 0)], None, ["TestDecode", "TestWRAM", "Echo 5"]),

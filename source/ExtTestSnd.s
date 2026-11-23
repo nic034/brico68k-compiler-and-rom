@@ -16,7 +16,8 @@
 ; plays, or plays noise / cut, while the others do: its V ROM area (data
 ; or address line of a V chip, NEO-PCM2 on MVS) - the same codes on a good
 ; cartridge or in MAME tell the console from the cartridge.
-; Defaults: P1 = $20, P2 = P1 + 15, P3 = 15 (1.5 s); P3 at most 100.
+; Defaults: P1 = $20, P2 = P1 + 15, P3 = 15 (1.5 s); P3 at most 600 (a whole
+; piece of music: TestSnd $code $code 600).
 ; A new command stops the sweep (Z80 $03) and runs. Not heard in the
 ; emulator (no FM / ADPCM; its test M1 only knows $02 and $7F).
 ; No WRAM: registers only, no stack.
@@ -43,9 +44,9 @@ EXT_TEST_SND:
 .order:
 	tst.l d7
 	beq.s .time15
-	cmp.l #100,d7
+	cmp.l #600,d7
 	bls.s .timeOk
-	moveq #100,d7
+	move.l #600,d7
 	bra.s .timeOk
 .time15:
 	moveq #15,d7
