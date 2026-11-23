@@ -65,7 +65,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.23"
+APP_VERSION = "1.24"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -303,6 +303,9 @@ TESTS = {
     "TestGfx": _t("Video", look="Look at the screen: labels, fix tiles, flips, 8 x 4 tiles, H and V shrink (drawn "
                                 "from VRAM; V shrink approximated, no L0 ROM). No tiles without a game or the test "
                                 "cartridge."),
+    "TestGfxRom": _t("Video", look="Look at the screen: one row per C ROM chip pair, one column per tile address bit, "
+                                   "colours per bit plane, the S ROM at the bottom. With a game set in the Cartridge tab "
+                                   "this is the reference picture for the real console."),
     "TestDAC": _t("Video", last=True,
                   look="Look at the screen: 16 bands, one colour bit each (a black band = dead bit)."),
     "TestZ80": _t("Sound"),
@@ -313,6 +316,9 @@ TESTS = {
     "TestSsg": _t("Sound", wait=0.5,                            # the chime lasts ~0.15 s
                   look="Listen: the built-in test M1 plays a two-note chime on the YM2610 SSG; a real M1 plays "
                        "its own coin chime (SSG, noise and timer A: only the SSG tones are emulated)."),
+    "TestSnd": _t("Sound", wait=0.5,
+                  look="Listen on the real console: the game's own sound commands, one after the other (M1 and V "
+                       "ROMs). Not heard here: the emulator has no FM / ADPCM and its test M1 only knows $02 and $7F."),
     "TestInp": _t("Inputs and system", varies="depends on the controllers, switches and memory card plugged in"),
     "TestStatusA": _t("Inputs and system", varies="depends on coins, service button and memory card"),
     "TestSystype": _t("Inputs and system", varies="depends on the board and its jumpers"),

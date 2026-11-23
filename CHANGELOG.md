@@ -4,6 +4,61 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-23 - ROM 1.35-nic034-17: TestGfxRom, TestSnd, TestGfx P3; Emulator 1.24
+
+Checked with a game set, World Heroes Perfect (`whp`: P1, S1, C1-C8, M1, V1-V3, not encrypted).
+
+**Colour / video tests reviewed**
+- **TestGfx**: it fills the fix layer with tile `$20`, "blank in the usual fonts". In whp's S ROM
+  tile `$20` is solid colour 2: the fix layer (always above the sprites) covered the whole screen
+  and hid every sprite (emulator picture white). New **P3 = fix tile for empty cells** (default
+  `$20`); whp needs `$FF`. One more line in the report says so. The labels need an ASCII font at
+  `$20-$5F`: whp's is not one, they stay unreadable (the zones are documented in the text).
+- **TestDAC**: robust: each band sets the backdrop and palette 0 colours 1-15, so fix tiles of any
+  font take the band colour (16 colours per line with and without whp).
+- **Color**: robust: every palette entry and the backdrop.
+
+**ROM 1.35-nic034-17** (SHA-256 `bc355868f6b5ee39da97ddc46ac74691f21caebb328d90450142d8aa4c6e0fac`, 31 extensions, 93016 bytes free before `$1FF00`)
+- **TestGfxRom** (new, `ExtTestGfx.s`): the game's C ROMs and S ROM through the cartridge port.
+  The 68000 has no path back from the CHA / fix buses (nor from the V ROMs or M1): no pass / fail
+  is possible, so it is a reference picture. 17 sprites x P2 rows: row r = chip pair r (tile
+  r << P1), column 0 the pair's first tile, column c that tile with tile address bit c-1 flipped.
+  Below, 2 x 2 fix cells: S ROM tile 0, then tiles `$1-$800` (bits 0-11). Palettes coded per bit
+  plane (bit 0 red, 1 green, 2 blue, 3 brighter): a dead data line / plane removes one colour in
+  its pair's row; a stuck address line makes its column a copy of column 0. Compare the TV with
+  `Brico68k_Emulator.py --cart SET --run TestGfxRom --png ref.png` (same game set). P1 tile bits
+  per pair (16: 4 MB chips, whp), P2 pairs (8; whp 4), P3 blank fix tile. Rows past the last pair
+  differ by nature (no ROM). The tile-to-pair order is MAME's (C1/C2 first, linear).
+- **TestSnd** (new, `ExtTestSnd.s`): the game's M1 / V ROMs through its own driver: Z80 commands
+  P1 to P2 (default `$20-$2F`), P3 tenths of a second each (default 15, max 100), after the EOT,
+  polling the command block every 0.65 ms; a new command sends `$03` and runs. Listen: a sound
+  silent / cut / noisy while the others play = its V ROM area. The codes are the game's (its sound
+  test numbers). Checked in the emulator: one code every P3 tenths, `$03` at the end, an Echo sent
+  during the sweep stops it and answers. Not heard there (no FM / ADPCM; test M1). The rule check
+  caught a first version that waited for the command block to read 0 before accepting a command:
+  the loop-mode repeat 20 us after the EOT was lost; now any command is taken (TestSnd's own
+  command is cleared 1 ms after it came, its text takes ~3 ms).
+
+**Emulator 1.24**: TestGfxRom (Video, LOOK) and TestSnd (Sound, LOOK) in Run all;
+`regress_rom.py` appends `TestGfxRom`, `TestGfxRom 15 2 $FF`, `TestSnd $20 $21 1`;
+`bench/real_aes_session.txt` runs both before TestDAC; `guiverify.py` counts 31 extensions, 6 look,
+26 compared commands.
+
+**Checks** (emulation only)
+- `--test` rule check: 25 runs, no rule broken (CartDiag FAIL: no PROG board, as always).
+- Regression -16 against -17, new commands set aside: identical except the TestGfx line and the
+  Version string; chaotic scenarios (WRAM stack, floating lines, BIOS socket address faults: the
+  console then runs random code, which changes with the code layout).
+- `test_chip_hints`, `test_decode`, `test_ext_check`, `test_neo_py`: 0 failures.
+  `bench_fuzz.py` seeds 9 and 41: 0 failures over 6724 commands (80 lines under the rule check).
+  `guiverify.py` 207/207 (C core, Xvfb).
+- README: the 7fc1faf commit (Emulator 1.23) had cut a block of the README by mistake (the
+  guiverify line replaced up to the next list item, far below): rebuilt from 681bb38 with every
+  change since; nothing else lost (775 lines).
+
+Not done: real AES, MAME. On the AES with whp: `TestGfxRom 16 4 $FF` against the emulator picture,
+`TestSnd` (codes to find with the game), `TestGfx 0 0 $FF`.
+
 ## 2026-11-23 - Emulator 1.23: the three commands back, GUI check 205/205
 
 ROM unchanged (1.35-nic034-16).

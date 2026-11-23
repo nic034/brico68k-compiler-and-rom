@@ -8,7 +8,7 @@ CART:   Tiles for the screen: generated here (S: a 5 x 7 font at the ASCII codes
 0x1234
 [eot, 0 ms emulated]
 > Version
-Brico68k 1.35-nic034-16 - Nic034 fork (Nicolas), not an Aurelien34 release
+Brico68k 1.35-nic034-17 - Nic034 fork (Nicolas), not an Aurelien34 release
 Based on Aurelien34/Brico68k 1.35 (1b72deb): the BricoNeo shows 1.35
 Source: github.com/nic034/brico68k-compiler-and-rom
 
@@ -252,11 +252,38 @@ Sprites (C ROMs) from tile $00000000 (P1). P2=1: whole screen, 20 x 14 tiles.
 Zones: flips, 8 x 4 tiles, H shrink $F-$0, V shrink $FF-$3F (L0 ROM),
 fix tiles $00-$FF (S ROM). Look for missing, shifted or wrong tiles,
 vertical bars, no flip, no shrink. Blank tiles: try another P1.
+Fix layer hides everything (its tile $20 is not blank): P3=$FF.
 TestDAC clears the screen.
 
 [eot, 12 ms emulated]
 ; TestGfx: labels, fix tiles and sprites (flips, 8x4 tiles, H and V shrink) from the cartridge tiles
 > Delay 5000
+; graphics ROMs of the game: compare with the emulator's picture of the same game set
+> TestGfxRom
+Graphics ROM access (game cartridge): C ROMs and S ROM tiles
+Sprites: 8 rows = chip pairs (C1/C2, C3/C4...), tile = pair x 2^16
+Columns: the pair's first tile, then tile address bit 0-15 flipped.
+Bottom, 2x2 cells each: S ROM tile 0, then tile bits 0-11 ($1-$800).
+Colours: pixel bit 0 red, 1 green, 2 blue, 3 brighter.
+Column like column 0: that address line stuck (one row: one pair).
+A colour missing in a row: a data line / bit plane of that pair.
+No pass/fail (the 68000 cannot read these ROMs): compare with the
+emulator, same game: --cart SET --run TestGfxRom --png ref.png
+P1 tile bits per pair: 14 (1 MB chips), 15 (2 MB), 16 (4 MB), 17 (8 MB).
+P2 pairs (rows past the last pair differ: no ROM). P3 blank fix tile.
+
+[eot, 11 ms emulated]
+> Delay 5000
+; the game's sound commands $20-$2F, 1.5 s each: listen (another command stops it)
+> TestSnd
+Sound sweep: Z80 commands $0020 to $002F, 15 tenths of a second each.
+Listen. No pass/fail: the 68000 cannot read M1 / V ROMs nor hear.
+Codes: the game's own (its sound test numbers); $01-$07 = driver
+control. One sound silent, cut or noisy: its V ROM area. Compare
+with a good cartridge or MAME. A new command stops the sweep.
+
+[eot, 3 ms emulated]
+> Delay 25000
 > TestDAC
 RGB DAC test pattern, top to bottom:
   R4 R3 R2 R1 R0 | G4 G3 G2 G1 G0 | B4 B3 B2 B1 B0 | white

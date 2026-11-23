@@ -47,7 +47,8 @@ HEALTHY = ["Echo $1234", "Read $320001", "Read $380000", "Read $300000", "Read $
            "Dump $C00000 16", "Read $400000", "Dump $100 8", "TestWRAM",
            "TestVectors", "TestGfx", "Echo $31", "TestGfx $12345", "TestDAC $15", "TestVectors",
            "TestGfx $12345 1", "TestGfx 0 1", "TestDAC $12",
-           "Version", "TestBus", "Echo $5C", "CartTest", "CartTest 1", "Echo $5D"]   # back in -16: appended, older recordings still line up
+           "Version", "TestBus", "Echo $5C", "CartTest", "CartTest 1", "Echo $5D",
+           "TestGfxRom", "TestGfxRom 15 2 $FF", "TestSnd $20 $21 1", "Echo $5E"]  # -17   # back in -16: appended, older recordings still line up
 SCREEN = {"testdac"}
 DECODE = ["TestDecode", "Echo $5B"]       # last in every scenario that has it: older recordings still line up
 

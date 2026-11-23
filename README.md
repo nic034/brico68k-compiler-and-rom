@@ -11,7 +11,7 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 | Path | What it is |
 |---|---|
 | `Brico68k_Compiler.py` | Brico68k Compiler 1.5 (Python 3.8+, standard library only, Tk window) |
-| `Brico68k_Emulator.py` | Brico68k Emulator 1.23 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
+| `Brico68k_Emulator.py` | Brico68k Emulator 1.24 (pure Python, no DLL): tests the ROM on an emulated AES (cartridge or diagnostic PROG board included), no MAME and no BricoNeo needed |
 | `rom/ROM.BIO` | Ready-to-use ROM, 128 KB, loaded whole by the BricoNeo: the code, each 32 KB quarter padded with its own byte, and the TestBus CRC table filled by Brico68k Compiler (SHA-256 in `rom/ROM.BIO.sha256`) |
 | `brico16bits/` | Optional Brico16Bits patch (EXCPT: 68000 exception reports). Syntax-checked only, not built for the Pico, not run |
 | `source/` | Firmware source used to build that ROM (vasm Motorola syntax) |
@@ -257,7 +257,7 @@ its track, or the other parts on that bus: the message cannot tell which.
 **Space first.** Since 1.35-nic034-16 the code uses the whole 128 KB image the BricoNeo serves
 (Brico16Bits `FLASH_IMAGE_SIZE`; Aurelien confirmed the 128 KB limit). It must end before `$1FF00`:
 `$1FF00` and `$1FF02` are the BricoNeo output ports (a read there is an EOT / arms an output word).
-With the 29 extensions of 1.35-nic034-16, **about 95 KB are free**. Brico68k Compiler prints the
+With the 31 extensions of 1.35-nic034-17, **about 93 KB are free**. Brico68k Compiler prints the
 free space after each build. Calls between files are absolute (`JsrA6`, `PrintText`, `jmp
 EOT_AND_WAIT`...): a PC-relative jump only reaches +/-32 KB, and vlink stops with "doesn't fit
 into 16 bits" if one is too far. `source/Brico68k.ld` puts the header, the print and screen
@@ -388,7 +388,57 @@ Checking the Python core:
   report (never the 3 s timeout), at most 2047 words, a result that fits its type, and `Echo` answers
   right after (the 68000 is back in the dispatcher). `--check N` adds N random lines under the
   Brico16Bits rule check (Python core). `--seed` replays a failure. C test core by default (`--core python`).
-- `emulator/guiverify.py`: 205/205 with the C core (1.35-nic034-16, Emulator 1.23: `BRICO68K_CORE=emulator/build/libneocore_test.so xvfb-run python3.12 emulator/guiverify.py Brico68k_Emulator.py OUTDIR`); with the Python core the diagnosis step exceeds its 10 minute limit and the checks after it fail with it.
+- `emulator/guiverify.py`: 207/207 with the C core (1.35-nic034-17, Emulator 1.24: `BRICO68K_CORE=emulator/build/libneocore_test.so xvfb-run python3.12 emulator/guiverify.py Brico68k_Emulator.py OUTDIR`); with the Python core the diagnosis step exceeds its 10 minute limit and the checks after it fail with it.
+
+ROM regression check, for a source change meant to keep every output (a size or speed change):
+`python3 emulator/regress_rom.py run OLD.BIO old.json`, the same for the new ROM, then
+`python3 emulator/regress_rom.py compare old.json new.json`. 474 scenarios (no cartridge, test
+cartridge, PROG board, every single fault the core models, every slot fault), each command's
+output words, screen lines, Z80 commands and cartridge writes; about 1 minute on 2 cores.
+`python3 emulator/build_test_core.py` (Linux, gcc) builds a test-only C core with settable joypad,
+DIP, STATUS_A/B and SYSTYPE ports and an MVS backup RAM; the Python core has the same test hook.
+With `CORE=python` or `CORE=emulator/build/libneocore_test.so` the check adds 10 input sets (MVS,
+buttons, memory card states), which the AES model never reaches otherwise. With the Python core
+the check takes much longer than with the C core.
+
+## ROM contents: 26 extensions
+
+Commands are typed on the Brico16Bits console. "No WRAM" means the test never relies on
+work RAM (no stack), so it still runs on a board with dead WRAM.
+
+| Command | No WRAM | What it does |
+|---|:-:|---|
+| **TestChip** | partly | Quick state of the board, one line per part, < 1 s (see below) |
+| Echo, Read, Write, WriteB, Dump | yes | Link check and raw memory access. Odd addresses are handled. Dump: at most 2045 words (BricoNeo buffer: 2048 words, address included). |
+| TestInp | yes | Controllers, memory card detect, AES/MVS mode |
+| TestWRAM / TestBRAM / TestPRAM | yes | One suite (see below): data bus walking 1/0, byte writes (not palette), each address line named, March C- $5555/$AAAA on every word. PRAM: both banks + bank select. TestBRAM is MVS only and destructive. |
+| **TestVRAM** | yes | All VRAM in one test, replaces TestVRAML/U and MarchVRAML/U (see below) |
+| TestLSPC | yes | LSPC2-A2 registers, VRAM auto-increment |
+| **TestDecode** | yes | Address decoding: the mirrors of WRAM (A16-A19), palette RAM (A13-A21) and the LSPC registers (A4-A16) name the line a decoder does not ignore; WRAM and palette RAM must not change each other (see below). Every word is put back |
+| Color | yes | Whole screen in one colour (upstream) |
+| TestStatusA / TestSystype | yes | Coin, service and RTC bits / TEST and JAMMA sense, AES/MVS aware |
+| TestAudio | no | Z80 handshake, then left / right / centre beeps (upstream, reworked). A new command stops the beeps and runs. |
+| TestFM | yes | Eyecatcher music, sound command `$02`, FM1-FM4 (upstream; was PlayEyeSnd) |
+| TestSsg | yes | Coin chime, sound command `$7F`: timer A, SSG A-C, noise (upstream). On an AES the cartridge M1 decides what `$7F` plays |
+| **TestZ80** | yes | Z80 handshake 03/01/03: needs 16 stable fresh replies, flags a latch echo |
+| **TestDAC** | yes | RGB DAC pattern: 16 bands, one colour bit each. `P1=1` adds the dark bit; `P1=$10+n` fills the screen with band n for a scope or multimeter. |
+| **TestTiming** | yes | LSPC line counter (+1 steps, range, lines per frame, stuck bits named), CPU cycles per frame, auto-animation counter |
+| **TestWatchdog** | no | First run starves the watchdog; the second run reports the reset and its delay |
+| **CartDiag** | yes | "p-bus test (diag cart)" on the jwestfall69 PROG board, **writes** its SRAM: /ROMOE and /PORTOE (prefetch, bus hold), write/read test of D0-D15, both byte lanes, A1-A19 (see below) |
+| **TestVectors** | yes | Vector table switch `$000000-$00007F`, system ROM / cartridge (`REG_SWPBIOS`, `REG_SWPROM`): compares the 32 vectors with `$C00000` in both positions and back. Read only |
+| **TestBus** | yes | BIOS socket, 68000 -> BricoNeo: CRC-32 of each 32 KB quarter of the image (table written by Brico68k Compiler), A15 / A16 probes; checked at boot too, 16 screen bands on an A15 / A16 fault (see below) |
+| **CartTest** | yes | Game cartridge P bus D0-D15, read only (never writes): P1 by the security code (names stuck / open lines), P2 activity |
+| **Version** | yes | The fork version (`1.35-nic034-17`), the upstream base and the source. Also in the `?` list |
+| **TestGfxRom** | yes | The game's graphics ROMs through the cartridge port: one row per C ROM chip pair, one column per tile address bit (base tile, then bit 0-15 flipped), the S ROM tile bits 0-11 below, colours coded per bit plane. No pass / fail (the 68000 cannot read the C, S or V ROMs): compare the TV with the emulator's picture of the same game set (`--cart SET --run TestGfxRom --png ref.png`). P1 tile bits per pair (16 = 4 MB chips), P2 pairs (8), P3 blank fix tile |
+| **TestSnd** | yes | The game's M1 / V ROMs through its own sound driver: Z80 commands P1 to P2 (default `$20-$2F`), P3 tenths of a second each, after the EOT; listen (a sound silent, cut or noisy: its V ROM area). A new command stops it. Not heard in the emulator |
+| **TestGfx** | yes | Test screen for the fix layer and the sprites, with the cartridge tiles (first C tile = P1): labels, fix tiles `$00-$FF`, flips, 8 x 4 tiles, H and V shrink. P2 = 1: the whole screen in tiles. P3: the fix tile for empty cells (`$20`; World Heroes Perfect needs `$FF`, its `$20` is solid and hides the sprites). Read on the screen (see below) |
+
+Bold entries are new in this repository.
+
+The code ends before `$1FF00` (fork 1.35-nic034-17, 128 KB image, no NeoDiag flag `$0004`).
+
+Back in 1.35-nic034-16 (they had been removed for space in -10 and -11): **Version**, **CartTest**
+and **TestBus**. TestBus no longer has the NeoDiag copies of the first 32 KB to read A15/A16 from:
 - **at boot** (`busCheck`, 4 reads, < 1 ms): Brico68k Compiler stores, for one offset where the
   four quarters differ, the long word of each quarter. A quarter that reads as another one means
   A15 / A16 stuck at 0. Then the BricoNeo output ports (`$1FF00`, A15 = A16 = 1) are out of reach
@@ -611,7 +661,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `84f7840` (2026-11-09); re-read at `bf426f9` (2026-11-18, 68000 debugger v2) for -16: 128 KB image (`FLASH_IMAGE_SIZE`), `NeoDiagImageBuilder` only with flag `$0004`, output ports `$1FF00` / `$1FF02` (`DebugLink.cpp`), header offsets unchanged; the debugger patches only the official SNK BIOS. Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd), plus `5643191` / `1b72deb` (2026-11-08: PlayEyeSnd renamed TestFM, new TestSsg). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-16** (also shown by the `Version` command); the header announces **1.35**, the upstream base; 29 extensions, flags `$0003`, SHA-256 `87719df532d910ff142ddc0a57003bd1ca25b3304637e8bd144b74b5ce0fc508` |
+| This ROM | fork version **1.35-nic034-17** (also shown by the `Version` command); the header announces **1.35**, the upstream base; 31 extensions, flags `$0003`, SHA-256 `bc355868f6b5ee39da97ddc46ac74691f21caebb328d90450142d8aa4c6e0fac` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
