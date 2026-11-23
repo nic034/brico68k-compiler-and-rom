@@ -120,7 +120,7 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_CART_TEST,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartTest",			"Game cartridge P bus, read only: P1 security code names stuck/open lines, P2 activity (P1=1 forces it). Never writes. No WRAM."
 	DECLARE_EXTENSION EXT_CART_DIAG,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartDiag",			"p-bus test (diag cart), github.com/jwestfall69/neogeo-diag-aes-prog. WRITES the SRAM: /ROMOE, /PORTOE, D0-D15, lanes, A1-A19. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_VECTORS,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestVectors",		"Vector table switch, system ROM / cartridge (REG_SWPBIOS / REG_SWPROM). No WRAM."
-	DECLARE_EXTENSION EXT_TEST_GFX,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestGfx",			"Screen: fix tiles, sprites (flips, 8x4, H/V shrink), cartridge tiles from P1. P2=1: whole screen. P3: blank fix tile ($20). No WRAM."
+	DECLARE_EXTENSION EXT_TEST_GFX,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestGfx",			"Screen: fix tiles, sprites (flips, 8x4, H/V shrink), cartridge tiles from P1. P2=1: whole screen by rows, P2=N: by columns of N tiles. P3: blank fix tile ($20). No WRAM."
 	; Version: written by hand (not DECLARE_EXTENSION) so that the description
 	; takes the fork version from FORK_VERSION, its only definition
 	dc.l EXT_VERSION

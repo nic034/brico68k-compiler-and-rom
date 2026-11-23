@@ -5,7 +5,7 @@
 0x1234
 [eot, 0 ms emulated]
 > Version
-Brico68k 1.35-nic034-17 - Nic034 fork (Nicolas), not an Aurelien34 release
+Brico68k 1.35-nic034-18 - Nic034 fork (Nicolas), not an Aurelien34 release
 Based on Aurelien34/Brico68k 1.35 (1b72deb): the BricoNeo shows 1.35
 Source: github.com/nic034/brico68k-compiler-and-rom
 
@@ -245,7 +245,8 @@ P2       activity $200000-$002FDFFF, 65024 words
 > TestGfx
 Graphics test screen: fix layer and sprites (cartridge tiles)
 No NEO-GEO header at $100: no cartridge = no tiles to show.
-Sprites (C ROMs) from tile $00000000 (P1). P2=1: whole screen, 20 x 14 tiles.
+Sprites (C ROMs) from tile $00000000 (P1). P2=1: whole screen, 20 x 14 tiles by rows;
+P2=16 or 32: by columns of that many tiles (game pictures).
 Zones: flips, 8 x 4 tiles, H shrink $F-$0, V shrink $FF-$3F (L0 ROM),
 fix tiles $00-$FF (S ROM). Look for missing, shifted or wrong tiles,
 vertical bars, no flip, no shrink. Blank tiles: try another P1.

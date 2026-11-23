@@ -4,6 +4,19 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-23 - ROM 1.35-nic034-18: TestGfx by columns (game pictures)
+
+**ROM 1.35-nic034-18** (SHA-256 `511f6466609ed5c20129af07d63915c4bffe0348ef72d3c0438a3f7fc64a3047`, 31 extensions, 92876 bytes free)
+- **TestGfx P2 = N (2-64)**: the whole screen by columns, column c showing tiles P1 + c x N
+  downwards. Games store their sprites as columns of consecutive tiles, so their characters and
+  scenery come out recognisable (TestGfx colours: the game's palettes are in its program). P2 = 1
+  (by rows) unchanged. With World Heroes Perfect `TestGfx 0 8 $FF` shows whole characters;
+  with Samurai Shodown III (`samsho3`) `TestGfx $10000 8 $FF` shows its characters.
+- Checked: rule check (25 runs and `TestGfx $100 16`), regression -17 against -18 (only the new
+  report lines of TestGfx, the Version string and dumps of the ROM itself).
+- The samsho3 archive received was truncated (no central directory, V2 cut): C1-C8, S1, M1, P
+  recovered from the local headers, CRC-32 checked; enough for the graphics.
+
 ## 2026-11-23 - ROM 1.35-nic034-17: TestGfxRom, TestSnd, TestGfx P3; Emulator 1.24
 
 Checked with a game set, World Heroes Perfect (`whp`: P1, S1, C1-C8, M1, V1-V3, not encrypted).

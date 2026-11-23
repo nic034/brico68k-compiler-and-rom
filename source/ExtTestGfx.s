@@ -30,6 +30,11 @@
 ; P2 = 1: the whole screen instead, 20 sprites of 14 tiles (320 x 224), no
 ; label: a fault that depends on the position (line buffer, a column of
 ; pixels) shows wherever it is; the test zones only cover parts of the screen.
+; Tiles row by row: P1 + column + 20 x row.
+; P2 = N (2-64): the whole screen by columns: column c shows tiles P1 + c x N
+; down. Games store their sprites as columns of consecutive tiles (often 16
+; or 32 high), so pieces of characters and scenery come out recognisable
+; (in TestGfx colours, not the game's: its palettes are in its program).
 ; P3: the fix tile drawn in the empty cells (default $20, blank in the usual
 ; fonts). Some S ROMs have no blank $20 (World Heroes Perfect: $20 is solid
 ; colour 2, the fix layer then hides every sprite): P3=$FF there.
@@ -138,17 +143,32 @@ EXT_TEST_GFX:
 
 	; --- sprites: the whole screen, 20 columns of 14 tiles ---------------
 .full:
+	movea.l d5,a5					; P2: 1 = by rows, N = columns of N tiles
+	cmpa.l #64,a5
+	bls.s .p2Ok
+	movea.w #64,a5
+.p2Ok:
 	moveq #1,d6
-	moveq #20,d5					; tile = P1 + column + 20 * row
+	moveq #20,d5					; by rows: tile = P1 + column + 20 * row
+	cmpa.w #1,a5
+	beq.s .rows
+	moveq #1,d5						; by columns: tile = P1 + column * N + row
+.rows:
 	moveq #0,d3						; x
 	moveq #0,d2						; no flip
 	suba.l a4,a4					; y = 0
 	movea.w #$0FFF,a3				; full size
 	movea.w #14,a1
 .fullSprite:
-	move.l d7,d4
-	add.l d6,d4
-	subq.l #1,d4
+	move.w d6,d4
+	subq.w #1,d4					; column
+	cmpa.w #1,a5
+	beq.s .rowStart
+	move.l a5,d0
+	mulu d0,d4						; column * N
+.rowStart:
+	and.l #$FFFF,d4
+	add.l d7,d4
 	JsrA6 gfxSprite
 	add.w #16,d3
 	cmp.w #20+1,d6
@@ -166,7 +186,8 @@ EXT_TEST_GFX:
 	move.l d7,d0
 	JsrA6 printLong
 	PrintText
-	dc.b " (P1). P2=1: whole screen, 20 x 14 tiles.",10
+	dc.b " (P1). P2=1: whole screen, 20 x 14 tiles by rows;",10
+	dc.b "P2=16 or 32: by columns of that many tiles (game pictures).",10
 	dc.b "Zones: flips, 8 x 4 tiles, H shrink $F-$0, V shrink $FF-$3F (L0 ROM),",10
 	dc.b "fix tiles $00-$FF (S ROM). Look for missing, shifted or wrong tiles,",10
 	dc.b "vertical bars, no flip, no shrink. Blank tiles: try another P1.",10
