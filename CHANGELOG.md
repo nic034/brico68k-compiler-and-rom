@@ -4,6 +4,23 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-23 - Emulator 1.23: the three commands back, GUI check 205/205
+
+ROM unchanged (1.35-nic034-16).
+- Version 1.23. Run all now has TestBus (Overview) and CartTest (Cartridge); Version is a tool.
+- `compare_mame.py`: Version, TestBus, CartTest, CartTest 1 added to the commands run in MAME
+  and the emulator. `compare_mame_faults.py`: the slot data faults run CartTest again (and the
+  header dump). Not run here (no MAME).
+- `guiverify.py`: CartTest PASS on the test cartridge, slot D3 stuck -> CartTest FAIL naming D3,
+  CartTest on a game set, Version shows the fork version, TestBus PASS in Run all. Its counts were
+  stale since -12 (25 extensions, "10 pass", 20 compared commands, TestDecode missing from the dead
+  WRAM chip log): now 29, 12 pass (11 with the watchdog off), 24, 6 different.
+- Checked: `guiverify.py` 205/205 with the C core under Xvfb (python3.12 with Tk). A first run
+  with the Python core: 188/205, the known case (diagnosis over its 10 minutes, then the checks
+  after it) plus the stale counts.
+- Seen: with an unstable BIOS socket line (`bios:float:N`) every read is random, code fetches
+  too: the console crashes before TestBus can run (as in -15). A limit of the model.
+
 ## 2026-11-23 - ROM 1.35-nic034-16: 128 KB image, Version / CartTest / TestBus back; Compiler 1.7
 
 Aurelien confirmed that the Brico68k ROM limit is 128 KB, not 32 KB. The 32 KB came from header
