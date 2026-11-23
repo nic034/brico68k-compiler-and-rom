@@ -104,10 +104,10 @@ EXT_TEST_VECTORS:
 	tst.w d7
 	bne .failed
 	PrintLn "=> Test success"
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 .failed:
 	PrintLn "=> Test failure"
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 
 ; vecCompare: d5 = number of long words (0-32) equal at $000000 and $C00000.
 ; Destroys d0, d1, a1, a2.

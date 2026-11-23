@@ -25,7 +25,7 @@ EXT_WRITE:
 .done:
 
     ; End of transmission
-    jmp EOT_AND_WAIT(pc)
+    jmp EOT_AND_WAIT
 
     ; Jump back to the command loop
 
@@ -36,4 +36,4 @@ EXT_WRITE_B:
     move.l (BRICO_COMMAND_PARAM_1).l,d0
     move.l (BRICO_COMMAND_PARAM_2).l,a0
     move.b d0,(a0)
-    jmp EOT_AND_WAIT(pc)
+    jmp EOT_AND_WAIT

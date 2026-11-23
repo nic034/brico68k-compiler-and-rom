@@ -60,7 +60,7 @@
 	global BRICO_COMMAND_PARAM_3
 	; Used to return after the execution of a extension function
 	global  WAIT_FOR_COMMAND
-	; Same, after sending the EOT: "jmp EOT_AND_WAIT(pc)" (4 bytes) replaces
+	; Same, after sending the EOT: "jmp EOT_AND_WAIT" (4 bytes) replaces
 	; "WriteEOT" + "jmp WAIT_FOR_COMMAND" (12 bytes)
 	global  EOT_AND_WAIT
 	; Entry for extensions that keep running until the next command arrives
@@ -76,7 +76,7 @@
 	; Version - 4 bytes
 	BRICONEO_VERSION 1,35			; upstream base; the fork version (FORK_VERSION) is not in the image
 	; Special modes
-	dc.w BRICO_SPECIAL_FLAG_ENABLE_EXTENSIONS + BRICO_SPECIAL_FLAG_68K_SENDS_COMMANDS + BRICO_SPECIAL_FLAG_NEODIAG_MIRRORS
+	dc.w BRICO_SPECIAL_FLAG_ENABLE_EXTENSIONS + BRICO_SPECIAL_FLAG_68K_SENDS_COMMANDS	; 128 KB image, no NeoDiag mirrors
 
 JUMP_TO_COMMAND:
 	dc.w $4ef9 ; jmp opcode, in order to jump directly to the following address
@@ -114,9 +114,21 @@ EXTENSIONS_TABLE:
 	DECLARE_EXTENSION EXT_TEST_WATCHDOG,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestWatchdog",		"Run 1 stops kicking the watchdog (reset ~0.13 s), run 2 reports it. Uses WRAM $10FFE0."
 	DECLARE_EXTENSION EXT_TEST_CHIP,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestChip",		"One line per part, < 1 s: WRAM, palette, VRAM, LSPC2, NEO-C1, IRQs, Z80, NEO-D0 clocks. IRQs need WRAM."
 	DECLARE_EXTENSION EXT_TEST_SYSTYPE,		BRICO_EXT_OUTPUT_TYPE_STRING,	"TestSystype",		"SYSTYPE: TEST button, JAMMA sense (MVS). No WRAM."
+	DECLARE_EXTENSION EXT_TEST_BUS,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestBus",			"BIOS socket 68000 -> BricoNeo: CRC32 of each 32 KB of the image (A1-A16, D0-D15), names A15/A16 if a quarter reads as another. No WRAM."
+	DECLARE_EXTENSION EXT_CART_TEST,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartTest",			"Game cartridge P bus, read only: P1 security code names stuck/open lines, P2 activity (P1=1 forces it). Never writes. No WRAM."
 	DECLARE_EXTENSION EXT_CART_DIAG,		BRICO_EXT_OUTPUT_TYPE_STRING,	"CartDiag",			"p-bus test (diag cart), github.com/jwestfall69/neogeo-diag-aes-prog. WRITES the SRAM: /ROMOE, /PORTOE, D0-D15, lanes, A1-A19. No WRAM."
 	DECLARE_EXTENSION EXT_TEST_VECTORS,	BRICO_EXT_OUTPUT_TYPE_STRING,	"TestVectors",		"Vector table switch, system ROM / cartridge (REG_SWPBIOS / REG_SWPROM). No WRAM."
 	DECLARE_EXTENSION EXT_TEST_GFX,			BRICO_EXT_OUTPUT_TYPE_STRING,	"TestGfx",			"Screen: fix tiles, sprites (flips, 8x4, H/V shrink), cartridge tiles from P1. P2=1: whole screen. No WRAM."
+	; Version: written by hand (not DECLARE_EXTENSION) so that the description
+	; takes the fork version from FORK_VERSION, its only definition
+	dc.l EXT_VERSION
+	dc.w BRICO_EXT_OUTPUT_TYPE_STRING
+	dc.b "Version",0
+	align 1
+	dc.b "Fork version "
+	FORK_VERSION
+	dc.b ": Nic034 fork of Aurelien34/Brico68k 1.35 (header: 1.35). No WRAM.",0
+	align 1
 	dc.l $ffffffff ; No more extensions
 
 START:
@@ -126,7 +138,14 @@ START:
 	move.w  #$4000,(REG_LSPCMODE).l ; stop animations
 	lea RAM_RESERVED_SYS_ROM,sp		; Set stack pointer to BIOS_WORKRAM
 	DisableInterrupts 				; Interrupts are disabled by default
-	bra.s WAIT_FOR_COMMAND
+	; BIOS socket A15/A16 (TestBus probes, no WRAM, < 1 ms): stuck at 0, the
+	; BricoNeo serves another quarter and its output ports ($1FF00: A15 =
+	; A16 = 1) are out of reach - no text can ever come back, so the fault
+	; is shown on screen (16 bands, A1 at the top) until a command arrives.
+	JsrA6 busCheck
+	tst.l d5
+	beq.s WAIT_FOR_COMMAND
+	jmp BUS_SCREEN
 
 EOT_AND_WAIT:
 	WriteEOT

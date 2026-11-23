@@ -50,7 +50,7 @@ screenBand_JsrA6:
 	bra.s .poll
 .command:
 	move.l (BRICO_COMMAND_IN).l,d0
-	jmp DISPATCH_COMMAND(pc)
+	jmp DISPATCH_COMMAND
 .clear:
 	moveq #1,d2
 .poll:

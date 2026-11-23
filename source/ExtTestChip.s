@@ -509,7 +509,7 @@ EXT_TEST_CHIP:
 	PrintLn ""
 .notCovered:
 	PrintLn "Not covered: video (TestDAC), watchdog (TestWatchdog), sound (TestAudio)."
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 
 	even
 .ports:							; read last first: bit 3 = SOUND ... bit 0 = P1

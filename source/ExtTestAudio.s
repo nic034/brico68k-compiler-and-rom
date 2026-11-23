@@ -32,7 +32,7 @@ EXT_TEST_AUDIO:
 	tst.b d0
 	bne.s .ackOk
 	PrintLn "ERROR: no Z80 ACK $01 (Z80, M1/SM1 ROM or NEO-D0/sound latch?)"
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 
 .ackOk:
 	PrintLn "Z80 ACK $01 received"
@@ -69,7 +69,7 @@ EXT_TEST_AUDIO:
 	move.b #3,(REG_SOUND).l
 	bsr.w SM1_CommandDelay
 
-	jmp WAIT_FOR_COMMAND(pc)
+	jmp WAIT_FOR_COMMAND
 
 ; ------------------------------------------------------------------------
 ; SM1_Send01AndWaitAck
@@ -132,4 +132,4 @@ Wait_1Second:
 .command:
 	move.b #3,(REG_SOUND).l
 	lea RAM_RESERVED_SYS_ROM,sp
-	jmp DISPATCH_COMMAND(pc)
+	jmp DISPATCH_COMMAND

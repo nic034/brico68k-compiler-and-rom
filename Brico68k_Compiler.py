@@ -43,7 +43,7 @@ import zipfile
 from pathlib import Path
 
 APP_NAME = "Brico68k Compiler"
-APP_VERSION = "1.6"
+APP_VERSION = "1.7"
 
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_compiler"
@@ -580,6 +580,10 @@ def check_briconeo(data):
         free = 0x7FFA - len(data)
         res.append((free >= 0, f"NeoDiag layout (header flag $0004): code ends before $7FFA, {free} bytes free "
                                "for new code"))
+    else:
+        free = PORT_OFFSET - len(data)
+        res.append((free >= 0, f"128 KB image: code ends before ${PORT_OFFSET:05X} (BricoNeo output ports), "
+                               f"{free} bytes free for new code"))
     reset_hi = struct.unpack_from(">H", data, 4)[0]
     pc = struct.unpack_from(">I", data, 4)[0]
     res.append((reset_hi == 0x00C0, f"Reset vector ${pc:08X}: byte order recognised by Brico16Bits "
@@ -617,6 +621,21 @@ def check_briconeo(data):
     return res
 
 
+PORT_OFFSET = 0x1FF00          # $1FF00 EOT, $1FF02 output: never code (Brico16Bits DebugLink.cpp)
+BUS_MAGIC = b"BUSCRC32"         # TestBus (ExtTestBus.s BUS_TABLE): magic, then 36 data bytes:
+BUS_DATA = 36                   # CRC-32 of each 32 KB quarter, probe offset, probe long of each quarter
+
+
+def bus_quarter_crcs(img, tab):
+    """CRC-32 of each 32 KB quarter of a 128 KB image as the 68000 reads it (ExtTestBus.s):
+    quarter 0 with the command block $90-$9F and the table's 36 data bytes at tab+8 as zeros,
+    quarter 3 up to $1FEFF (the BricoNeo output ports are never read)."""
+    import zlib
+    q0 = bytearray(img[0:0x8000]); q0[0x90:0xA0] = bytes(16); q0[tab + 8:tab + 8 + BUS_DATA] = bytes(BUS_DATA)
+    parts = (bytes(q0), img[0x8000:0x10000], img[0x10000:0x18000], img[0x18000:PORT_OFFSET])
+    return [zlib.crc32(q) & 0xFFFFFFFF for q in parts]
+
+
 def make_sp1_image(data, fill=0xFF):
     """128 KB BricoNeo image. With header flag $0004 (bytes $8C-$8D), the image
     the BricoNeo builds itself on a mass-storage / serial load (Brico16Bits
@@ -626,7 +645,33 @@ def make_sp1_image(data, fill=0xFF):
     Otherwise: plain padding."""
     flags = int.from_bytes(data[0x8C:0x8E], "big") if len(data) >= 0x8E else 0
     if not (flags & 4) or len(data) > 0x7FFA:
-        return data + bytes([fill]) * (SP1_SIZE - len(data))
+        tab = data.find(BUS_MAGIC)
+        if tab < 0 or len(data) > PORT_OFFSET:
+            return data + bytes([fill]) * (SP1_SIZE - len(data))
+        if data.find(BUS_MAGIC, tab + 1) >= 0 or tab + 8 + BUS_DATA > 0x8000:
+            raise BuildError("TestBus CRC table: found twice, or not in the first 32 KB (see Brico68k.ld)")
+        # TestBus image: each quarter padded with its own byte ($FF, $FE, $FD, $FC) so that
+        # no two quarters have the same CRC, then the CRC table above the output ports
+        img = bytearray(data)
+        while len(img) < SP1_SIZE:
+            img.append((fill - (len(img) >> 15)) & 0xFF)
+        img[PORT_OFFSET:PORT_OFFSET + 4] = bytes(4)
+        # probe: an offset (even, not the command block, the table, the ports) where the
+        # long word of the four quarters differs: busCheck (boot) names A15 / A16 from it
+        probe = None
+        for off in range(0x7FF0, 0x100, -4):
+            if tab <= off < tab + 8 + BUS_DATA or off + 4 > tab and off < tab:
+                continue
+            vals = [bytes(img[q * 0x8000 + off:q * 0x8000 + off + 4]) for q in range(4)]
+            if len(set(vals)) == 4:
+                probe = (off, vals)
+                break
+        if probe is None:
+            raise BuildError("TestBus: no offset where the four quarters differ")
+        crcs = bus_quarter_crcs(bytes(img), tab)
+        img[tab + 8:tab + 8 + BUS_DATA] = (b"".join(c.to_bytes(4, "big") for c in crcs)
+                                           + probe[0].to_bytes(4, "big") + b"".join(probe[1]))
+        return bytes(img)
     import zlib
     base = bytearray(data + bytes(0x8000 - len(data)))
     crc = zlib.crc32(bytes(base[:0x7FFB]))

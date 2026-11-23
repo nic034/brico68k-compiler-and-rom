@@ -292,6 +292,7 @@ def _t(cat, look=None, varies=None, verdict_only=None, wait=0.0, twice=0.0, rese
 
 TESTS = {
     "TestChip": _t("Overview"),
+    "TestBus": _t("Overview"),
     "TestWRAM": _t("Memory"),
     "TestBRAM": _t("Memory"),
     "TestPRAM": _t("Memory"),
@@ -317,8 +318,10 @@ TESTS = {
     "TestSystype": _t("Inputs and system", varies="depends on the board and its jumpers"),
     "TestVectors": _t("Inputs and system"),
     "TestWatchdog": _t("Inputs and system", twice=2.0, resets=True),
+    "CartTest": _t("Cartridge", varies="depends on the cartridge: insert the same game set in the emulator "
+                                       "(Cartridge tab) to compare"),
     "CartDiag": _t("Cartridge"),
-    **{n: _t("Tools") for n in ("Echo", "Read", "Write", "WriteB", "Dump", "Color")},
+    **{n: _t("Tools") for n in ("Version", "Echo", "Read", "Write", "WriteB", "Dump", "Color")},
 }
 CATEGORIES = []                       # [(group, [names])] in TESTS order, "Tools" last
 for _n, _s in TESTS.items():
@@ -528,8 +531,9 @@ def diagnose_report(d, log_name, top=8):
             out.append(f"  {i}. {c['fault']}  [{c['spec']}]  {c['explained']}/{c['total']}, {rest}")
         if exact and all(c["spec"].startswith("bios:") for c in exact):
             out.append("The console never answers: a BIOS socket address line (68000 -> BricoNeo) is suspect, "
-                       "and the log cannot say which one (no test of the socket lines since TestBus was removed "
-                       "in 1.35-nic034-11): reseat the BricoNeo, then BricoNeo Trace and a continuity meter.")
+                       "and the log cannot say which one. Look at the screen after power-on: with A15 or A16 stuck at 0 "
+                       "the firmware shows 16 bands, A1 at the top (red = stuck at 0); with a line stuck at 1, or "
+                       "A1-A14: no boot, reseat the BricoNeo, then BricoNeo Trace and a continuity meter.")
     out.append("Limits: one stuck-at fault at a time, in the modelled chips only (WRAM, palette RAM, VRAM, "
                "line counter, BIOS socket address lines). Intermittent faults, shorts between lines, timing "
                "faults and other chips are not in the dictionary.")

@@ -98,7 +98,7 @@ EXT_TEST_STATUSA:
 	PrintLn ""
 
 	; End of transmission
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 .lblTitle:
 	dc.b "STATUS_A breakdown ($320001), AES/MVS-aware (MAME neogeo.cpp)", 10, 0
 .lblCoins:						; bits 0-4

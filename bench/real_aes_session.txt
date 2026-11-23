@@ -2,7 +2,10 @@
 ; Paste the whole file into the serial terminal (PuTTY, Tera Term...). Lines starting with ; are ignored.
 ; Insert a game cartridge: on an AES the Z80 program (M1) comes from the cartridge.
 Echo $1234
+Version
 TestChip
+TestBus
+; TestBus: CRC32 of each 32 KB of the BIOS image, about 1 s
 TestWRAM
 TestBRAM
 TestPRAM
@@ -28,6 +31,8 @@ TestWatchdog
 ; first pass starves the watchdog: wait for the reset, then read the result
 Delay 2000
 TestWatchdog
+; game cartridge P bus, read only (never writes)
+CartTest
 ; diagnostic PROG board only (it WRITES its SRAM, never on a game cartridge): CartDiag
 TestGfx
 ; TestGfx: labels, fix tiles and sprites (flips, 8x4 tiles, H and V shrink) from the cartridge tiles

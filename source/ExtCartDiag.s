@@ -165,7 +165,7 @@ CART_BOARD:
 	movea.l #P2_START,a5
 	movea.l #P2_START+$10000,a4
 	lea .p1(pc),a3				; RAM_SUITE returns through a3
-	jmp RAM_SUITE(pc)
+	jmp RAM_SUITE
 .p1:
 	Print "> P1 window (/ROMOE) read back Test "
 	movea.l #P2_START+$200,a0	; write: walking 1, then walking 0
@@ -243,4 +243,4 @@ CART_BOARD:
 	dc.b "=> Test failure: P1 window (/ROMOE)",10,0
 	even
 CART_END:
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT

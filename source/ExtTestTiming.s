@@ -345,4 +345,4 @@ EXT_TEST_TIMING:
 	PrintLn "=> Test FAIL"
 
 .end:
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT

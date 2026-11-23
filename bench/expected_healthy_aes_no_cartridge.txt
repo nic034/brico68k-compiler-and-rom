@@ -4,6 +4,12 @@
 > Echo $1234
 0x1234
 [eot, 0 ms emulated]
+> Version
+Brico68k 1.35-nic034-16 - Nic034 fork (Nicolas), not an Aurelien34 release
+Based on Aurelien34/Brico68k 1.35 (1b72deb): the BricoNeo shows 1.35
+Source: github.com/nic034/brico68k-compiler-and-rom
+
+[eot, 2 ms emulated]
 > TestChip
 Chip check: quick state of the board (details: the long tests)
 Part             Result  Detail
@@ -28,6 +34,16 @@ NEO-D0 outputs:
 Not covered: video (TestDAC), watchdog (TestWatchdog), sound (TestAudio).
 
 [eot, 730 ms emulated]
+> TestBus
+BIOS socket, 68000 -> BricoNeo: CRC32 of each 32 KB of the image
+Quarter 0  OK
+Quarter 1  OK
+Quarter 2  OK
+Quarter 3  OK
+=> Test success: the BIOS socket path works (A1-A16, D0-D15)
+
+[eot, 919 ms emulated]
+; TestBus: CRC32 of each 32 KB of the BIOS image, about 1 s
 > TestWRAM
 Work RAM (WRAM) test
 > Data bus walking 1/0 Test Success
@@ -96,7 +112,7 @@ Video timing test (LSPC line counter, $3C0006)
 > Auto-animation counter: 8/8 frame steps OK
 => Test success
 
-[eot, 703 ms emulated]
+[eot, 855 ms emulated]
 > TestZ80
 Z80 handshake test (ACTIVE: stops any sound)
 Needs a standard SM1/M1 sound driver.
@@ -208,11 +224,23 @@ again to read the result (commands sent meanwhile are lost).
 > Delay 2000
 > TestWatchdog
 Watchdog test result:
-> The watchdog reset the 68000 after ~133 ms (44576 loops of 3 us)
+> The watchdog reset the 68000 after ~133 ms (44570 loops of 3 us)
   MAME MVS: 135 ms. Real boards: about 0.13 s.
 => Test success (run again to re-arm)
 
 [eot, 2 ms emulated]
+; game cartridge P bus, read only (never writes)
+> CartTest
+Cartridge P bus data lines D0-D15
+Header   no NEO-GEO at $100, read $FFFF $FFFF $FFFF $FFFF
+  (diag PROG board: use CartDiag)
+P1       no security code. Activity $000100-$0FFFFF, 65520 words
+         every word reads $FFFF: nothing answers (chip, output enable), or blank
+P2       activity $200000-$002FDFFF, 65024 words
+         every word reads $FFFF: nothing answers (chip, output enable), or blank
+=> CHECK: no cartridge seen. Clean the edge, try another one
+
+[eot, 1025 ms emulated]
 ; diagnostic PROG board only (it WRITES its SRAM, never on a game cartridge): CartDiag
 > TestGfx
 Graphics test screen: fix layer and sprites (cartridge tiles)

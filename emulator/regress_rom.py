@@ -46,7 +46,8 @@ HEALTHY = ["Echo $1234", "Read $320001", "Read $380000", "Read $300000", "Read $
            "TestWatchdog", "Echo $99", "TestWatchdog", "Echo $9A", "TestWatchdog", "TestWatchdog",
            "Dump $C00000 16", "Read $400000", "Dump $100 8", "TestWRAM",
            "TestVectors", "TestGfx", "Echo $31", "TestGfx $12345", "TestDAC $15", "TestVectors",
-           "TestGfx $12345 1", "TestGfx 0 1", "TestDAC $12"]
+           "TestGfx $12345 1", "TestGfx 0 1", "TestDAC $12",
+           "Version", "TestBus", "Echo $5C", "CartTest", "CartTest 1", "Echo $5D"]   # back in -16: appended, older recordings still line up
 SCREEN = {"testdac"}
 DECODE = ["TestDecode", "Echo $5B"]       # last in every scenario that has it: older recordings still line up
 
@@ -136,8 +137,8 @@ def scenarios(rom):
              "pal": ["TestPRAM", "TestChip", "TestDAC", "Echo 3"] + DECODE,
              "lspc": ["TestLSPC", "TestChip", "Echo 3"] + DECODE,
              "vramlo": ["TestVRAM", "TestChip", "TestLSPC"], "vramhi": ["TestVRAM", "TestChip", "TestLSPC"],
-             "line": ["TestTiming", "TestChip", "TestDAC", "Echo 4", "Echo 5"],
-             "bios": ["TestChip", "Echo 6", "Echo 7", "Dump $C07FF0 16"],
+             "line": ["TestTiming", "TestChip", "TestDAC", "Echo 4", "TestBus", "Echo 5"],
+             "bios": ["TestBus", "Echo 6", "Version", "Dump $C07FF0 16"],
              "vec": ["TestVectors", "Echo $41", "TestVectors", "TestChip"]}
     for f in E.all_single_faults():
         spec_ = E.fault_spec(f)
@@ -156,6 +157,7 @@ def scenarios(rom):
                        ["TestVectors", "Echo $41", "TestVectors"]))
     for cf in cart_faults:
         sc.append((f"fault/diag/{cf}", rom, "diag", 1, [cf], ["CartDiag", "Echo $42"]))
+        sc.append((f"fault/test/{cf}", rom, "test", 1, [cf], ["CartTest", "CartTest 1"]))
     if CORE:
         cmds = ["TestInp", "TestStatusA", "TestSystype", "TestBRAM", "TestChip", "TestWRAM"]
         # p1, dip, p2, status_a, status_b, systype word, MVS backup RAM

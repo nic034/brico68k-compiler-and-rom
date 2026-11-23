@@ -98,7 +98,7 @@ EXT_TEST_DAC:
 	move.w d5,d0
 	JsrA6 printWord
 	NlPrintLn "Measure R, G and B at the video output (scope / multimeter)."
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 
 	even
 BAND_COLOURS:

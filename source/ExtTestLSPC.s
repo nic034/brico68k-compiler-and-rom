@@ -127,4 +127,4 @@ EXT_TEST_LSPC:
     jmp .done
 
 .done:
-    jmp EOT_AND_WAIT(pc)
+    jmp EOT_AND_WAIT

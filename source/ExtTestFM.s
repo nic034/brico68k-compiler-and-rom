@@ -15,7 +15,7 @@ EXT_TEST_FM:
     JsrA6 wait_for_z80
 
     ; End of transmission
-    jmp EOT_AND_WAIT(pc)
+    jmp EOT_AND_WAIT
 
     ; Jump back to the command loop
 

@@ -63,7 +63,7 @@ EXT_TEST_WATCHDOG:
 	WatchDog
 	move.l #MAGIC_NORST_HI,(a3)
 	move.l #MAGIC_NORST_LO,4(a3)
-	jmp WAIT_FOR_COMMAND(pc)			; EOT already sent
+	jmp WAIT_FOR_COMMAND			; EOT already sent
 
 ; --- 2nd run: results ------------------------------------------------------
 .wasReset:
@@ -106,4 +106,4 @@ EXT_TEST_WATCHDOG:
 	PrintLn "=> Cannot run: WRAM does not hold the signature. Run TestWRAM."
 
 .end:
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT

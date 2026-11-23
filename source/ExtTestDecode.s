@@ -110,10 +110,10 @@ EXT_TEST_DECODE:
 	dc.b "  Next: TestChip",10
 	dc.b "=> Test failure",10,0
 	even
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 .success:
 	PrintLn "=> Test success"
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 
 .groups:
 	Group DEC_WRAM,16,19,"> Work RAM    $100000-$1FFFFF  "

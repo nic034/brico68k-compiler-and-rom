@@ -83,7 +83,7 @@ EXT_TEST_SYSTYPE:
 	PrintLn ""
 
 	; End of transmission
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 .lblTitle:
 	dc.b "SYSTYPE breakdown ($300080/$300081), AES/MVS-aware (MAME neogeo.cpp)", 10, 0
 .lblPressed:

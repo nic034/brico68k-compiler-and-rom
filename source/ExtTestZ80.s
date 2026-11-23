@@ -54,7 +54,7 @@ EXT_TEST_Z80:
 
 .cleanup:
 	JsrA6 z80Quiet
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 
 ; ------------------------------------------------------------------------
 ; Standard sound driver handshake, shared by TestZ80 and TestChip: $03

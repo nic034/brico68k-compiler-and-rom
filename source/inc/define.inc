@@ -78,7 +78,8 @@ BRICO_EXT_OUTPUT_TYPE_DUMP equ $3
 ; BricoNeo special flags
 BRICO_SPECIAL_FLAG_ENABLE_EXTENSIONS equ $0001		; Command extensions are active
 BRICO_SPECIAL_FLAG_68K_SENDS_COMMANDS equ $0002		; The 68k can send commands using the output port
-BRICO_SPECIAL_FLAG_NEODIAG_MIRRORS equ $0004		; The BricoNeo writes the CRC32 at $7FFC and the 3 mirrors (NeoDiagImageBuilder)
+BRICO_SPECIAL_FLAG_NEODIAG_MIRRORS equ $0004		; The BricoNeo writes the CRC32 at $7FFC and the 3 mirrors (NeoDiagImageBuilder).
+												; Not set since 1.35-nic034-16: the code uses the whole 128 KB image
 
 ; VRAM memory mapped registers
 REG_VRAMADD	equ $3C0000
@@ -100,7 +101,7 @@ REG_STATUS_B equ $380000
 	; Brico16Bits shows "Found BricoNeo ROM version 1.35". build.py and the
 	; Compiler check that the header equals the base of this string.
 	macro FORK_VERSION
-		dc.b "1.35-nic034-15"
+		dc.b "1.35-nic034-16"
 	endm
 
 	macro BRICONEO_VERSION
@@ -139,7 +140,7 @@ REG_STATUS_B equ $380000
 
     macro JsrA6
 		lea .\@(pc),a6					; PC-relative: 4 bytes / 8 cycles instead of 6 / 12
-		jmp \1_JsrA6(pc)				; PC-relative: the whole ROM is < 32 KiB
+		jmp \1_JsrA6					; absolute: since -16 the code is over 32 KiB (128 KB image)
 .\@:
 	endm
 
@@ -191,7 +192,7 @@ REG_STATUS_B equ $380000
 		; after it (8 bytes of code per Print, was 18). Destroys d0, a0, a6
 		; (a6 was already destroyed by the JsrA6 of the previous version).
 		lea .\@StringAddress(pc),a6
-		jmp printInline_JsrA6(pc)
+		jmp printInline_JsrA6
 	.\@StringAddress:
 		ifc "\3","1"
 		dc.b 10
@@ -209,7 +210,7 @@ REG_STATUS_B equ $380000
 	; saved.
 	macro PrintText
 		lea .\@StringAddress(pc),a6
-		jmp printInline_JsrA6(pc)
+		jmp printInline_JsrA6
 	.\@StringAddress:
 	endm
 

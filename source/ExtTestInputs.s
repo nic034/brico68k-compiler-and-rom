@@ -159,10 +159,10 @@ EXT_TEST_INPUTS:
 	btst #7,d1
 	bne.s .hwMVS
 	PrintLn "AES"
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 .hwMVS:
 	PrintLn "MVS"
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 
 .lblButtons:					; P1 and P2, bits 0-7
 	dc.b "  Up      : ",0,"  Down    : ",0,"  Left    : ",0,"  Right   : ",0

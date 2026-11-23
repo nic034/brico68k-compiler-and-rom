@@ -630,7 +630,7 @@ RAM_END_OF_TEST:
 	move.b d0,REG_SRAMLOCK				; protect backup RAM (data ignored)
 	move.b d0,REG_PALBANK0				; palette bank 0, as after the PRAM test
     ; End of transmission
-    jmp EOT_AND_WAIT(pc)
+    jmp EOT_AND_WAIT
     ; Jump back to the command loop
 
 RAMT_TXT_WRAM:

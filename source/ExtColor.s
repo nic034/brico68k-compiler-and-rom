@@ -25,6 +25,6 @@ EXT_COLOR:
     bne .loop
 
     ; End of transmission
-    jmp EOT_AND_WAIT(pc)
+    jmp EOT_AND_WAIT
 
     ; Jump back to the command loop

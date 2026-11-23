@@ -4,6 +4,71 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-23 - ROM 1.35-nic034-16: 128 KB image, Version / CartTest / TestBus back; Compiler 1.7
+
+Aurelien confirmed that the Brico68k ROM limit is 128 KB, not 32 KB. The 32 KB came from header
+flag `$0004` (NeoDiag layout), kept since -11 for nothing.
+
+**Checked in Brico16Bits** (`bf426f9`, 2026-11-18): the image is 128 KB (`FLASH_IMAGE_SIZE`),
+loaded whole; `NeoDiagImageBuilder` only acts with flag `$0004`, else the image is served as it
+is; the output ports are offsets `$1FF00` / `$1FF02` (`DebugLink.cpp`, same mask as `IsHostPort`);
+header offsets unchanged; the new 68000 debugger patches only the official SNK BIOS.
+
+**ROM 1.35-nic034-16** (SHA-256 `56eba171004e9586c440a99cebc6b163fa209f19ae41210bd0a778e3e8691791`, 29 extensions, 95332 bytes free before `$1FF00`)
+- Flag `$0004` removed (flags `$0003`); linker: code up to `$1FF00` (was `$7FFA`).
+- Calls between files are absolute (`JsrA6`, `PrintText`, 34 `jmp EOT_AND_WAIT/WAIT_FOR_COMMAND/
+  DISPATCH_COMMAND/RAM_SUITE`): a PC-relative jump only reaches +/-32 KB (vlink stops with
+  "doesn't fit into 16 bits", checked). 2 bytes and 4 cycles per call.
+- **Version** back (as in -09; upstream base now `1b72deb`).
+- **CartTest** back (game cartridge P bus, read only), unchanged; shares nothing but EOT_AND_WAIT.
+- **TestBus** back, redesigned (no NeoDiag copies any more):
+  - Command: CRC-32 of each 32 KB quarter (command block `$90-$9F` and the table's data as zeros,
+    quarter 3 up to `$1FEFF`: the ports are never read) against `BUS_TABLE`, filled by the
+    Compiler; then the A15/A16 probes. 0.92 s (byte table, 1 KB blocks by `dbra`, watchdog
+    between blocks; a first version took 1.14 s).
+  - Boot (`busCheck`, 4 reads, < 1 ms): the Compiler picks an offset where the four quarters
+    differ and stores each quarter's long word there. A quarter read as another = A15 / A16
+    stuck at 0. Then the output ports (A15 = A16 = 1) are out of reach and no text can come
+    back, so the screen shows the 16 bands of the old TestBus (A1 at the top, the bad line red)
+    until a command. Checked: A15 / A16 stuck at 0 give band 15 / 16 red.
+  - Not covered any more: A15 / A16 stuck at 1 (quarter 0 unreadable: no boot) - the old
+    TestBus booted on a NeoDiag copy and named it. A1-A14 / D0-D15 cut: no boot, as before.
+  - `Brico68k.ld` puts the header, Tools, Trace, Screen, TestBus and Echo in the first 32 KB.
+  - Checked on altered images: a byte changed in quarter 2, at `$1FEFF` and at `$A0` -> that
+    quarter FAILs.
+
+**Compiler 1.7**
+- Without flag `$0004`: checks that the code ends before `$1FF00` and prints the free space.
+- Image with TestBus (`BUSCRC32` found once, in the first 32 KB): each quarter padded with its
+  own byte (`$FF`, `$FE`, `$FD`, `$FC`), CRC-32 of each quarter and the probe written into
+  `BUS_TABLE`. Other images: plain `$FF` padding, as before.
+
+**Emulator, tests, bench**
+- TestBus (Overview), CartTest (Cartridge), Version (Tools) back in the lists; Find the fault's
+  BIOS socket message points to the boot screen.
+- `regress_rom.py`: Version, TestBus, CartTest, CartTest 1 appended to the healthy list,
+  TestBus in the line / BIOS socket scenarios, CartTest under every slot fault (570 scenarios,
+  2509 commands).
+- `test_ext_check.py`: no longer widens the 32 KB linker length (the fixture fits).
+- `bench_fuzz.py`: a WRAM fault under a command that uses the stack (TestAudio, TestChip IRQs,
+  TestWatchdog) is undefined (a corrupted return address), not a failure.
+- `bench/real_aes_session.txt`: Version, TestBus, CartTest; expected outputs regenerated.
+
+**Checks** (emulation only: no real AES, no MAME)
+- Regression -15 against -16 (C test core), the new commands set aside: every other command
+  answers word for word as before, except 6 measured watchdog counts, 6 `Dump $C0...` (the ROM
+  itself), and the scenarios that are chaotic by nature: in each, the first difference is
+  TestAudio / TestWatchdog under a WRAM fault (stack) or CartDiag on a floating slot line.
+  Example: with `wram:data:3:0 wram:data:11:1`, TestAudio's corrupted return now loops in its
+  delay routine (kicking the watchdog: no reset) where -15 hit an exception.
+- `--test` rule check: 23 runs, no rule broken. `test_chip_hints`, `test_decode`,
+  `test_ext_check`, `test_neo_py` (lockstep): 0 failures.
+- `bench_fuzz.py`, seeds 5, 7, 23, 41: 0 failures over about 14000 commands, about 800 fault
+  sequences, 200 random lines under the rule check.
+
+Not done: real AES, MAME, guiverify (no Tk). On the real AES: `Version`, `TestBus` (expect 4 x OK,
+about 1 s), `CartTest` with a game.
+
 ## 2026-11-18 - ROM 1.35-nic034-15: Read / Dump spare the BricoNeo ports, TestChip survives a dead IRQ acknowledge; bug-hunt and unexpected-input benches
 
 **ROM 1.35-nic034-15** (SHA-256 `8dcd66e4c2f2240032dd022eb6006244a61dded0acdde137abb564bc61bad69a`, 26 extensions,

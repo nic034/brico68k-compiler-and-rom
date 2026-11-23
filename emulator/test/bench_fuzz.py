@@ -96,6 +96,8 @@ class Bench:
         self.r = random.Random(seed)
         self.seed = seed
         self.exts = E.parse_extensions(rom)
+        self.stack_users = {n.lower() for n, _, _, d in self.exts if "WRAM (stack)" in d or "Uses WRAM" in d
+                            or "need WRAM" in d}
         self.fail = []
         self.stats = {"commands": 0, "eot": 0, "exception": 0, "timeout_expected": 0, "echo": 0}
 
@@ -108,6 +110,9 @@ class Bench:
         n = w[0].lower()
         if any(f[0] == 5 for f in faults):              # BIOS socket fault: host link itself is broken
             return True
+        if n in self.stack_users and any(f[0] == 0 for f in faults):
+            return True                                 # WRAM fault under a command that uses the stack:
+                                                        # a corrupted return address, anything can follow
         if n == "testwatchdog":
             return True
         if n in WRITERS:
@@ -126,7 +131,8 @@ class Bench:
             vals = h.last_values
             self.stats["commands"] += 1
             name = line.split()[0].lower()
-            if st == "timeout" or st == "exception":
+            if st == "timeout" or st == "exception" or (faults and any(f[0] == 0 for f in faults)
+                                                        and name in self.stack_users):
                 if self.expected_hang(line, faults) or (st == "exception" and faults):
                     self.stats["timeout_expected"] += 1
                     return                                # console state no longer defined: next sequence

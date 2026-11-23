@@ -165,7 +165,7 @@ EXT_TEST_GFX:
 	dc.b "vertical bars, no flip, no shrink. Blank tiles: try another P1.",10
 	dc.b "TestDAC clears the screen.",10,0
 	even
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 
 ; gfxSprite: writes sprite d6 and adds 1 to d6. d3 = x, a4 = y (visible
 ; area), a3 = SCB2 shrink word, a1 = height in tiles, d2 = flips, d4 = first

@@ -413,7 +413,7 @@ EXT_TEST_VRAM:
 
 .done:
 	move.w #1,(REG_VRAMMOD).l
-	jmp EOT_AND_WAIT(pc)
+	jmp EOT_AND_WAIT
 
 	even
 VRAM_ZONES:						; base, words, zone id, address lines

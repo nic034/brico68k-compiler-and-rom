@@ -42,9 +42,8 @@ def build(tmp):
     main = main.replace(anchor, '\tDECLARE_EXTENSION EXT_CHECK_BAD, BRICO_EXT_OUTPUT_TYPE_WORD, "CheckBad", '
                                 '"Test fixture: breaks one rule per P1."\n' + anchor, 1)
     (src / "Brico68k.s").write_text(main)
-    ld = (src / "Brico68k.ld").read_text()        # the fixture does not fit the 32 KiB NeoDiag layout
-    assert "len=0x7f7a" in ld
-    (src / "Brico68k.ld").write_text(ld.replace("len=0x7f7a", "len=0xff80"))
+    ld = (src / "Brico68k.ld").read_text()        # since -16 the linker allows the 128 KB image: fixture fits
+    assert "len=0x1fe80" in ld
     objs = []
     for s in sorted(src.glob("*.s")):
         o = tmp / (s.stem + ".o")
