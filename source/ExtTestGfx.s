@@ -2,6 +2,7 @@
 
 	global EXT_TEST_GFX
 	global EXT_TEST_GFX_ROM
+	global EXT_TEST_GFX_AUTO
 
 	section text
 
@@ -449,6 +450,154 @@ EXT_TEST_GFX_ROM:
 	PrintLn "=> CHECK: no picture table at P1 (WRAM $100000-$10EFFF, word GR, 1-96"
 	PrintLn "   sprites): run the console script of tools/gfxrom_scan.py first."
 	jmp EOT_AND_WAIT
+
+; ------------------------------------------------------------------------
+; TestGfxAuto - scrolls through the game's C ROMs until the BricoNeo sends
+; another command. No PC, no table: pages of 20 columns of 14 consecutive
+; tiles (280 tiles), one a second; 20 pages spread over each chip pair
+; (pair r = tiles r << P1), pair after pair, then again. A dead chip makes
+; its pair's pages empty or short of colours; a data line / plane changes
+; the colours. Columns of fixed height cut the characters (the picture
+; mode of TestGfxRom, prepared on the PC, does not). Palette: a fixed ramp,
+; colour index 1 dark to 15 light: the game's palettes cannot be found
+; reliably by the 68000 (tried: on samsho3 the rule picked code, and the
+; palettes may sit in a P2 bank). P1 tile bits per pair (16), P2 pairs (8),
+; P3 blank fix tile ($20), as the grid. After the EOT the command block is
+; polled after each column drawn and every 0.65 ms while a page shows.
+; No WRAM.
+; ------------------------------------------------------------------------
+GAUTO_COLS  equ 20
+GAUTO_ROWS  equ 14
+GAUTO_PAGES equ 20				; pages per chip pair
+
+EXT_TEST_GFX_AUTO:
+	move.l (BRICO_COMMAND_PARAM_1).l,d5	; tile bits per pair
+	move.l (BRICO_COMMAND_PARAM_2).l,d6	; pairs
+	move.l (BRICO_COMMAND_PARAM_3).l,d7	; blank fix tile
+	tst.l d5
+	bne.s .bitsSet
+	moveq #16,d5
+.bitsSet:
+	cmp.l #19,d5
+	bls.s .bitsOk
+	moveq #19,d5
+.bitsOk:
+	cmp.l #5,d5						; a page is 280 tiles: at least 2^5 per pair
+	bhs.s .bitsMin
+	moveq #5,d5
+.bitsMin:
+	tst.l d6
+	beq.s .pairs8
+	cmp.l #8,d6
+	bls.s .pairsOk
+.pairs8:
+	moveq #8,d6
+.pairsOk:
+	JsrA6 screenBlank				; a0 = REG_VRAMRW, REG_VRAMMOD = 1
+	move.w d7,d0
+	JsrA6 gfxFixBlank
+	move.w #$8000,(PALETTE_BACKDROP).l	; black
+	lea (PALETTE_0+32+2).l,a1		; palette 1, colour 1
+	lea GAUTO_RAMP(pc),a2
+	moveq #15-1,d1
+.ramp:
+	move.w (a2)+,(a1)+
+	dbra d1,.ramp
+	moveq #0,d1						; 20 sprites: full size, y = 0, 14 tiles, x = 16 c
+.setup:
+	move.w d1,d0
+	add.w #VRAM_SCB2+1,d0
+	move.w d0,(REG_VRAMADD).l
+	move.w #$0FFF,(a0)
+	move.w d1,d0
+	add.w #VRAM_SCB4+1,d0
+	move.w d0,(REG_VRAMADD).l
+	move.w d1,d0
+	lsl.w #4,d0
+	lsl.w #7,d0
+	move.w d0,(a0)
+	move.w d1,d0
+	add.w #VRAM_SCB3+1,d0
+	move.w d0,(REG_VRAMADD).l
+	move.w #(496<<7)|GAUTO_ROWS,(a0)	; y = 0 (496 = top of the screen)
+	addq.w #1,d1
+	cmp.w #GAUTO_COLS,d1
+	bne.s .setup
+	Print "Graphics ROM tour: "
+	move.l d6,d0
+	JsrA6 printDec
+	Print " chip pair(s) of 2^"
+	move.l d5,d0
+	JsrA6 printDec
+	PrintText
+	dc.b " tiles, 20 pages each, 1 s a page,",10
+	dc.b "until another command. 20 columns of 14 consecutive tiles, fixed",10
+	dc.b "ramp palette (index 1 dark .. 15 light). A pair with empty or",10
+	dc.b "colourless pages: that chip pair. Pictures: TestGfxRom + the tool.",10,0
+	even
+	WriteEOT
+	lea (REG_VRAMRW).l,a0			; Print / WriteEOT destroy a0
+	move.w #1,(REG_VRAMMOD).l
+
+	moveq #0,d3						; pair
+	moveq #0,d4						; page in the pair
+.page:
+	moveq #1,d0
+	lsl.l d5,d0
+	divu #GAUTO_PAGES,d0			; page step (2^19 / 20 fits a word)
+	mulu d4,d0
+	move.l d0,d2
+	move.l d3,d0
+	lsl.l d5,d0
+	add.l d0,d2						; first tile of the page
+	moveq #0,d1						; column
+.col:
+	move.w d1,d0
+	addq.w #1,d0
+	lsl.w #6,d0
+	move.w d0,(REG_VRAMADD).l		; SCB1 of sprite c + 1
+	moveq #GAUTO_ROWS-1,d7
+.tile:
+	and.l #$000FFFFF,d2
+	move.w d2,(a0)					; tile bits 15-0
+	move.l d2,d0
+	swap d0
+	and.w #$000F,d0
+	lsl.w #4,d0
+	or.w #$0100,d0					; palette 1, tile bits 19-16
+	move.w d0,(a0)
+	addq.l #1,d2
+	dbra d7,.tile
+	move.l (BRICO_COMMAND_IN).l,d0
+	bne .command
+	addq.w #1,d1
+	cmp.w #GAUTO_COLS,d1
+	bne.s .col
+	WatchDog
+	move.w #1536-1,d1				; 1536 x ~0.65 ms = 1 s
+.wait:
+	move.w #$0300,d0				; 769 x 10 cycles, as TestAudio / TestSnd
+.inner:
+	dbra d0,.inner
+	WatchDog
+	move.l (BRICO_COMMAND_IN).l,d0
+	bne.s .command
+	dbra d1,.wait
+	addq.w #1,d4
+	cmp.w #GAUTO_PAGES,d4
+	bne .page
+	moveq #0,d4
+	addq.w #1,d3
+	cmp.w d6,d3
+	bne .page
+	moveq #0,d3
+	bra .page
+.command:
+	jmp DISPATCH_COMMAND			; d0 = BRICO_COMMAND_IN, no stack in use
+
+GAUTO_RAMP:							; index 1 dark .. 15 light, slightly warm
+	dc.w $0210,$0320,$0431,$0542,$0653,$0764,$0875,$0986
+	dc.w $0A97,$0BA8,$0CB9,$0DCA,$0EDB,$0FEC,$0FFD
 
 	even
 GROM_COLOURS:						; colour index bits 0-3 -> red, green, blue, +bright

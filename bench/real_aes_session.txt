@@ -43,5 +43,8 @@ Delay 5000
 ; the game's sound commands $20-$2F, 1.5 s each: listen (another command stops it)
 TestSnd
 Delay 25000
+; the game's C ROMs scrolling, 1 s a page, until the next command
+TestGfxAuto
+Delay 10000
 TestDAC
 ; TestDAC leaves 16 colour bands on screen: one band per colour bit, a black band = dead bit

@@ -7,7 +7,8 @@
 ; ------------------------------------------------------------------------
 ; TestSnd - sound ROM access through the game's own sound driver: sends
 ; Z80 commands P1 to P2 (REG_SOUND $320000), each held P3 tenths of a
-; second, after the EOT, like a sound test menu. The Z80 runs the
+; second, after the EOT, like a sound test menu, then again from P1 (a
+; driver reset $03 in between) until the BricoNeo sends another command. The Z80 runs the
 ; cartridge M1 (AES) and plays from the V ROMs (YM2610 ADPCM) or FM / SSG.
 ; The 68000 cannot read M1 or the V ROMs, nor hear the result: no pass /
 ; fail, listen. The codes are the game's: its own sound test numbers (MVS
@@ -65,9 +66,10 @@ EXT_TEST_SND:
 	dc.b "Listen. No pass/fail: the 68000 cannot read M1 / V ROMs nor hear.",10
 	dc.b "Codes: the game's own (its sound test numbers); $01-$07 = driver",10
 	dc.b "control. One sound silent, cut or noisy: its V ROM area. Compare",10
-	dc.b "with a good cartridge or MAME. A new command stops the sweep.",10,0
+	dc.b "with a good cartridge or MAME. Loops until another command.",10,0
 	even
 	WriteEOT
+	move.w d5,d4					; first code, for the next round
 
 .code:
 	move.b d5,(REG_SOUND).l
@@ -90,5 +92,6 @@ EXT_TEST_SND:
 	addq.w #1,d5
 	cmp.w d6,d5
 	bls.s .code
-	move.b #3,(REG_SOUND).l			; driver reset: silence
-	jmp WAIT_FOR_COMMAND
+	move.b #3,(REG_SOUND).l			; driver reset: silence, then the codes again
+	move.w d4,d5
+	bra .code

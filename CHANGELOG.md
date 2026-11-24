@@ -4,6 +4,34 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-24 - ROM 1.35-nic034-20: TestGfxAuto (C ROM tour), TestSnd loops; Emulator 1.26
+
+**ROM 1.35-nic034-20** (SHA-256 `e56d7c0a1ac887124d9d4aa896562fb258e861f39df2805050f017357f934fa0`, 32 extensions, 91256 bytes free)
+- **TestGfxAuto** (new, `ExtTestGfx.s`): scrolls through the game's C ROMs until the BricoNeo
+  sends another command. Pages of 20 columns x 14 consecutive tiles, 1 s each, 20 pages spread
+  over each chip pair, all pairs, again. Command block polled after each column drawn and every
+  0.65 ms while a page shows; no stack, no WRAM. Same parameters as the grid.
+  - Palette: a fixed ramp (index 1 dark .. 15 light). Tried first: finding the game's palette from
+    the 68000 with a rule cheap enough for it. whp: a plausible block; samsho3: code, not a palette
+    (its palettes also sit in a P2 bank). Not reliable: dropped. Real colours: the PC tool.
+  - A first build drew nothing: Print / WriteEOT destroy a0 (REG_VRAMRW) and the tile writes went
+    elsewhere. Seen in the emulator (SCB1 empty), fixed by reloading a0 after the EOT.
+  - Checked: samsho3 pages (its bamboo forest at 4 s), no watchdog reset, an Echo sent during
+    the tour stops it and answers.
+- **TestSnd** loops: P1..P2, a driver reset `$03`, again, until another command (was one pass).
+  Checked: `TestSnd $20 $23 5` sends $20 $21 $22 $23 every 0.5 s, then $03 + $20 together, 18
+  commands in 7 s; an Echo stops it.
+
+**Emulator 1.26**: TestGfxAuto in Run all (Video, LOOK); `regress_rom.py` appends
+`TestGfxAuto 16 2 $FF`, `Echo $60`, `TestSnd $20 $21 1`, `Echo $61`; bench session runs it;
+`guiverify.py` 32 extensions, 7 look, 27 compared commands.
+
+**Checks**: rule check 26 runs (no rule broken); regression -19 vs -20: same words except
+Version, ROM dumps, TestSnd (its new line) and the Echo after it (one more Z80 command: the
+loop); `test_chip_hints`, `test_decode`, `test_ext_check`, `test_neo_py` 0 failures;
+`bench_fuzz.py` seed 17 0 failures (3488 commands); `guiverify.py` 208/208.
+Not done: real AES, MAME; TestSnd is not heard in the emulator.
+
 ## 2026-11-23 - ROM 1.35-nic034-19: TestGfxRom picture mode + tools/gfxrom_scan.py; TestSnd up to 60 s; Emulator 1.25
 
 **ROM 1.35-nic034-19** (SHA-256 `d30ef5728788f5a8a9a978128534bc8ca41ad172f24da9f96de338dcde0bb5e5`, 31 extensions, 92146 bytes free)
