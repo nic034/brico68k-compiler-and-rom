@@ -1,4 +1,4 @@
-# Brico68k Compiler and ROM
+# Brico68k Compiler, Emulator and ROM
 
 A one-file tool that builds the **Brico68k** Neo Geo diagnostic ROM, and a ready-to-use build
 of an extended Brico68k (BricoNeo 1.35 + review fixes + new tests).
