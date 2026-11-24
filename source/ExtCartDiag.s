@@ -5,9 +5,8 @@
 	section text
 
 ; ------------------------------------------------------------------------
-; CartDiag - cartridge P bus on the diagnostic PROG board (SRAM), with writes
-; (CART_BOARD, below). The game-cartridge test CartTest was removed in
-; 1.35-nic034-10.
+; CartDiag - cartridge P bus on the diagnostic PROG board (SRAM), with writes.
+; A game cartridge (read only): CartTest.
 ; No WRAM, no stack.
 ; ------------------------------------------------------------------------
 P2_START    equ $200000
@@ -76,7 +75,7 @@ OE_HOLD245:
 	jmp (a1)
 
 ; ------------------------------------------------------------------------
-; CartDiag, CART_BOARD: diagnostic PROG board (jwestfall69 neogeo-diag-aes-prog: one
+; CartDiag: diagnostic PROG board (jwestfall69 neogeo-diag-aes-prog: one
 ; 1 MiB 16-bit SRAM, A0-A18 = slot A1-A19, D0-D15 = slot D0-D15, read by
 ; /ROMOE and /PORTOE, written by /PORTWEU and /PORTWEL). Destroys its content.
 ; Console name: "p-bus test (diag cart)", with the board's GitHub address.
@@ -89,7 +88,6 @@ OE_HOLD245:
 ;      walking 0) read back through P1 ($000200): /ROMOEU, /ROMOEL.
 ; ------------------------------------------------------------------------
 EXT_CART_DIAG:
-CART_BOARD:
 	PrintText
 	dc.b "p-bus test (diag cart): SRAM $200000, ERASED",10
 	dc.b "https://github.com/jwestfall69/neogeo-diag-aes-prog",10,0

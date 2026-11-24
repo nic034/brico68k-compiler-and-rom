@@ -163,6 +163,7 @@ def main():
     else:
         pal = [0x8000] + [((i * 2) << 8) | ((i * 2) << 4) | (i * 2) for i in range(1, 16)]
         pnote = "no palette found in the P ROM: grey ramp"
+    assert len(sprites) <= MAX_SPRITES, len(sprites)
     addr = int(a.addr.lstrip("$"), 16) if a.addr.startswith("$") else int(a.addr, 0)
     if not (0x100000 <= addr < 0x10F000 - (8 + 12 * len(sprites) + 32)) or addr & 1:
         sys.exit("--addr: even, in WRAM $100000-$10EFFF (below the stack)")

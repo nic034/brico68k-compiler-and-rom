@@ -5,7 +5,7 @@
 0x1234
 [eot, 0 ms emulated]
 > Version
-Brico68k 1.35-nic034-21 - Nic034 fork (Nicolas), not an Aurelien34 release
+Brico68k 1.35-nic034-22 - Nic034 fork (Nicolas), not an Aurelien34 release
 Based on Aurelien34/Brico68k 1.35 (1b72deb): the BricoNeo shows 1.35
 Source: github.com/nic034/brico68k-compiler-and-rom
 
@@ -316,7 +316,7 @@ Live: *TestPad here (redraws), and the screen: 16 bands, P1 then P2
 > Delay 3000
 ; WRAM, palette RAM and VRAM, ~1 s a pass (*StressRam on the console: until stopped)
 > StressRam
-StressRam pass, seed $6FB2 (*StressRam: again and again)
+StressRam pass, seed $6FB2
 WRAM     $100000-$10FFFF  OK
 Palette  bank 1           OK
 Palette  bank 0           OK

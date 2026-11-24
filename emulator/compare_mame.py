@@ -3,7 +3,7 @@ Needs MAME, BRICO_SOUND_ROM (your 000-lo.lo) and a built core (emulator/build_co
 Usage: BRICO_SOUND_ROM=000-lo.lo python3 emulator/compare_mame.py rom/ROM.BIO
        BRICO_CART=<tools/make_test_cart.py folder> also inserts the test cartridge on both sides.
 """
-import sys, os, json
+import sys, os
 HERE = __import__('pathlib').Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE)); sys.path.insert(0, str(HERE.parent / 'tools'))
 from emu_host import *

@@ -46,13 +46,12 @@ EXT_STRESS_RAM:
 	Print "StressRam pass, seed $"
 	move.w d7,d0
 	JsrA6 printWord
-	PrintLn " (*StressRam: again and again)"
 
 	; --- WRAM -------------------------------------------------------------
 	lea $100000,a2
 	move.w #32768-1,d6
 	JsrA6 stressMem
-	Print "WRAM     $100000-$10FFFF  "
+	NlPrint "WRAM     $100000-$10FFFF  "
 	tst.l d4
 	beq.s .wramOk
 	bset #SR_WRAM,d7

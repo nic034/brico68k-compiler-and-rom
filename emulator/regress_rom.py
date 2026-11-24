@@ -24,7 +24,7 @@ them; the vector table switch held on either side is one of the faults (vec:stuc
 - Dump / Read of the ROM itself, and the TestWatchdog loop count (a few loops: it depends on
   the cycles spent before the starve loop), shown as MEASURED.
 """
-import sys, os, json, re, zlib, ctypes, difflib, importlib.util
+import sys, os, json, re, zlib, difflib, importlib.util
 from collections import defaultdict
 from multiprocessing import Pool
 from pathlib import Path

@@ -6,7 +6,7 @@ L0 ROM: a table generated here with the emulator's approximation (source line = 
 checks everything else against MAME's own sprite and fix code (positions, flips, H shrink,
 palettes, priorities, fix map). With BRICO_SOUND_ROM = your 000-lo.lo, MAME uses the real table
 and the V shrink zone shows how far the approximation is."""
-import sys, os, json
+import sys, os
 from pathlib import Path
 R = Path(__file__).resolve().parent.parent; S = Path(sys.argv[2]); S.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(R / "emulator")); sys.path.insert(0, str(R / "tools"))
@@ -22,7 +22,6 @@ os.environ.setdefault("BRICO_SOUND_ROM", str(S / "gen-lo.lo"))
 os.environ.update(BRICO_CART=str(S / "cartdir"),
                   BRICO_SNAP="1,2,3", BRICO_SNAP_DIR=str(S / "snap"))
 import mame_bench
-from emu_host import *
 from PIL import Image
 JOBS = ["TestGfx:0x100", "TestGfx:0x1F00:1", "TestGfx:0x0FFE"]
 rom = sys.argv[1]

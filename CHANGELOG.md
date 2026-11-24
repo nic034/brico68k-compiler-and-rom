@@ -4,6 +4,29 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-24 - ROM 1.35-nic034-22: clean-up (code, comments, README)
+
+**ROM 1.35-nic034-22** (SHA-256 `84d1b191e572a9f07965a494a5ec5323e32d461d3b431c5a2592449fe33c025b`, 34 extensions, 89040 bytes free)
+- StressRam: the line of each pass no longer says how to loop (`*StressRam` is the BricoNeo's own
+  loop mode, as for every command); its description is shorter.
+- Stale comments fixed: CartDiag and Screen.s still said CartTest / TestBus were removed (they
+  are back since -16), define.inc said the Version command was gone and named a `build.py` this
+  repository does not have. Unused label `CART_BOARD` removed.
+
+**Python**: unused imports removed (`build_test_core.py`, `compare_mame.py`,
+`compare_mame_gfx.py`, `regress_rom.py`); `gfxrom_scan.py` now checks its 96-sprite limit
+(`MAX_SPRITES` was declared and never used). Pyflakes and vulture: nothing left but the names
+that `package_emulator.py` injects. No file of the repository was unused.
+
+**README**: version history and stale counts removed (26 -> 34 extensions, 25 -> 34 in the `?`
+check, 474 -> 570 regression scenarios, "CartTest removed since", `build.py`); the BricoNeo loop
+mode (`*Command`) explained once for every command; "not run on real hardware" now lists every
+test added after -06.
+
+**Checks**: regression -21 vs -22: only Version and the StressRam line; rule check of all
+extensions: no rule broken; `test_chip_hints`, `test_decode`, `test_ext_check`, `test_neo_py`
+0 failures; `bench_fuzz.py` 0 failures (2963 commands); `guiverify.py` 210/210 (C core, Xvfb).
+
 ## 2026-11-24 - ROM 1.35-nic034-21: TestPad (live controllers), StressRam (endurance); Emulator 1.27
 
 **ROM 1.35-nic034-21** (SHA-256 `e06bc4e917c172021f059a076bb7daf7914d327f1a459f630119778fcc9d33d5`, 34 extensions, 88976 bytes free)

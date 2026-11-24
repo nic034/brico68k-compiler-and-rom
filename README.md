@@ -66,10 +66,8 @@ of the superzazu/z80 Z80 that the model's Z80 programs use, and a Neo Geo AES mo
 MAME's driver. The port gives the same results as the C Musashi word for word (see "Checking the
 Python core" below).
 
-Speed, measured (one core of a cloud x86 server, 1.21): 88 to 102 frames/s idle and 68 to 79
-during TestWRAM / TestVRAM, for 59.2 in real time, with Python 3.11 to 3.13 (1.20 on the same
-machine: 46 to 57 idle, 49 to 56 in the tests). TestWRAM (0.38 s emulated) takes 0.3 s. Slow with
-this core: `--diagnose` (and the same search in the window), which replays a log on 290 simulated
+Speed (one core of a cloud x86 server, Python 3.11 to 3.13): 88 to 102 frames/s idle and 68 to 79
+during TestWRAM / TestVRAM, for 59.2 in real time. Slow with this core: `--diagnose` (and the same search in the window), which replays a log on 290 simulated
 faults: much longer than with the C core, so use the C core for it. For speed, the
 C build of the same core is still supported: put `neocore.dll` (Windows) or `libneocore.so`
 (Linux) built by `emulator/build_core.py` next to the script, or give its path in the
@@ -96,7 +94,7 @@ line of the window says which core runs.
   for the coin chime. Its listing is in `emulator/neo_py.py`
   (`TEST_M1_PARTS`); the MAME bench cartridge (`tools/make_test_cart.py`) carries the same M1. It
   can also run without any program, like an AES with no cartridge.
-- **Sound** (1.19): the SSG square-wave tones the Z80 programmed (ports `$04` / `$05`, registers
+- **Sound**: the SSG square-wave tones the Z80 programmed (ports `$04` / `$05`, registers
   `$00`-`$0F`) are played through the PC speakers: winsound on Windows, `paplay` / `pw-play` /
   `aplay` / `afplay` elsewhere (Settings > Sound to switch off). The status bar shows the tone
   (`♪ 1000 Hz`) and the console notes each change. So a sound is heard only when the 68000 sent the
@@ -141,7 +139,7 @@ line of the window says which core runs.
   protected cartridges (SMA, PVC, CMC, encrypted P: their extra registers read
   as P ROM) and a memory card. V and M1 are checked, not used: the cartridge's M1 does
   not replace the built-in test M1.
-- **Interrupts** (1.9): VBLANK (level 1, line `$F0` + 58 mclk), LSPC timer (level 2, 6 MHz
+- **Interrupts**: VBLANK (level 1, line `$F0` + 58 mclk), LSPC timer (level 2, 6 MHz
   pixel clock, `REG_LSPCMODE` bits 4-7, `REG_TIMERHIGH/LOW`, reloads as in MAME) and level 3
   pending from power-on, acknowledged through `REG_IRQACK`. Taken from MAME `neogeo.cpp`.
 - **TestChip progress**: while TestChip runs, the status bar shows its percentage (the test
@@ -154,14 +152,10 @@ line of the window says which core runs.
   **Run script...** (or `--script FILE` in text mode) plays a whole file, such as
   `bench/real_aes_session.txt`.
 
-Checked against MAME, 38 test commands each time (`emulator/compare_mame.py`, an address
-error report included), with word-for-word identical output (measured on 1.35-nic034-09,
-with CartTest, Version and PlayEyeSnd; not re-run since):
-
-- `aes` without a cartridge, against the Z80 without a program: 38 out of 38;
-- `aes` with the bench test cartridge, whose real MAME Z80 runs the same M1, against the
-  built-in test cartridge and test M1: 38 out of 38. This covers TestZ80, TestAudio,
-  PlayEyeSnd (now TestFM) and CartTest (removed since).
+`emulator/compare_mame.py` runs the same commands in MAME and in the emulator and compares the
+words: 38 out of 38 identical, on `aes` without a cartridge (Z80 without a program) and with the
+bench test cartridge (same M1 on both sides). Last full run on 1.35-nic034-09; the tests added
+since were compared one by one (see CHANGELOG.md).
 
 Nothing to install with pip: the emulator uses only the Python standard library. The window needs Tkinter. It comes with Python on Windows (python.org installer); on
 Linux it may be a separate package (`sudo apt install python3-tk`), and the tool says so if it is
@@ -255,10 +249,10 @@ its track, or the other parts on that bus: the message cannot tell which.
 
 ### Writing and testing a new extension
 
-**Space first.** Since 1.35-nic034-16 the code uses the whole 128 KB image the BricoNeo serves
+**Space first.** The code uses the whole 128 KB image the BricoNeo serves
 (Brico16Bits `FLASH_IMAGE_SIZE`; Aurelien confirmed the 128 KB limit). It must end before `$1FF00`:
 `$1FF00` and `$1FF02` are the BricoNeo output ports (a read there is an EOT / arms an output word).
-With the 34 extensions of 1.35-nic034-21, **about 89 KB are free**. Brico68k Compiler prints the
+With the 34 extensions of 1.35-nic034-22, **about 89 KB are free**. Brico68k Compiler prints the
 free space after each build. Calls between files are absolute (`JsrA6`, `PrintText`, `jmp
 EOT_AND_WAIT`...): a PC-relative jump only reaches +/-32 KB, and vlink stops with "doesn't fit
 into 16 bits" if one is too far. `source/Brico68k.ld` puts the header, the print and screen
@@ -291,8 +285,7 @@ The rule check (`emu_host.check_command`, Python core) watches the bus while the
 | FAIL loop-mode repeat missed | the same command sent 20 us after the EOT (`*MyTest`) must run |
 
 `emulator/test/test_ext_check.py` builds the ROM with `test/ExtCheckBad.s` (one broken rule per
-P1) and shows that each finding fires, and that the real ROM gives none (the last one, TestVRAM
-at 1.77 s, is gone since 1.35-nic034-12: 1.47 s). Limits:
+P1) and shows that each finding fires, and that the real ROM gives none. Limits:
 the rules are the Brico16Bits code as modelled here, and the 20 us loop-mode delay is an
 assumption, not measured on a BricoNeo; only a real console confirms a finding.
 
@@ -370,12 +363,10 @@ Checking the Python core:
 - `emulator/test/test_neo_py.py` runs the Python and C AES models in lockstep (commands, reset
   button, Z80 options, cartridges, faults, test inputs) and compares cycles, PC, output words,
   screen lines, VRAM and palette after every slice: 0 differences.
-- `emulator/regress_rom.py` with `CORE=python` against the C core: 474 scenarios, 2281 commands,
-  0 differences (about 45 minutes on 2 cores, 1 minute with the C core). The scenarios the check
-  sets apart as chaotic (random unstable lines, a crashed 68000) are not word-for-word between the
-  two runs because the C library keeps its random generator and CPU registers from one scenario
-  to the next in a worker (10 such scenarios in the last run; they were not re-run one by one
-  from a fresh process for this ROM).
+- `emulator/regress_rom.py` with `CORE=python` against the C core: 0 differences (last run on
+  -14, 474 scenarios; about 45 minutes on 2 cores). The scenarios it sets apart as chaotic (random
+  unstable lines, a crashed 68000) are not word for word between two runs: the C library keeps its
+  random generator and CPU registers from one scenario to the next in a worker.
 - `emulator/test/test_chip_hints.py`: the chip references and hint lines of TestWRAM, TestPRAM and
   TestVRAM under data and address faults (U1/U2, U7/U6, U17/U18, U19/U20), and none on a healthy console.
 - `emulator/test/test_decode.py`: TestDecode under every decoding fault (`wram:sel`, `pal:sel`,
@@ -389,22 +380,26 @@ Checking the Python core:
   report (never the 3 s timeout), at most 2047 words, a result that fits its type, and `Echo` answers
   right after (the 68000 is back in the dispatcher). `--check N` adds N random lines under the
   Brico16Bits rule check (Python core). `--seed` replays a failure. C test core by default (`--core python`).
-- `emulator/guiverify.py`: 207/210 with the C core (1.35-nic034-21: the 3 others were expected counts, updated since, Emulator 1.27: `BRICO68K_CORE=emulator/build/libneocore_test.so xvfb-run python3.12 emulator/guiverify.py Brico68k_Emulator.py OUTDIR`); with the Python core the diagnosis step exceeds its 10 minute limit and the checks after it fail with it.
+- `emulator/guiverify.py`: the window, check by check (`BRICO68K_CORE=emulator/build/libneocore_test.so
+  xvfb-run python3.12 emulator/guiverify.py Brico68k_Emulator.py OUTDIR`); with the Python core the
+  diagnosis step exceeds its 10 minute limit and the checks after it fail with it.
 
 ROM regression check, for a source change meant to keep every output (a size or speed change):
 `python3 emulator/regress_rom.py run OLD.BIO old.json`, the same for the new ROM, then
-`python3 emulator/regress_rom.py compare old.json new.json`. 474 scenarios (no cartridge, test
+`python3 emulator/regress_rom.py compare old.json new.json`. 570 scenarios (no cartridge, test
 cartridge, PROG board, every single fault the core models, every slot fault), each command's
-output words, screen lines, Z80 commands and cartridge writes; about 1 minute on 2 cores.
+output words, screen lines, Z80 commands and cartridge writes; a few minutes with the C core.
+Commands appended to a scenario shift the ones after them: set them apart before comparing.
 `python3 emulator/build_test_core.py` (Linux, gcc) builds a test-only C core with settable joypad,
 DIP, STATUS_A/B and SYSTYPE ports and an MVS backup RAM; the Python core has the same test hook.
 With `CORE=python` or `CORE=emulator/build/libneocore_test.so` the check adds 10 input sets (MVS,
 buttons, memory card states), which the AES model never reaches otherwise. With the Python core
 the check takes much longer than with the C core.
 
-## ROM contents: 26 extensions
+## ROM contents: 34 extensions
 
-Commands are typed on the Brico16Bits console. "No WRAM" means the test never relies on
+Commands are typed on the Brico16Bits console; any command is repeated with `*Command` (the
+BricoNeo's loop mode), so no test has a loop option of its own. "No WRAM" means the test never relies on
 work RAM (no stack), so it still runs on a board with dead WRAM.
 
 | Command | No WRAM | What it does |
@@ -429,20 +424,19 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | **TestVectors** | yes | Vector table switch `$000000-$00007F`, system ROM / cartridge (`REG_SWPBIOS`, `REG_SWPROM`): compares the 32 vectors with `$C00000` in both positions and back. Read only |
 | **TestBus** | yes | BIOS socket, 68000 -> BricoNeo: CRC-32 of each 32 KB quarter of the image (table written by Brico68k Compiler), A15 / A16 probes; checked at boot too, 16 screen bands on an A15 / A16 fault (see below) |
 | **CartTest** | yes | Game cartridge P bus D0-D15, read only (never writes): P1 by the security code (names stuck / open lines), P2 activity |
-| **Version** | yes | The fork version (`1.35-nic034-21`), the upstream base and the source. Also in the `?` list |
+| **Version** | yes | The fork version (`1.35-nic034-22`), the upstream base and the source. Also in the `?` list |
 | **TestGfxRom** | yes | The game's graphics ROMs through the cartridge port: one row per C ROM chip pair, one column per tile address bit (base tile, then bit 0-15 flipped), the S ROM tile bits 0-11 below, colours coded per bit plane. No pass / fail (the 68000 cannot read the C, S or V ROMs): compare the TV with the emulator's picture of the same game set (`--cart SET --run TestGfxRom --png ref.png`). P1 tile bits per pair (16 = 4 MB chips), P2 pairs (8), P3 blank fix tile. **Picture mode**: `TestGfxRom $10E000` after the console script of `tools/gfxrom_scan.py` (see below): one band per chip pair, pictures of the game in a palette of its P ROM |
 | **TestGfxAuto** | yes | Scrolls through the game's C ROMs until the BricoNeo sends another command: pages of 20 columns of 14 consecutive tiles, 1 s each, 20 pages per chip pair, pair after pair, again and again. Fixed ramp palette (the 68000 cannot find the game's palettes reliably). No PC needed; empty or colourless pages = that chip pair. P1 tile bits per pair (16), P2 pairs (8), P3 blank fix tile |
 | **TestSnd** | yes | The game's M1 / V ROMs through its own sound driver: Z80 commands P1 to P2 (default `$20-$2F`), P3 tenths of a second each (up to 600: a whole piece of music), after the EOT, then again (driver reset `$03` between rounds) until another command; listen (a sound silent, cut or noisy: its V ROM area). A new command stops it. Not heard in the emulator |
 | **TestGfx** | yes | Test screen for the fix layer and the sprites, with the cartridge tiles (first C tile = P1): labels, fix tiles `$00-$FF`, flips, 8 x 4 tiles, H and V shrink. P2 = 1: the whole screen in tiles, by rows; P2 = N (2-64): by columns of N consecutive tiles, so pieces of the game's characters and scenery come out (8, 16 or 32: try; in TestGfx colours). P3: the fix tile for empty cells (`$20`; World Heroes Perfect needs `$FF`, its `$20` is solid and hides the sprites). Read on the screen (see below) |
-| **TestPad** | yes | Both controllers drawn in ASCII on the console (d-pad, A B C D, start, select; pressed = `[^]`, `(A)`, `START`), raw P1 / P2 / STATUS_B. `*TestPad` redraws them again and again: live view. On screen after the EOT: 16 bands, P1 (green) then P2 (blue), up down left right A B C D, lit while pressed, until another command (start / select: console only). No verdict |
-| **StressRam** | yes | Endurance: WRAM `$100000-$10FFFF`, palette RAM (both banks), VRAM `$0000-$87FF` (slow and fast, but `$8600-$86FF`: the sprite lists the LSPC2 rewrites while it draws, as in TestVRAM) written with a 16-bit LFSR pattern and read back, ~1 s a pass. New seed each pass (line counter mixed with the previous pass's last WRAM word); the pattern is complemented when the seed is odd. `*StressRam` on the console = until stopped there, one report per pass. On an error: count and first bad word (address, expected, read, bad bits) per region. No WRAM used (it is under test). Not covered: Z80 RAM, memory card, MVS backup RAM (TestBRAM) |
+| **TestPad** | yes | Both controllers drawn in ASCII on the console (d-pad, A B C D, start, select; pressed = `[^]`, `(A)`, `START`), raw P1 / P2 / STATUS_B. Repeated (`*TestPad`): a live view. On screen after the EOT: 16 bands, P1 (green) then P2 (blue), up down left right A B C D, lit while pressed, until another command (start / select: console only). No verdict |
+| **StressRam** | yes | Endurance: WRAM `$100000-$10FFFF`, palette RAM (both banks), VRAM `$0000-$87FF` (slow and fast, but `$8600-$86FF`: the sprite lists the LSPC2 rewrites while it draws, as in TestVRAM) written with a 16-bit LFSR pattern and read back, ~1.1 s a pass. New seed each pass (line counter mixed with the previous pass's last WRAM word); the pattern is complemented when the seed is odd. Endurance = `*StressRam`, one report per pass. On an error: count and first bad word (address, expected, read, bad bits) per region. No WRAM used (it is under test). Not covered: Z80 RAM, memory card, MVS backup RAM (TestBRAM) |
 
 Bold entries are new in this repository.
 
-The code ends before `$1FF00` (fork 1.35-nic034-21, 128 KB image, no NeoDiag flag `$0004`).
+The code ends before `$1FF00` (fork 1.35-nic034-22, 128 KB image, no NeoDiag flag `$0004`).
 
-Back in 1.35-nic034-16 (they had been removed for space in -10 and -11): **Version**, **CartTest**
-and **TestBus**. TestBus no longer has the NeoDiag copies of the first 32 KB to read A15/A16 from:
+**TestBus** (the image has no NeoDiag copies of the first 32 KB to read A15 / A16 from):
 - **at boot** (`busCheck`, 4 reads, < 1 ms): Brico68k Compiler stores, for one offset where the
   four quarters differ, the long word of each quarter. A quarter that reads as another one means
   A15 / A16 stuck at 0. Then the BricoNeo output ports (`$1FF00`, A15 = A16 = 1) are out of reach
@@ -451,10 +445,7 @@ and **TestBus**. TestBus no longer has the NeoDiag copies of the first 32 KB to 
 - **the command**: CRC-32 of each 32 KB quarter against the table the Compiler wrote (a marginal
   line A1-A16 / D0-D15, NEO-E0 or a patched image), then the same probes; about 1.1 s;
 - **not covered**: a line stuck at 1 on A15 / A16, or any cut on A1-A14 / D0-D15: the console
-  does not boot (quarter 0 holds the vectors): BricoNeo `Trace`, continuity meter. With the
-  NeoDiag copies the old TestBus could still boot and report A15 / A16 stuck at 1.
-
-`ChipCheck` was renamed **TestChip** in 1.35-nic034-07 (same test, same output).
+  does not boot (quarter 0 holds the vectors): BricoNeo `Trace`, continuity meter.
 
 ### TestDecode
 
@@ -587,13 +578,12 @@ words, the bad bits by name (`D3 D12`) and **which chip**: upper, lower or both.
 
 The former fixed patterns ($0000/$FFFF/$AAAA/$5555) and the increment test are covered by the
 March C- and the named address lines. Durations (3 s host limit): TestWRAM 0.38 s, TestPRAM
-0.15 s, TestVRAM 1.47 s (1.35-nic034-12; were 0.42 / 0.16 / 1.77 s).
+0.15 s, TestVRAM 1.47 s.
 
 TestVRAM follows the wiki's VRAM rules with at least 8 cycles of margin: a read 24 CPU cycles
 or more after the address write (16 required), a new address 24 cycles after a data write (16),
 the next data write 20 cycles after the previous one (12). These are worst cases, counting only
-the instructions in between (since 1.35-nic034-12; the March loops use address registers, and
-`lsl.l` on a free register as a 2-byte wait, instead of absolute addresses and nops). The address is set before every read
+the instructions in between (`lsl.l` on a free register as a 2-byte wait). The address is set before every read
 (the wiki does not describe a read buffer, so none is relied on). It covers $0000-$7FFF,
 $8000-$85FF and $8700-$87FF; $8600-$86FF holds the sprite lists the LSPC2 rewrites during the
 display and cannot be tested from the 68000. Each zone is cleared to 0 afterwards.
@@ -660,7 +650,7 @@ Read from the Brico16Bits code (and Aurelien's review):
   the upstream TRACE debugger.
 - **Command dispatch**: as upstream (`jmp JUMP_TO_COMMAND`). A re-read loop added earlier was
   removed: the torn read it fixed came from the MAME test host, not from the BricoNeo.
-- **Header flag `$0004`** (NeoDiag CRC32 + mirrors): set until -15, removed in -16 so that the code can use the 128 KB.
+- **Header flag `$0004`** (NeoDiag CRC32 + mirrors) is not set, so the code can use the 128 KB.
 - **Palette bank registers**: `$3A000F` selects bank 0 and `$3A001F` bank 1. This was checked
   in MAME (`snk/neogeo.cpp`, `write_a3`); upstream 1.35 still has them swapped.
 - **TestAudio**: the Brico16Bits host waits for one EOT with a fixed 3 s timeout. The 1.35
@@ -689,14 +679,14 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `84f7840` (2026-11-09); re-read at `bf426f9` (2026-11-18, 68000 debugger v2) for -16: 128 KB image (`FLASH_IMAGE_SIZE`), `NeoDiagImageBuilder` only with flag `$0004`, output ports `$1FF00` / `$1FF02` (`DebugLink.cpp`), header offsets unchanged; the debugger patches only the official SNK BIOS. Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd), plus `5643191` / `1b72deb` (2026-11-08: PlayEyeSnd renamed TestFM, new TestSsg). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-21** (also shown by the `Version` command); the header announces **1.35**, the upstream base; 34 extensions, flags `$0003`, SHA-256 `1394f3eefa587715b71a981d256e400db7a292edaef702e3ab0fbf28f89aca4a` |
+| This ROM | fork version **1.35-nic034-22** (also shown by the `Version` command); the header announces **1.35**, the upstream base; 34 extensions, flags `$0003`, SHA-256 `84d1b191e572a9f07965a494a5ec5323e32d461d3b431c5a2592449fe33c025b` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 
 **Versioning**: the fork version is `1.35-nic034-NN` (upstream base 1.35, fork build NN, +1 for
-every published ROM). The `Version` command (back in -16) prints it; the SHA-256 identifies a build. The header keeps the upstream base, so Brico16Bits shows "Found BricoNeo ROM
+every published ROM). The `Version` command prints it; the SHA-256 identifies a build. The header keeps the upstream base, so Brico16Bits shows "Found BricoNeo ROM
 version 1.35" (it prints two numbers, `%d.%d`, and has no room for a suffix). The string is
-`FORK_VERSION` in `source/inc/define.inc`; `build.py` and the Compiler check that the header
+`FORK_VERSION` in `source/inc/define.inc`; the Compiler checks that the header
 (`BRICONEO_VERSION` in `source/Brico68k.s`) equals its base.
 
 The ROM keeps the BricoNeo header and the BricoExt layout (magic at `$80`, flags at `$8C`,
@@ -712,7 +702,7 @@ Brico16Bits recognises the byte order.
 3. Drop `rom/ROM.BIO` at the root of the `BricoNeo` USB drive. The root loads it in RAM only
    and resets the console: your bank 0 is untouched, and the next power cycle brings it back.
    (Put it in a bank folder to keep it.)
-4. Type `?`: the Extensions section must list the 25 commands.
+4. Type `?`: the Extensions section must list the 34 commands.
 5. Paste the whole of `bench/real_aes_session.txt` into the terminal. The `;` lines are comments
    and `Delay` waits, both built into the BricoNeo console.
 6. In the emulator, **Compare** tab > **Open real console log...** (or
@@ -768,9 +758,10 @@ each well under the 3 s host limit.
   and bus hold tests exist nowhere else: MAME and the emulator cannot check them). No console log
   was compared word for word, and no board with a known fault has been tested yet: that the tests
   name a real fault correctly is still shown in simulation only. MAME stays the reference.
-  **1.35-nic034-07 to -09 (TestVectors, TestGfx) and -14 (TestDecode, chip references) have not run on real hardware yet.** In MAME
-  0.264 both give the same words as in the emulator, and TestGfx the same picture pixel for pixel
-  with the test cartridge. Not shown by that: the real L0 ROM (vertical shrink), real S and C
+  **Everything added after -06 has not run on real hardware yet** (TestVectors, TestGfx,
+  TestDecode, the chip references, TestBus, TestGfxRom / TestGfxAuto, TestSnd, TestPad,
+  StressRam): emulator and MAME 0.264 only. TestGfx gives the same picture as MAME pixel for
+  pixel with the test cartridge. Not shown by that: the real L0 ROM (vertical shrink), real S and C
   tiles, and what a real LSPC does with sprite 0 (MAME draws it in the unused sprite slots of
   each line, 1 pixel wide at x = 0, even with a height of 0: the screen tests now put it off
   screen, as SNK's system ROM does for every sprite).

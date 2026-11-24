@@ -7,8 +7,8 @@
 	section text
 
 ; ------------------------------------------------------------------------
-; Screen helpers shared by the screen tests (from TestBus, removed in
-; 1.35-nic034-11). No WRAM.
+; Screen helpers shared by the screen tests (TestDAC, TestGfx, TestBus,
+; TestPad, StressRam...). No WRAM.
 ; ------------------------------------------------------------------------
 ; screenBlank: palette bank 0, every sprite hidden (SCB3 Y/height = 0, sprite 0
 ; also off screen), every

@@ -10,7 +10,7 @@ Never packaged into Brico68k_Emulator.py. Linux, gcc. Reuses the Musashi / z80 c
 build_core.py (same pinned commits) or clones them.
 Usage: python3 emulator/build_test_core.py
 """
-import shutil, subprocess, sys
+import shutil, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
