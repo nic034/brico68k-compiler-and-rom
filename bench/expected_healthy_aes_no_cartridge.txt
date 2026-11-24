@@ -5,9 +5,9 @@
 0x1234
 [eot, 0 ms emulated]
 > Version
-Brico68k 1.35-nic034-22 - Nic034 fork (Nicolas), not an Aurelien34 release
+Brico68k 1.35-nic034-23 - Nic034 fork (Nicolas), not an Aurelien34 release
 Based on Aurelien34/Brico68k 1.35 (1b72deb): the BricoNeo shows 1.35
-Source: github.com/nic034/brico68k-compiler-and-rom
+Source: github.com/nic034/brico68k-compiler-emulator-and-rom
 
 [eot, 2 ms emulated]
 > TestChip
@@ -224,7 +224,7 @@ again to read the result (commands sent meanwhile are lost).
 > Delay 2000
 > TestWatchdog
 Watchdog test result:
-> The watchdog reset the 68000 after ~133 ms (44570 loops of 3 us)
+> The watchdog reset the 68000 after ~133 ms (44571 loops of 3 us)
   MAME MVS: 135 ms. Real boards: about 0.13 s.
 => Test success (run again to re-arm)
 

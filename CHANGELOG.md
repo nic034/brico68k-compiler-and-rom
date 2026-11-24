@@ -4,6 +4,22 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-24 - ROM 1.35-nic034-23: repository renamed
+
+The repository is now **nic034/brico68k-compiler-emulator-and-rom** (was
+brico68k-compiler-and-rom; GitHub redirects the old address).
+
+**ROM 1.35-nic034-23** (SHA-256 `9ee5753da672049a60eb6a7a8d5462ec1f52cc8aba07843d6d84b4a0363013b1`, 34 extensions, 89032 bytes free)
+- `Version` prints the new address (`source/ExtVersion.s`); same in `inc/define.inc`.
+
+**Scripts**: no Python script held the repository address (checked: Compiler, Emulator, tools,
+emulator/); a stale comment in `Brico68k_Compiler.py` (the fork version "not in the image") fixed.
+Versions unchanged: Compiler 1.7, Emulator 1.27. README title: "Compiler, Emulator and ROM".
+
+**Checks**: regression -22 vs -23: only Version; rule check of all extensions: no rule broken;
+`test_ext_check`, `test_neo_py` 0 failures; bench expected outputs: Version and the TestWatchdog
+loop count (44570 -> 44571, the code moved by 8 bytes).
+
 ## 2026-11-24 - ROM 1.35-nic034-22: clean-up (code, comments, README)
 
 **ROM 1.35-nic034-22** (SHA-256 `84d1b191e572a9f07965a494a5ec5323e32d461d3b431c5a2592449fe33c025b`, 34 extensions, 89040 bytes free)

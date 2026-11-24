@@ -802,8 +802,8 @@ def full_build(source_mode, source_path, auto, manual_vasm, manual_vlink, out_di
         fork = fork_version(src_root)
     checks = check_briconeo(data)
     final = make_sp1_image(data) if sp1 else data
-    # The fork version (FORK_VERSION in inc/define.inc, e.g. "1.35-nic034-12") is not in the image
-    # since 1.35-nic034-10: read from the source, the header must announce its base (1.35).
+    # The fork version (FORK_VERSION in inc/define.inc, e.g. "1.35-nic034-23") is only in the
+    # Version text, not in the header: read from the source, the header must announce its base (1.35).
     fv = re.match(r"(\d+)\.(\d+)-[A-Za-z0-9]+-(\d+)$", fork or "")
     if fv:
         log("Fork version: " + fork)

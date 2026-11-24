@@ -1,6 +1,7 @@
 # Brico68k Compiler, Emulator and ROM
 
-A one-file tool that builds the **Brico68k** Neo Geo diagnostic ROM, and a ready-to-use build
+A one-file tool that builds the **Brico68k** Neo Geo diagnostic ROM, a one-file emulator that tests it
+without a console, and a ready-to-use build
 of an extended Brico68k (BricoNeo 1.35 + review fixes + new tests).
 
 The ROM runs on the **BricoNeo** board, driven by the **Brico16Bits** host firmware (stock
@@ -252,7 +253,7 @@ its track, or the other parts on that bus: the message cannot tell which.
 **Space first.** The code uses the whole 128 KB image the BricoNeo serves
 (Brico16Bits `FLASH_IMAGE_SIZE`; Aurelien confirmed the 128 KB limit). It must end before `$1FF00`:
 `$1FF00` and `$1FF02` are the BricoNeo output ports (a read there is an EOT / arms an output word).
-With the 34 extensions of 1.35-nic034-22, **about 89 KB are free**. Brico68k Compiler prints the
+With the 34 extensions of 1.35-nic034-23, **about 89 KB are free**. Brico68k Compiler prints the
 free space after each build. Calls between files are absolute (`JsrA6`, `PrintText`, `jmp
 EOT_AND_WAIT`...): a PC-relative jump only reaches +/-32 KB, and vlink stops with "doesn't fit
 into 16 bits" if one is too far. `source/Brico68k.ld` puts the header, the print and screen
@@ -424,7 +425,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 | **TestVectors** | yes | Vector table switch `$000000-$00007F`, system ROM / cartridge (`REG_SWPBIOS`, `REG_SWPROM`): compares the 32 vectors with `$C00000` in both positions and back. Read only |
 | **TestBus** | yes | BIOS socket, 68000 -> BricoNeo: CRC-32 of each 32 KB quarter of the image (table written by Brico68k Compiler), A15 / A16 probes; checked at boot too, 16 screen bands on an A15 / A16 fault (see below) |
 | **CartTest** | yes | Game cartridge P bus D0-D15, read only (never writes): P1 by the security code (names stuck / open lines), P2 activity |
-| **Version** | yes | The fork version (`1.35-nic034-22`), the upstream base and the source. Also in the `?` list |
+| **Version** | yes | The fork version (`1.35-nic034-23`), the upstream base and the source. Also in the `?` list |
 | **TestGfxRom** | yes | The game's graphics ROMs through the cartridge port: one row per C ROM chip pair, one column per tile address bit (base tile, then bit 0-15 flipped), the S ROM tile bits 0-11 below, colours coded per bit plane. No pass / fail (the 68000 cannot read the C, S or V ROMs): compare the TV with the emulator's picture of the same game set (`--cart SET --run TestGfxRom --png ref.png`). P1 tile bits per pair (16 = 4 MB chips), P2 pairs (8), P3 blank fix tile. **Picture mode**: `TestGfxRom $10E000` after the console script of `tools/gfxrom_scan.py` (see below): one band per chip pair, pictures of the game in a palette of its P ROM |
 | **TestGfxAuto** | yes | Scrolls through the game's C ROMs until the BricoNeo sends another command: pages of 20 columns of 14 consecutive tiles, 1 s each, 20 pages per chip pair, pair after pair, again and again. Fixed ramp palette (the 68000 cannot find the game's palettes reliably). No PC needed; empty or colourless pages = that chip pair. P1 tile bits per pair (16), P2 pairs (8), P3 blank fix tile |
 | **TestSnd** | yes | The game's M1 / V ROMs through its own sound driver: Z80 commands P1 to P2 (default `$20-$2F`), P3 tenths of a second each (up to 600: a whole piece of music), after the EOT, then again (driver reset `$03` between rounds) until another command; listen (a sound silent, cut or noisy: its V ROM area). A new command stops it. Not heard in the emulator |
@@ -434,7 +435,7 @@ work RAM (no stack), so it still runs on a board with dead WRAM.
 
 Bold entries are new in this repository.
 
-The code ends before `$1FF00` (fork 1.35-nic034-22, 128 KB image, no NeoDiag flag `$0004`).
+The code ends before `$1FF00` (fork 1.35-nic034-23, 128 KB image, no NeoDiag flag `$0004`).
 
 **TestBus** (the image has no NeoDiag copies of the first 32 KB to read A15 / A16 from):
 - **at boot** (`busCheck`, 4 reads, < 1 ms): Brico68k Compiler stores, for one offset where the
@@ -679,7 +680,7 @@ Read from the Brico16Bits code (and Aurelien's review):
 |---|---|
 | Brico16Bits host firmware | [Aurelien34/Brico16Bits](https://github.com/Aurelien34/Brico16Bits) at `84f7840` (2026-11-09); re-read at `bf426f9` (2026-11-18, 68000 debugger v2) for -16: 128 KB image (`FLASH_IMAGE_SIZE`), `NeoDiagImageBuilder` only with flag `$0004`, output ports `$1FF00` / `$1FF02` (`DebugLink.cpp`), header offsets unchanged; the debugger patches only the official SNK BIOS. Works unmodified; the `brico16bits/` patch only improves exception reports. |
 | Brico68k upstream | [Aurelien34/Brico68k](https://github.com/Aurelien34/Brico68k) `main` at `52c1c92` (2026-11-02, BricoNeo 1.35 + PlayEyeSnd), plus `5643191` / `1b72deb` (2026-11-08: PlayEyeSnd renamed TestFM, new TestSsg). The `v1.34` tag (`434a447`) actually announces 1.33 with 13 extensions. |
-| This ROM | fork version **1.35-nic034-22** (also shown by the `Version` command); the header announces **1.35**, the upstream base; 34 extensions, flags `$0003`, SHA-256 `84d1b191e572a9f07965a494a5ec5323e32d461d3b431c5a2592449fe33c025b` |
+| This ROM | fork version **1.35-nic034-23** (also shown by the `Version` command); the header announces **1.35**, the upstream base; 34 extensions, flags `$0003`, SHA-256 `9ee5753da672049a60eb6a7a8d5462ec1f52cc8aba07843d6d84b4a0363013b1` |
 | vasm / vlink | vasm 1.9d (Volker Barthelmann, Frank Wille), vlink 0.17a (Frank Wille), built from source with zig 0.17.0 |
 | Emulation | MAME 0.264, drivers `aes` and `neogeo` (MVS) |
 

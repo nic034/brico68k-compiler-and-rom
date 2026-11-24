@@ -15,7 +15,7 @@ EXT_VERSION:
 	PrintA1
 	PrintLn " - Nic034 fork (Nicolas), not an Aurelien34 release"
 	PrintLn "Based on Aurelien34/Brico68k 1.35 (1b72deb): the BricoNeo shows 1.35"
-	PrintLn "Source: github.com/nic034/brico68k-compiler-and-rom"
+	PrintLn "Source: github.com/nic034/brico68k-compiler-emulator-and-rom"
 	jmp EOT_AND_WAIT
 
 VERSION_TXT:
