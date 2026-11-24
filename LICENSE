@@ -21,11 +21,3 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----------------------------------------------------------------------------
-Same licence as upstream Aurelien34/Brico68k (MIT). It covers this
-repository's own files. Third-party parts keep their own terms:
-- emulator/MUSASHI_LICENSE.txt: Musashi 68000 (MIT, Karl Stenerud)
-- emulator/Z80_LICENSE.txt: superzazu/z80 (MIT, Nicolas Allemand)
-- vasm and vlink binaries embedded in Brico68k_Compiler.py: their authors'
-  terms (free for non-commercial use; ask the authors before any commercial
-  redistribution). Not covered by the MIT licence above.

@@ -19,7 +19,7 @@ Brico16Bits code expects (see "How the ROM must talk to the BricoNeo" below).
 | `emulator/` | Emulator core source (Neo Geo model + host) and its build script |
 | `bench/` | Session to paste into the real BricoNeo console, and the expected healthy output |
 | `CHANGELOG.md` | What changed, release by release, with checksums and checks |
-| `LICENSE` | MIT, as Aurelien34/Brico68k (third-party exceptions listed in it) |
+| `LICENSE` | MIT, as Aurelien34/Brico68k; third-party exceptions in `THIRD_PARTY_LICENSES.md` |
 
 ## Quick start
 
@@ -797,7 +797,7 @@ each well under the 3 s host limit.
 ## Licences
 
 This repository: **MIT**, the same licence as Aurelien34/Brico68k (`LICENSE`: © 2024 Aurelien34,
-© 2026 Nicolas / Nic034). The third-party parts below keep their own terms.
+© 2026 Nicolas / Nic034). The third-party parts below keep their own terms (`THIRD_PARTY_LICENSES.md`).
 
 - Brico68k Emulator core: Musashi 68000, MIT, © Karl Stenerud (`emulator/MUSASHI_LICENSE.txt`),
   ported to Python in `emulator/m68k_py.py` (its tables generated from Musashi); Z80 core
