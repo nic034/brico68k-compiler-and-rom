@@ -46,5 +46,10 @@ Delay 25000
 ; the game's C ROMs scrolling, 1 s a page, until the next command
 TestGfxAuto
 Delay 10000
+; both pads in ASCII (press buttons and run it again: *TestPad), the screen lights a band per button
+TestPad
+Delay 3000
+; WRAM, palette RAM and VRAM, ~1 s a pass (*StressRam on the console: until stopped)
+StressRam
 TestDAC
 ; TestDAC leaves 16 colour bands on screen: one band per colour bit, a black band = dead bit

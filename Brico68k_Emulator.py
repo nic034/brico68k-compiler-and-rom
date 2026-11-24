@@ -65,7 +65,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "Brico68k Emulator"
-APP_VERSION = "1.26"
+APP_VERSION = "1.27"
 TOOL_DIR = Path(__file__).resolve().parent
 WORK_DIR = TOOL_DIR / "brico68k_emulator"
 CONFIG_PATH = WORK_DIR / "config.json"
@@ -3952,6 +3952,8 @@ TESTS = {
     "TestBRAM": _t("Memory"),
     "TestPRAM": _t("Memory"),
     "TestDecode": _t("Memory"),
+    "StressRam": _t("Memory", look=None, varies="the seed (pattern) changes from pass to pass; *StressRam on the "
+                                                   "console repeats it until stopped"),
     "TestVRAM": _t("Video"),
     "TestLSPC": _t("Video"),
     "TestTiming": _t("Video", verdict_only="the measured cycle counts can differ slightly on a real board"),
@@ -3978,6 +3980,9 @@ TESTS = {
                   look="Listen on the real console: the game's own sound commands, one after the other, again and again "
                        "until another command (M1 and V "
                        "ROMs). Not heard here: the emulator has no FM / ADPCM and its test M1 only knows $02 and $7F."),
+    "TestPad": _t("Inputs and system", look="Press the buttons: the console draws both pads in ASCII (*TestPad "
+                                            "redraws), the screen lights one band per button (P1 green, P2 blue).",
+                  varies="depends on the buttons held"),
     "TestInp": _t("Inputs and system", varies="depends on the controllers, switches and memory card plugged in"),
     "TestStatusA": _t("Inputs and system", varies="depends on coins, service button and memory card"),
     "TestSystype": _t("Inputs and system", varies="depends on the board and its jumpers"),

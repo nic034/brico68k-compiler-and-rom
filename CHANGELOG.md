@@ -4,6 +4,41 @@ Newest first. Release notes used to be kept on Google Drive; they now live here 
 Upstream references stay the same unless stated: Aurelien34/Brico68k `52c1c92`,
 Aurelien34/Brico16Bits `5859d6b`.
 
+## 2026-11-24 - ROM 1.35-nic034-21: TestPad (live controllers), StressRam (endurance); Emulator 1.27
+
+**ROM 1.35-nic034-21** (SHA-256 `e06bc4e917c172021f059a076bb7daf7914d327f1a459f630119778fcc9d33d5`, 34 extensions, 88976 bytes free)
+- **TestPad** (new, `ExtTestPad.s`): both controllers drawn in ASCII on the console (d-pad,
+  A B C D, start, select), raw P1 / P2 / STATUS_B. `*TestPad` (loop mode) redraws them: live view.
+  After the EOT, 16 screen bands (P1 green, P2 blue, released grey) lit while pressed, until
+  another command (start / select: console only, no font without a cartridge). No WRAM.
+  - The rule check found ~2.7 ms without polling after the EOT (screen clear): the clear now runs
+    before the EOT. `printWord` of the raw bytes now clears d0 first.
+- **StressRam** (new, `ExtStressRam.s`): WRAM, palette RAM (both banks), VRAM `$0000-$87FF`
+  except `$8600-$86FF`; 16-bit LFSR pattern written then read back, one polarity a pass
+  (complemented when the seed is odd), ~1.1 s a pass. Seed: line counter mixed with the last
+  WRAM word of the previous pass (consecutive passes differ). `*StressRam` = until stopped from
+  the BricoNeo; one report per pass: count and first bad word per region. No WRAM (under test).
+  - Found while writing it: VRAM auto-increment wraps inside the slow VRAM ($7FFF+1 = $0000), so
+    the fast VRAM needs its own address write at $8000 (a first build overwrote $0000-$07FF).
+  - Found in MAME, not in the emulator: `$8600-$86FF` (sprite lists) is rewritten by the LSPC2
+    while it draws (194 words "bad"); skipped as TestVRAM does. The emulator does not model those
+    writes.
+  - A first version did both polarities each pass: 2.17 s, too close to the 3 s EOT limit.
+
+**Emulator 1.27**: TestPad (Inputs and system, LOOK) and StressRam (Memory) in Run all;
+`regress_rom.py` appends `TestPad`, `StressRam`, `Echo $62`; bench session runs both;
+`guiverify.py` 34 extensions, 13 pass (12 watchdog off), 8 look, 29 compared commands (C core, Xvfb: 207/210, the 3 others were these counts, showing 12 / 29 / 29; updated, not rerun).
+
+**tools/mame_bench.py**: `BRICO_GAME` (a MAME-named game zip, inserted with `-cart`). With
+`BRICO_WAV` it recorded TestSnd playing World Heroes Perfect's own sound driver (5 s).
+
+**Checks**: rule check (`--test`) TestPad / StressRam: no rule broken. StressRam detects injected
+faults (WRAM data bit, palette address line, slow and fast VRAM data bits, VRAM address line).
+MAME 0.264 (`aes`): StressRam passes twice (65 frames each), TestPad output identical.
+Regression -20 vs -21 (C test core, 570 scenarios): same words except Version (new commands
+set apart); `test_chip_hints`, `test_decode`, `test_ext_check`, `test_neo_py` 0 failures;
+`bench_fuzz.py` 0 failures (2963 commands). Not done: real AES.
+
 ## 2026-11-24 - ROM 1.35-nic034-20: TestGfxAuto (C ROM tour), TestSnd loops; Emulator 1.26
 
 **ROM 1.35-nic034-20** (SHA-256 `e56d7c0a1ac887124d9d4aa896562fb258e861f39df2805050f017357f934fa0`, 32 extensions, 91256 bytes free)
